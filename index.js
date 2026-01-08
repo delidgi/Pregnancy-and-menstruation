@@ -1,4 +1,4 @@
-import { extension_settings, saveSettingsDebounced } from "../../../extensions.js";
+import { extension_settings, saveSettings } from "../../../extensions.js";
 import { eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "reproductive-health";
@@ -36,14 +36,6 @@ const defaultSettings = {
             "трахался", "трахались", "лижет", "сосёт", "сосет",
             "целует её", "целует ее", "ласкает её", "ласкает ее",
             "fuck", "fucks", "fucking", "having sex", "oral", "anal", "sucking", "licking"
-        ],
-        condomOnKeywords: [
-            "надел презерватив", "надевает презерватив", "натянул презерватив",
-            "раскатал презерватив", "надо надеть", "put on condom", "condom on"
-        ],
-        condomOffKeywords: [
-            "снял презерватив", "снимает презерватив", "без презерватива",
-            "сорвал презерватив", "removed condom", "no condom", "without condom"
         ]
     },
     contraception: {
@@ -61,9 +53,6 @@ const defaultSettings = {
         currentWeek: 0,
         fetusCount: 1,
         fetusSexes: [],
-        complications: [],
-        outcome: null,
-        lastStatusShown: null,
         config: {
             baseTwinChance: 3,
             baseTripletChance: 0.3,
@@ -82,7 +71,7 @@ const defaultSettings = {
 function getSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = structuredClone(defaultSettings);
-        saveSettingsDebounced();
+        saveSettings();
     }
     return extension_settings[extensionName];
 }
@@ -99,7 +88,7 @@ function rollD100() {
     return (arr[0] % 100) + 1;
 }
 
-function addMessage(character, text, isUser = false) {
+function addMessage(text) {
     try {
         const messageElement = document.createElement("div");
         messageElement.className = "message is_system";
@@ -110,11 +99,9 @@ function addMessage(character, text, isUser = false) {
             chatMessages.scrollTop = chatMessages.scrollHeight;
         }
     } catch (e) {
-        console.error("[ReproHealth] Failed to add message:", e);
+        console.error("[ReproHealth]", e);
     }
 }
-
-// ---------- ПАНЕЛЬ UI (FIXED, БЕЗ КОНТЕЙНЕРОВ) ----------
 
 function renderPanel() {
     const settings = getSettings();
@@ -135,11 +122,7 @@ function renderPanel() {
     let sexLine = "-";
 
     if (preg.isPregnant && preg.currentWeek >= preg.config.revealSexWeek) {
-        const sexNames = preg.fetusSexes.map(sex => {
-            if (sex === "male") return "👦";
-            if (sex === "female") return "👧";
-            return "❓";
-        });
+        const sexNames = preg.fetusSexes.map(sex => sex === "male" ? "👦" : "👧");
         sexLine = sexNames.join(" ");
     } else if (preg.isPregnant) {
         sexLine = "🔄 неизвестен";
@@ -156,30 +139,29 @@ function renderPanel() {
     const condomStatus = contra.condom ? "🟢 ВКЛ" : "🔴 ВЫКЛ";
     const pillStatus = contra.pill ? "🟢 ВКЛ" : "🔴 ВЫКЛ";
 
+    panel.style.cssText = "position:fixed;right:16px;bottom:90px;width:270px;background:rgba(255,107,157,0.25);border:1px solid rgba(255,255,255,0.3);border-radius:14px;padding:14px;color:white;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Arial,sans-serif;font-size:12px;backdrop-filter:blur(12px);box-shadow:0 12px 32px rgba(0,0,0,0.4);z-index:99999;pointer-events:auto;";
+
     panel.innerHTML = `
-        <div style="position: fixed; right: 16px; bottom: 90px; width: 270px; background: rgba(255,107,157,0.25); border: 1px solid rgba(255,255,255,0.3); border-radius: 14px; padding: 14px; color: white; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Arial, sans-serif; font-size: 12px; backdrop-filter: blur(12px); box-shadow: 0 12px 32px rgba(0,0,0,0.4); z-index: 99999; pointer-events: auto;">
-            
-            <div style="font-weight: bold; margin-bottom: 10px; display: flex; justify-content: space-between; align-items: center;">
-                <span style="font-size: 14px;">🩺 Repro Health</span>
-                <span style="font-size: 10px; opacity: 0.75; background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 4px;">Auto</span>
-            </div>
-            
-            <div style="background: rgba(0,0,0,0.25); border-radius: 10px; padding: 10px; margin-bottom: 10px; font-size: 11px; border: 1px solid rgba(255,255,255,0.12);">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="opacity: 0.85;">День цикла:</span><span style="font-weight: bold; color: #fffacd;">${cycleDay}/28</span></div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="opacity: 0.85;">Фертильность:</span><span style="font-weight: bold; color: #fffacd;">${fertilityStatus}</span></div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="opacity: 0.85;">Беременность:</span><span style="font-weight: bold; color: #fffacd;">${pregnancyLine}</span></div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="opacity: 0.85;">Эмбрионов:</span><span style="font-weight: bold; color: #fffacd;">${fetusLine}</span></div>
-                <div style="display: flex; justify-content: space-between; margin-bottom: 4px;"><span style="opacity: 0.85;">Пол:</span><span style="font-weight: bold; color: #fffacd;">${sexLine}</span></div>
-                <div style="display: flex; justify-content: space-between;"><span style="opacity: 0.85;">ИППП:</span><span style="font-weight: bold; color: #fffacd;">${settings.sti.infected.length > 0 ? "⚠️ Заражена" : "✅ Чистая"}</span></div>
-            </div>
-
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-bottom: 8px;">
-                <button id="repro-condom-btn" style="padding: 8px 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: ${contra.condom ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.25)'}; color: white; cursor: pointer; font-size: 10px; font-weight: bold; font-family: inherit; transition: all 0.15s;">Презерватив<br>${condomStatus}</button>
-                <button id="repro-pill-btn" style="padding: 8px 6px; border-radius: 8px; border: 1px solid rgba(255,255,255,0.3); background: ${contra.pill ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.25)'}; color: white; cursor: pointer; font-size: 10px; font-weight: bold; font-family: inherit; transition: all 0.15s;">Таблетки<br>${pillStatus}</button>
-            </div>
-
-            <div style="font-size: 9px; opacity: 0.7; border-top: 1px solid rgba(255,255,255,0.12); padding-top: 6px; line-height: 1.3;">⚡ Система автоматична. Вагинал + без защиты = беременность. Любой секс = ИППП.</div>
+        <div style="font-weight:bold;margin-bottom:10px;display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-size:14px;">🩺 Repro Health</span>
+            <span style="font-size:10px;opacity:0.75;background:rgba(255,255,255,0.15);padding:2px 6px;border-radius:4px;">Auto</span>
         </div>
+        
+        <div style="background:rgba(0,0,0,0.25);border-radius:10px;padding:10px;margin-bottom:10px;font-size:11px;border:1px solid rgba(255,255,255,0.12);">
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="opacity:0.85;">День цикла:</span><span style="font-weight:bold;color:#fffacd;">${cycleDay}/28</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="opacity:0.85;">Фертильность:</span><span style="font-weight:bold;color:#fffacd;">${fertilityStatus}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="opacity:0.85;">Беременность:</span><span style="font-weight:bold;color:#fffacd;">${pregnancyLine}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="opacity:0.85;">Эмбрионов:</span><span style="font-weight:bold;color:#fffacd;">${fetusLine}</span></div>
+            <div style="display:flex;justify-content:space-between;margin-bottom:4px;"><span style="opacity:0.85;">Пол:</span><span style="font-weight:bold;color:#fffacd;">${sexLine}</span></div>
+            <div style="display:flex;justify-content:space-between;"><span style="opacity:0.85;">ИППП:</span><span style="font-weight:bold;color:#fffacd;">${settings.sti.infected.length > 0 ? "⚠️ Заражена" : "✅ Чистая"}</span></div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;">
+            <button id="repro-condom-btn" style="padding:8px 6px;border-radius:8px;border:1px solid rgba(255,255,255,0.3);background:${contra.condom ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.25)'};color:white;cursor:pointer;font-size:10px;font-weight:bold;font-family:inherit;transition:all 0.15s;">Презерватив<br/>${condomStatus}</button>
+            <button id="repro-pill-btn" style="padding:8px 6px;border-radius:8px;border:1px solid rgba(255,255,255,0.3);background:${contra.pill ? 'rgba(76,175,80,0.35)' : 'rgba(244,67,54,0.25)'};color:white;cursor:pointer;font-size:10px;font-weight:bold;font-family:inherit;transition:all 0.15s;">Таблетки<br/>${pillStatus}</button>
+        </div>
+
+        <div style="font-size:9px;opacity:0.7;border-top:1px solid rgba(255,255,255,0.12);padding-top:6px;line-height:1.3;">⚡ Вагинал + без защиты = беременность. Любой секс = ИППП.</div>
     `;
 
     setTimeout(() => {
@@ -191,9 +173,9 @@ function renderPanel() {
                 e.preventDefault();
                 e.stopPropagation();
                 settings.contraception.condom = !settings.contraception.condom;
-                saveSettingsDebounced();
+                saveSettings();
                 renderPanel();
-                addMessage("System", `🩹 Презерватив ${settings.contraception.condom ? "надет" : "снят"}`);
+                addMessage(`🩹 Презерватив ${settings.contraception.condom ? "надет" : "снят"}`);
             };
         }
 
@@ -202,17 +184,15 @@ function renderPanel() {
                 e.preventDefault();
                 e.stopPropagation();
                 settings.contraception.pill = !settings.contraception.pill;
-                saveSettingsDebounced();
+                saveSettings();
                 renderPanel();
-                addMessage("System", `💊 Таблетки ${settings.contraception.pill ? "приняты" : "отменены"}`);
+                addMessage(`💊 Таблетки ${settings.contraception.pill ? "приняты" : "отменены"}`);
             };
         }
     }, 50);
 
     console.log("[ReproHealth] Panel rendered ✅");
 }
-
-// ---------- ЛОГИКА БЕРЕМЕННОСТИ ----------
 
 function initiatePregnancy() {
     const settings = getSettings();
@@ -221,8 +201,6 @@ function initiatePregnancy() {
     preg.isPregnant = true;
     preg.conceptionDate = new Date().toISOString();
     preg.currentWeek = 1;
-    preg.complications = [];
-    preg.outcome = null;
 
     const twinRoll = rollD100();
     let fetusCount = 1;
@@ -242,24 +220,22 @@ function initiatePregnancy() {
     }
     preg.fetusSexes = sexes;
 
-    saveSettingsDebounced();
+    saveSettings();
     renderPanel();
 
     const sexDisplay = sexes.map(s => s === "male" ? "👦" : "👧").join(" ");
-    addMessage("System", `🤰 <b>БРОСОК НА ЗАЧАТИЕ:</b> ✅ Зачатие произошло!\n<b>Эмбрионов:</b> ${fetusCount}\n<b>Пол:</b> ${sexDisplay}`);
+    addMessage(`🤰 <b>БРОСОК НА ЗАЧАТИЕ:</b> ✅ Зачатие произошло!\n<b>Эмбрионов:</b> ${fetusCount}\n<b>Пол:</b> ${sexDisplay}`);
 }
 
 function tryConception(messageText) {
     const settings = getSettings();
-    if (!settings.automation.autoConception) return;
-    if (!messageText) return;
+    if (!settings.automation.autoConception || !messageText) return;
 
     const lower = messageText.toLowerCase();
     const isInside = matchesAny(lower, settings.triggers.conceptionKeywords);
     const isVaginal = matchesAny(lower, settings.triggers.vaginalKeywords);
 
-    if (!isInside || !isVaginal) return;
-    if (settings.pregnancy.isPregnant) return;
+    if (!isInside || !isVaginal || settings.pregnancy.isPregnant) return;
 
     const now = Date.now();
     if (now - settings.lastTriggerTime < settings.triggerCooldown) return;
@@ -268,28 +244,21 @@ function tryConception(messageText) {
     const fertileRoll = rollD100();
     let chance = settings.fertility.baseFertility;
 
-    if (settings.contraception.condom) {
-        chance *= 0.15;
-    }
-    if (settings.contraception.pill) {
-        chance *= 0.1;
-    }
+    if (settings.contraception.condom) chance *= 0.15;
+    if (settings.contraception.pill) chance *= 0.1;
 
     if (fertileRoll <= chance) {
         initiatePregnancy();
     } else {
-        addMessage("System", `🤰 <b>БРОСОК НА ЗАЧАТИЕ:</b> ❌ На этот раз беременность не наступила. (Шанс был: ${chance.toFixed(1)}%)`);
+        addMessage(`🤰 <b>БРОСОК НА ЗАЧАТИЕ:</b> ❌ На этот раз беременность не наступила. (Шанс был: ${chance.toFixed(1)}%)`);
     }
 
-    saveSettingsDebounced();
+    saveSettings();
 }
-
-// ---------- ЛОГИКА ИППП ----------
 
 function trySTICheck(messageText) {
     const settings = getSettings();
-    if (!settings.automation.autoSTICheck || !settings.sti.enabled) return;
-    if (!messageText) return;
+    if (!settings.automation.autoSTICheck || !settings.sti.enabled || !messageText) return;
 
     const lower = messageText.toLowerCase();
     const isSex = matchesAny(lower, settings.triggers.sexKeywords);
@@ -310,16 +279,14 @@ function trySTICheck(messageText) {
         const stiTypes = ["Хламидиоз", "Гонорея", "Герпес", "ВПЧ"];
         const randomSTI = stiTypes[Math.floor(Math.random() * stiTypes.length)];
         settings.sti.infected = [randomSTI];
-        saveSettingsDebounced();
-        addMessage("System", `🔬 <b>ПРОВЕРКА ИППП:</b> ⚠️ Возможное заражение!\n<b>Заболевание:</b> ${randomSTI}\n<b>Наблюдайте симптомы...</b>`);
+        saveSettings();
+        addMessage(`🔬 <b>ПРОВЕРКА ИППП:</b> ⚠️ Возможное заражение!\n<b>Заболевание:</b> ${randomSTI}\n<b>Наблюдайте симптомы...</b>`);
     } else {
-        addMessage("System", `🔬 <b>ПРОВЕРКА ИППП:</b> ✅ Признаков заражения не обнаружено.`);
+        addMessage(`🔬 <b>ПРОВЕРКА ИППП:</b> ✅ Признаков заражения не обнаружено.`);
     }
 
-    saveSettingsDebounced();
+    saveSettings();
 }
-
-// ---------- ОБРАБОТКА НОВЫХ СООБЩЕНИЙ ----------
 
 function onMessage(data) {
     if (!data) return;
@@ -331,10 +298,8 @@ function onMessage(data) {
     trySTICheck(messageText);
 }
 
-// ---------- ИНИЦИАЛИЗАЦИЯ ----------
-
 function initialize() {
-    console.log("[ReproHealth] Initializing...");
+    console.log("[ReproHealth] ✅ Initializing...");
     getSettings();
 
     renderPanel();
@@ -350,7 +315,7 @@ function initialize() {
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessage);
     eventSource.on(event_types.MESSAGE_SENT, onMessage);
 
-    console.log("[ReproHealth] Event listeners attached");
+    console.log("[ReproHealth] ✅ Event listeners attached");
 }
 
 if (document.readyState === "loading") {
@@ -378,4 +343,4 @@ window.ReproHealth = {
     initialize
 };
 
-console.log("[ReproHealth] ✅ Script loaded and ready");
+console.log("[ReproHealth] ✅ Script loaded. ReproHealth available.");
