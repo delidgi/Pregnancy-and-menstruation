@@ -1,383 +1,151 @@
-/* ==================== SETTINGS PANEL ==================== */
+/* Базовый блок панели */
 
-#reprohealth-settings {
-    margin-top: 10px;
-}
-
-#reprohealth-settings .inline-drawer-content {
-    padding: 10px;
-}
-
-#reprohealth-settings .inline-drawer-header {
-    background: linear-gradient(135deg, #ff6b9d20, #c44b6c20);
-    border-radius: 8px;
-    padding: 10px;
-    margin-bottom: 5px;
-}
-
-#reprohealth-settings .inline-drawer-header b {
-    font-size: 14px;
-}
-
-.reprohealth-setting {
-    margin: 8px 0;
-}
-
-.reprohealth-setting label {
-    display: block;
-    margin-bottom: 4px;
-    font-weight: 500;
+#reprohealth-panel {
+    position: fixed;
+    right: 16px;
+    bottom: 80px;
+    max-width: 260px;
+    z-index: 90;
+    background: linear-gradient(135deg, rgba(255,107,157,0.18), rgba(196,75,108,0.3));
+    border-radius: 16px;
+    padding: 10px 12px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+    backdrop-filter: blur(10px);
+    color: #fff;
     font-size: 13px;
-}
-
-.reprohealth-setting input[type="number"],
-.reprohealth-setting select {
-    width: 100%;
-    padding: 6px 8px;
-    border-radius: 6px;
-    border: 1px solid var(--SmartThemeBorderColor);
-    background: var(--SmartThemeBlurTintColor);
-    color: var(--SmartThemeBodyColor);
-    font-size: 13px;
-}
-
-.reprohealth-setting .checkbox_label {
     display: flex;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    padding: 4px 0;
+    flex-direction: column;
+    gap: 6px;
 }
 
-.reprohealth-setting .checkbox_label input {
-    width: 18px;
-    height: 18px;
-    accent-color: #ff6b9d;
-}
-
-#reprohealth-settings h4 {
-    margin: 15px 0 10px 0;
-    color: var(--SmartThemeQuoteColor);
-    font-size: 13px;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-#reprohealth-settings hr {
-    border: none;
-    border-top: 1px solid var(--SmartThemeBorderColor);
-    margin: 15px 0;
-    opacity: 0.5;
-}
-
-/* ==================== STATUS DISPLAY ==================== */
-
-.reprohealth-status {
-    background: linear-gradient(135deg, rgba(255,107,157,0.1), rgba(196,75,108,0.1));
-    border: 1px solid rgba(255,107,157,0.3);
-    border-radius: 10px;
-    padding: 12px;
-    margin: 10px 0;
-}
-
-.reprohealth-status p {
-    margin: 6px 0;
-    font-size: 13px;
-    line-height: 1.4;
-}
-
-.reprohealth-status strong {
-    color: #ff6b9d;
-}
-
-/* ==================== BUTTONS ==================== */
-
-.reprohealth-buttons {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-top: 15px;
-}
-
-.reprohealth-buttons button {
-    flex: 1;
-    min-width: 90px;
-    padding: 8px 12px;
-    font-size: 11px;
-    border-radius: 6px;
-    transition: all 0.2s;
-}
-
-.reprohealth-buttons button:hover {
-    transform: translateY(-1px);
-}
-
-/* ==================== CHAT OUTPUT BLOCKS ==================== */
-
-.reprohealth-block {
-    background: linear-gradient(135deg, #1a1a2e, #16213e);
-    border-radius: 12px;
-    padding: 15px;
-    margin: 10px 0;
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 13px;
-    line-height: 1.5;
-    border-left: 4px solid #667eea;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
-}
-
-.reprohealth-block-header {
-    font-size: 15px;
-    font-weight: 600;
-    margin-bottom: 10px;
-    padding-bottom: 8px;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-
-.reprohealth-block-row {
+.reprohealth-header {
     display: flex;
     justify-content: space-between;
-    padding: 4px 0;
-}
-
-.reprohealth-block-label {
-    color: rgba(255,255,255,0.6);
-}
-
-.reprohealth-block-value {
-    font-weight: 500;
-}
-
-/* Conception Block */
-.reprohealth-block.conception {
-    border-left-color: #ff6b9d;
-    background: linear-gradient(135deg, #2d1f3d, #1a1a2e);
-}
-
-.reprohealth-block.conception.success {
-    border-left-color: #ff4757;
-    background: linear-gradient(135deg, #3d1f2d, #2a1a2e);
-}
-
-.reprohealth-block.conception.success .reprohealth-block-header {
-    color: #ff6b6b;
-}
-
-.reprohealth-block.conception.fail .reprohealth-block-header {
-    color: #7bed9f;
-}
-
-/* Pregnancy Block */
-.reprohealth-block.pregnancy {
-    border-left-color: #ff9ff3;
-    background: linear-gradient(135deg, #2d1f3d, #1f2d3d);
-}
-
-/* Period Block */
-.reprohealth-block.period {
-    border-left-color: #ff4757;
-    background: linear-gradient(135deg, #3d1f2d, #1a1a2e);
-}
-
-.reprohealth-block.period.active {
-    border-left-color: #ff6b6b;
-}
-
-.reprohealth-block.period.pms {
-    border-left-color: #ffa502;
-}
-
-/* STI Block */
-.reprohealth-block.sti {
-    border-left-color: #5f27cd;
-    background: linear-gradient(135deg, #1f1f3d, #1a1a2e);
-}
-
-.reprohealth-block.sti.danger {
-    border-left-color: #ff4757;
-    background: linear-gradient(135deg, #3d1f1f, #2a1a1a);
-}
-
-/* Complication Block */
-.reprohealth-block.complication {
-    border-left-color: #ffa502;
-}
-
-.reprohealth-block.complication.severe {
-    border-left-color: #ff4757;
-    background: linear-gradient(135deg, #3d1f1f, #1a1a2e);
-}
-
-.reprohealth-block.complication.normal {
-    border-left-color: #7bed9f;
-}
-
-/* ==================== RESULT BADGES ==================== */
-
-.reprohealth-badge {
-    display: inline-block;
-    padding: 3px 10px;
-    border-radius: 20px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.reprohealth-badge.success {
-    background: rgba(123, 237, 159, 0.2);
-    color: #7bed9f;
-}
-
-.reprohealth-badge.danger {
-    background: rgba(255, 71, 87, 0.2);
-    color: #ff6b6b;
-}
-
-.reprohealth-badge.warning {
-    background: rgba(255, 165, 2, 0.2);
-    color: #ffa502;
-}
-
-.reprohealth-badge.info {
-    background: rgba(116, 185, 255, 0.2);
-    color: #74b9ff;
-}
-
-/* ==================== ROLL DISPLAY ==================== */
-
-.reprohealth-roll {
-    display: inline-flex;
     align-items: center;
-    gap: 8px;
-    background: rgba(0,0,0,0.3);
-    padding: 8px 15px;
-    border-radius: 8px;
-    margin: 8px 0;
+    margin-bottom: 4px;
 }
 
-.reprohealth-roll-dice {
-    font-size: 20px;
-}
-
-.reprohealth-roll-result {
-    font-size: 24px;
-    font-weight: 700;
-    font-family: 'Courier New', monospace;
-}
-
-.reprohealth-roll-target {
-    color: rgba(255,255,255,0.5);
+.reprohealth-title {
+    font-weight: 600;
     font-size: 14px;
 }
 
-/* ==================== PROGRESS BAR ==================== */
-
-.reprohealth-progress {
-    width: 100%;
-    height: 8px;
-    background: rgba(255,255,255,0.1);
-    border-radius: 4px;
-    overflow: hidden;
-    margin: 8px 0;
+.reprohealth-tag {
+    font-size: 11px;
+    opacity: 0.8;
 }
 
-.reprohealth-progress-fill {
-    height: 100%;
-    border-radius: 4px;
-    transition: width 0.3s ease;
-}
-
-.reprohealth-progress-fill.fertility-high {
-    background: linear-gradient(90deg, #ff6b6b, #ff4757);
-}
-
-.reprohealth-progress-fill.fertility-normal {
-    background: linear-gradient(90deg, #ffa502, #ff7f50);
-}
-
-.reprohealth-progress-fill.fertility-low {
-    background: linear-gradient(90deg, #7bed9f, #2ed573);
-}
-
-/* ==================== SYMPTOMS LIST ==================== */
-
-.reprohealth-symptoms {
+.reprohealth-status {
+    border-radius: 10px;
+    padding: 6px 8px;
+    background: rgba(0,0,0,0.22);
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 8px;
+    flex-direction: column;
+    gap: 2px;
 }
 
-.reprohealth-symptom {
-    background: rgba(255,255,255,0.1);
-    padding: 4px 10px;
-    border-radius: 15px;
+.reprohealth-status-row {
+    display: flex;
+    justify-content: space-between;
+    gap: 4px;
+}
+
+.reprohealth-label {
+    opacity: 0.8;
+}
+
+.reprohealth-value {
+    font-weight: 500;
+}
+
+/* Тогглы */
+
+.reprohealth-toggles {
+    display: flex;
+    gap: 6px;
+    margin-top: 4px;
+}
+
+.repro-toggle {
+    flex: 1;
+    padding: 6px 8px;
+    border-radius: 999px;
+    border: 1px solid rgba(255,255,255,0.35);
+    cursor: pointer;
+    font-size: 11px;
+    background: rgba(0,0,0,0.18);
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    align-items: flex-start;
+    transition: background 0.15s ease, transform 0.1s ease, box-shadow 0.15s ease;
+}
+
+.repro-toggle-label {
+    opacity: 0.9;
+}
+
+.repro-toggle-state {
+    font-weight: 600;
     font-size: 11px;
 }
 
-/* ==================== ANIMATIONS ==================== */
-
-@keyframes reprohealth-pulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.6; }
+.repro-toggle.on {
+    background: rgba(76, 175, 80, 0.3);
+    box-shadow: 0 0 0 1px rgba(76, 175, 80, 0.6);
 }
 
-@keyframes reprohealth-shake {
-    0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-5px); }
-    75% { transform: translateX(5px); }
+.repro-toggle.off {
+    background: rgba(244, 67, 54, 0.3);
+    box-shadow: 0 0 0 1px rgba(244, 67, 54, 0.6);
 }
 
-.reprohealth-block.new {
-    animation: reprohealth-pulse 0.5s ease-in-out 2;
+.repro-toggle:active {
+    transform: translateY(1px);
 }
 
-.reprohealth-badge.danger {
-    animation: reprohealth-shake 0.3s ease-in-out;
+/* Мелкий текст */
+
+.reprohealth-note {
+    margin-top: 4px;
+    font-size: 10px;
+    opacity: 0.8;
 }
 
-/* ==================== COMPACT BLOCKS ==================== */
+/* Адаптив под мобильные */
 
-.reprohealth-block.compact {
-    padding: 8px 12px;
-    margin: 5px 0;
-    font-size: 12px;
+@media (max-width: 768px) {
+    #reprohealth-panel {
+        left: 8px;
+        right: 8px;
+        bottom: 60px;
+        max-width: none;
+        padding: 8px 10px;
+        font-size: 12px;
+    }
+
+    .reprohealth-title {
+        font-size: 13px;
+    }
+
+    .repro-toggle {
+        font-size: 11px;
+    }
 }
 
-.reprohealth-block.compact span {
-    display: inline;
-}
+/* Светлая тема ST */
 
-/* ==================== AUTO-INJECT WRAPPER ==================== */
-
-.reprohealth-auto-inject {
-    margin-top: 15px;
-    padding-top: 10px;
-    border-top: 1px dashed rgba(255,255,255,0.2);
-}
-
-.reprohealth-auto-inject .reprohealth-block {
-    animation: reprohealth-fadein 0.5s ease;
-}
-
-@keyframes reprohealth-fadein {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-/* ==================== DARK/LIGHT THEME ADJUSTMENTS ==================== */
-
-[data-theme="light"] .reprohealth-block {
+[data-theme="light"] #reprohealth-panel {
     background: linear-gradient(135deg, #f8f9fa, #e9ecef);
     color: #212529;
-    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
-}
-
-[data-theme="light"] .reprohealth-block-label {
-    color: rgba(0,0,0,0.5);
+    box-shadow: 0 4px 15px rgba(0,0,0,0.15);
 }
 
 [data-theme="light"] .reprohealth-status {
-    background: linear-gradient(135deg, rgba(255,107,157,0.15), rgba(196,75,108,0.15));
+    background: rgba(0,0,0,0.04);
+}
+
+[data-theme="light"] .repro-toggle {
+    background: rgba(0,0,0,0.04);
+    border-color: rgba(0,0,0,0.18);
 }
