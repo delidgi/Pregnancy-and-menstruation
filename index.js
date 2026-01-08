@@ -82,6 +82,7 @@ const defaultSettings = {
 function getSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = structuredClone(defaultSettings);
+        saveSettingsDebounced();
     }
     return extension_settings[extensionName];
 }
@@ -115,24 +116,29 @@ function addMessage(character, text, isUser = false) {
 
 // ---------- ПАНЕЛЬ UI ----------
 
+function findPanelContainer() {
+    // Ищем место для вставки панели
+    let container = document.querySelector(".mobile-main-container");
+    if (!container) container = document.querySelector("main");
+    if (!container) container = document.querySelector(".main");
+    if (!container) container = document.querySelector(".chat");
+    if (!container) container = document.body;
+    return container;
+}
+
 function renderPanel() {
     const settings = getSettings();
+    const container = findPanelContainer();
 
-    let container = document.querySelector(".chat-input-wrap, .bottom-button-group, #chat-form");
-    if (!container) {
-        container = document.body;
+    // Удалим старую панель если была
+    const oldPanel = document.getElementById("reprohealth-panel");
+    if (oldPanel) {
+        oldPanel.remove();
     }
 
-    let panel = document.getElementById("reprohealth-panel");
-    if (!panel) {
-        panel = document.createElement("div");
-        panel.id = "reprohealth-panel";
-        if (container && container !== document.body) {
-            container.parentElement.insertBefore(panel, container);
-        } else {
-            document.body.appendChild(panel);
-        }
-    }
+    // Создаём новую панель
+    const panel = document.createElement("div");
+    panel.id = "reprohealth-panel";
 
     const preg = settings.pregnancy;
     const fert = settings.fertility;
@@ -213,26 +219,46 @@ function renderPanel() {
         </div>
     `;
 
-    const condomBtn = panel.querySelector("#repro-condom-toggle");
-    const pillBtn = panel.querySelector("#repro-pill-toggle");
-
-    if (condomBtn) {
-        condomBtn.addEventListener("click", () => {
-            settings.contraception.condom = !settings.contraception.condom;
-            saveSettingsDebounced();
-            renderPanel();
-            addMessage("System", `🩹 Презерватив ${settings.contraception.condom ? "надет" : "снят"}`);
-        });
+    // Вставляем панель в контейнер
+    if (container) {
+        container.appendChild(panel);
     }
 
-    if (pillBtn) {
-        pillBtn.addEventListener("click", () => {
-            settings.contraception.pill = !settings.contraception.pill;
-            saveSettingsDebounced();
-            renderPanel();
-            addMessage("System", `💊 Таблетки ${settings.contraception.pill ? "приняты" : "отменены"}`);
-        });
-    }
+    // Навешиваем обработчики ПОСЛЕ вставки в DOM
+    setTimeout(() => {
+        const condomBtn = document.querySelector("#repro-condom-toggle");
+        const pillBtn = document.querySelector("#repro-pill-toggle");
+
+        if (condomBtn) {
+            condomBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                settings.contraception.condom = !settings.contraception.condom;
+                saveSettingsDebounced();
+                renderPanel();
+                addMessage("System", `🩹 Презерватив ${settings.contraception.condom ? "надет" : "снят"}`);
+            });
+            console.log("[ReproHealth] Condom button attached");
+        } else {
+            console.warn("[ReproHealth] Condom button not found");
+        }
+
+        if (pillBtn) {
+            pillBtn.addEventListener("click", (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                settings.contraception.pill = !settings.contraception.pill;
+                saveSettingsDebounced();
+                renderPanel();
+                addMessage("System", `💊 Таблетки ${settings.contraception.pill ? "приняты" : "отменены"}`);
+            });
+            console.log("[ReproHealth] Pill button attached");
+        } else {
+            console.warn("[ReproHealth] Pill button not found");
+        }
+    }, 100);
+
+    console.log("[ReproHealth] Panel rendered to", container?.className || container?.id || "body");
 }
 
 // ---------- ЛОГИКА БЕРЕМЕННОСТИ ----------
@@ -360,35 +386,53 @@ function initialize() {
     console.log("[ReproHealth] Initializing...");
     getSettings();
 
-    setTimeout(() => {
-        renderPanel();
-        console.log("[ReproHealth] Panel rendered");
-    }, 1000);
+    // Рендеримся сразу
+    renderPanel();
 
+    // И ещё раз через полсекунды на случай если DOM ещё не готов
+    setTimeout(() => {
+        const panel = document.getElementById("reprohealth-panel");
+        if (!panel) {
+            console.log("[ReproHealth] Panel not found, re-rendering...");
+            renderPanel();
+        }
+    }, 500);
+
+    // Подписываемся на события
     eventSource.on(event_types.MESSAGE_RECEIVED, onMessage);
     eventSource.on(event_types.MESSAGE_SENT, onMessage);
 
     console.log("[ReproHealth] Event listeners attached");
 }
 
+// Ждём, пока DOM будет готов
 if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initialize);
 } else {
     initialize();
 }
 
+// Также слушаем APP_READY для надёжности
 if (eventSource) {
     eventSource.on(event_types.APP_READY, () => {
-        console.log("[ReproHealth] APP_READY event");
-        setTimeout(renderPanel, 500);
+        console.log("[ReproHealth] APP_READY, re-rendering panel");
+        setTimeout(() => {
+            renderPanel();
+            const panel = document.getElementById("reprohealth-panel");
+            console.log("[ReproHealth] Panel after APP_READY:", panel ? "✅ visible" : "❌ not found");
+        }, 1000);
     });
 }
 
+// Экспортируем для доступа из консоли
 window.ReproHealth = {
     getSettings,
     renderPanel,
     rollD100,
     initiatePregnancy,
     tryConception,
-    trySTICheck
+    trySTICheck,
+    initialize
 };
+
+console.log("[ReproHealth] Script loaded. Type 'ReproHealth.renderPanel()' to debug.");
