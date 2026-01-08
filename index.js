@@ -1,11 +1,41 @@
 import { extension_settings, saveSettingsDebounced } from "../../../extensions.js";
+import { eventSource, event_types } from "../../../../script.js";
+import { SlashCommandParser } from "../../../slash-commands/SlashCommandParser.js";
+import { SlashCommand } from "../../../slash-commands/SlashCommand.js";
+import { ARGUMENT_TYPE, SlashCommandNamedArgument } from "../../../slash-commands/SlashCommandArgument.js";
 
 const extensionName = "reproductive-health";
-const extensionFolderPath = `scripts/extensions/third-party/sillytavern-${extensionName}`;
 
 const defaultSettings = {
     enabled: true,
     language: 'ru',
+    automation: {
+        autoConception: true,
+        autoPregnancyStatus: true,
+        autoDetectCondom: true,
+        autoSTICheck: true,
+        autoCycleAdvance: false
+    },
+    triggers: {
+        conceptionKeywords: [
+            'кончил внутрь', 'кончила внутрь', 'кончает внутрь', 'излился внутрь',
+            'изливается внутрь', 'спустил внутрь', 'заполнил её', 'заполнил ее',
+            'наполнил её', 'наполнил ее', 'финишировал внутри', 'семя внутри',
+            'creampie', 'came inside', 'cum inside', 'cums inside', 'filled her',
+            'finishing inside', 'released inside', 'пульсирует внутри',
+            'внутрь неё', 'внутрь нее', 'глубоко внутрь'
+        ],
+        condomOnKeywords: [
+            'надел презерватив', 'надевает презерватив', 'натянул презерватив',
+            'достал презерватив', 'раскатал презерватив', 'put on condom',
+            'puts on condom', 'wearing condom', 'rolled on condom', 'с презервативом'
+        ],
+        condomOffKeywords: [
+            'снял презерватив', 'снимает презерватив', 'без презерватива',
+            'сорвал презерватив', 'стянул презерватив', 'removed condom',
+            'takes off condom', 'without condom', 'raw', 'no condom'
+        ]
+    },
     contraception: {
         condom: false, condomEffectiveness: 85,
         pill: false, pillEffectiveness: 91, pillDaysTaken: 0,
@@ -37,7 +67,8 @@ const defaultSettings = {
     },
     pregnancy: {
         isPregnant: false, conceptionDate: null, currentWeek: 0,
-        complications: [], checkups: [], outcome: null
+        complications: [], checkups: [], outcome: null,
+        lastStatusShown: null
     },
     history: { encounters: [], conceptionRolls: [], stiChecks: [], periods: [] }
 };
@@ -58,6 +89,8 @@ const i18n = {
         sti_check: "🔬 ПРОВЕРКА ИППП",
         infected: "ЗАРАЖЕНИЕ", safe: "Безопасно",
         condom_broke: "⚠️ ПРЕЗЕРВАТИВ ПОРВАЛСЯ",
+        condom_on: "🩹 Презерватив надет",
+        condom_off: "⚠️ Презерватив снят",
         high_fertility: "ВЫСОКАЯ", low_fertility: "низкая", normal_fertility: "норма",
         cycle_day: "День цикла",
         period_status: "🩸 МЕНСТРУАЦИЯ", period_active: "Идут месячные",
@@ -65,7 +98,8 @@ const i18n = {
         period_light: "Скудные", period_normal: "Нормальные", period_heavy: "Обильные",
         pms_active: "ПМС", pms_symptoms: "Симптомы",
         no_period: "Нет", next_period: "До месячных",
-        partner_risk: "Риск партнёра", during_period: "Во время месячных"
+        partner_risk: "Риск партнёра", during_period: "Во время месячных",
+        auto_triggered: "⚡ Автоматический триггер"
     },
     en: {
         conception_roll: "🤰 CONCEPTION ROLL", roll: "Roll", result: "Result",
@@ -82,6 +116,8 @@ const i18n = {
         sti_check: "🔬 STI CHECK",
         infected: "INFECTED", safe: "Safe",
         condom_broke: "⚠️ CONDOM BROKE",
+        condom_on: "🩹 Condom on",
+        condom_off: "⚠️ Condom off",
         high_fertility: "HIGH", low_fertility: "low", normal_fertility: "normal",
         cycle_day: "Cycle day",
         period_status: "🩸 MENSTRUATION", period_active: "Period active",
@@ -89,7 +125,8 @@ const i18n = {
         period_light: "Light", period_normal: "Normal", period_heavy: "Heavy",
         pms_active: "PMS", pms_symptoms: "Symptoms",
         no_period: "None", next_period: "Until period",
-        partner_risk: "Partner risk", during_period: "During period"
+        partner_risk: "Partner risk", during_period: "During period",
+        auto_triggered: "⚡ Auto-triggered"
     }
 };
 
@@ -378,14 +415,16 @@ function complicationCheck(tri) {
     return result;
 }
 
-function formatConceptionResult(r) {
+// ==================== ФОРМАТИРОВАНИЕ ====================
+
+function formatConceptionResult(r, auto = false) {
     if (!r.rolled) return `<div class="reprohealth-block conception"><div class="reprohealth-block-header">🤰 Уже беременна</div></div>`;
     
     const fertLabel = r.fertilityMod >= 1.5 ? t('high_fertility') : r.fertilityMod >= 0.5 ? t('normal_fertility') : t('low_fertility');
     const fertClass = r.fertilityMod >= 1.5 ? 'danger' : r.fertilityMod >= 0.5 ? 'warning' : 'success';
     
     return `<div class="reprohealth-block conception ${r.conceived ? 'success' : 'fail'}">
-<div class="reprohealth-block-header">${r.conceived ? t('conception_yes') : t('conception_no')}</div>
+<div class="reprohealth-block-header">${r.conceived ? t('conception_yes') : t('conception_no')}${auto ? ` <small>(${t('auto_triggered')})</small>` : ''}</div>
 <div class="reprohealth-roll">
 <span class="reprohealth-roll-dice">🎲</span>
 <span class="reprohealth-roll-result">${r.roll}</span>
@@ -401,8 +440,15 @@ ${r.conceived ? `<div class="reprohealth-block-row"><span class="reprohealth-blo
 </div>`;
 }
 
-function formatPregnancyStatus(s) {
-    if (!s) return `<div class="reprohealth-block pregnancy"><div class="reprohealth-block-header">🤰 Not pregnant</div></div>`;
+function formatPregnancyStatus(s, compact = false) {
+    if (!s) return compact ? '' : `<div class="reprohealth-block pregnancy"><div class="reprohealth-block-header">🤰 Not pregnant</div></div>`;
+    
+    if (compact) {
+        return `<div class="reprohealth-block pregnancy compact">
+<span>🤰 ${t('week')} ${s.weeks} | ${s.stage} | ${s.visibleChanges}</span>
+</div>`;
+    }
+    
     const pct = Math.min(100, Math.round(s.weeks / 40 * 100));
     return `<div class="reprohealth-block pregnancy">
 <div class="reprohealth-block-header">${t('pregnancy_status')}</div>
@@ -431,7 +477,7 @@ ${s.symptoms.length ? `<div class="reprohealth-symptoms">${s.symptoms.map(x => `
 </div>`;
 }
 
-function formatSTICheck(r) {
+function formatSTICheck(r, auto = false) {
     const lang = getSettings().language;
     const danger = r.newInfections.length > 0;
     
@@ -446,7 +492,7 @@ function formatSTICheck(r) {
     }
     
     return `<div class="reprohealth-block sti ${danger ? 'danger' : ''}">
-<div class="reprohealth-block-header">${t('sti_check')}</div>
+<div class="reprohealth-block-header">${t('sti_check')}${auto ? ` <small>(${t('auto_triggered')})</small>` : ''}</div>
 <div class="reprohealth-block-row"><span class="reprohealth-block-label">${t('partner_risk')}</span><span class="reprohealth-block-value">${r.partnerRisk}</span></div>
 ${checksHtml}
 ${r.newInfections.length ? `<div class="reprohealth-badge danger" style="margin-top:10px">⚠️ ${r.newInfections.map(x => stiDatabase[x].name[lang]).join(', ')}</div>` : ''}
@@ -469,51 +515,261 @@ function formatComplicationCheck(r) {
 </div>`;
 }
 
-function registerSlashCommands() {
-    const ctx = window.SillyTavern?.getContext?.();
-    if (!ctx?.registerSlashCommand) return;
-    const reg = ctx.registerSlashCommand;
+// ==================== АВТОМАТИЗАЦИЯ ====================
+
+function checkTextForTriggers(text) {
+    const s = getSettings();
+    if (!s.enabled) return { conception: false, condomOn: false, condomOff: false };
     
-    reg('conception', (args) => formatConceptionResult(conceptionRoll(args?.nocontra !== 'true', args?.partner || 'Unknown')), [], '[partner=X] - Conception roll', true, true);
-    reg('pregnancy', () => formatPregnancyStatus(getPregnancyStatus()), [], 'Pregnancy status', true, true);
-    reg('period', () => formatMenstruationStatus(getMenstruationStatus()), [], 'Period status', true, true);
-    reg('sticheck', (args) => formatSTICheck(checkSTITransmission(args?.partner || 'Unknown', getSettings().contraception.condom)), [], '[partner=X] - STI check', true, true);
-    reg('complication', (args) => formatComplicationCheck(complicationCheck(parseInt(args?.trimester) || 1)), [], '[trimester=1-3]', true, true);
-    reg('condom', (args) => {
-        const s = getSettings();
-        if (args?.value === 'on') s.contraception.condom = true;
-        else if (args?.value === 'off') s.contraception.condom = false;
-        else s.contraception.condom = !s.contraception.condom;
-        saveSettingsDebounced();
-        return `<div class="reprohealth-badge ${s.contraception.condom ? 'success' : 'warning'}">🩹 ${s.contraception.condom ? 'ON' : 'OFF'}</div>`;
-    }, [], '[on/off]', true, true);
-    reg('pill', (args) => {
-        const s = getSettings();
-        if (args?.value === 'on') s.contraception.pill = true;
-        else if (args?.value === 'off') { s.contraception.pill = false; s.contraception.pillDaysTaken = 0; }
-        else s.contraception.pill = !s.contraception.pill;
-        saveSettingsDebounced();
-        return `<div class="reprohealth-badge ${s.contraception.pill ? 'success' : 'warning'}">💊 ${s.contraception.pill ? 'ON' : 'OFF'}</div>`;
-    }, [], '[on/off]', true, true);
-    reg('cycleday', (args) => {
-        const s = getSettings();
-        if (args?.day) {
-            const d = parseInt(args.day);
-            if (d >= 1 && d <= s.fertility.cycleLength) { s.fertility.cycleDay = d; updateMenstruationStatus(); saveSettingsDebounced(); }
+    const lowerText = text.toLowerCase();
+    
+    let conception = false;
+    let condomOn = false;
+    let condomOff = false;
+    
+    if (s.automation.autoConception) {
+        for (const kw of s.triggers.conceptionKeywords) {
+            if (lowerText.includes(kw.toLowerCase())) {
+                conception = true;
+                break;
+            }
         }
-        const f = getFertilityModifier();
-        const m = getMenstruationStatus();
-        const fClass = f >= 1.5 ? 'danger' : f >= 0.5 ? 'warning' : 'success';
-        return `<div class="reprohealth-badge info">🗓️ ${s.fertility.cycleDay}</div> ${m.isActive ? '<span class="reprohealth-badge danger">🩸</span>' : ''} ${m.isPMS ? '<span class="reprohealth-badge warning">PMS</span>' : ''} <span class="reprohealth-badge ${fClass}">${f >= 1.5 ? 'HIGH' : f >= 0.5 ? 'NORM' : 'LOW'}</span>`;
-    }, [], '[day=N]', true, true);
-    reg('advanceday', (args) => {
-        const days = parseInt(args?.days) || 1;
-        advanceCycleDay(days);
-        const s = getSettings();
-        return `<div class="reprohealth-badge info">⏩ +${days}d → Day ${s.fertility.cycleDay}</div>`;
-    }, [], '[days=N]', true, true);
-    reg('reprohealth', () => { document.getElementById('reprohealth-settings')?.scrollIntoView(); return ''; }, [], 'Open settings', true, true);
+    }
+    
+    if (s.automation.autoDetectCondom) {
+        for (const kw of s.triggers.condomOnKeywords) {
+            if (lowerText.includes(kw.toLowerCase())) {
+                condomOn = true;
+                break;
+            }
+        }
+        for (const kw of s.triggers.condomOffKeywords) {
+            if (lowerText.includes(kw.toLowerCase())) {
+                condomOff = true;
+                break;
+            }
+        }
+    }
+    
+    return { conception, condomOn, condomOff };
 }
+
+function getCharacterName() {
+    try {
+        const context = window.SillyTavern?.getContext?.();
+        if (context?.name2) return context.name2;
+        return 'Partner';
+    } catch {
+        return 'Partner';
+    }
+}
+
+function injectIntoChat(html) {
+    try {
+        const chatContainer = document.querySelector('#chat');
+        if (!chatContainer) return;
+        
+        const wrapper = document.createElement('div');
+        wrapper.className = 'reprohealth-auto-inject';
+        wrapper.innerHTML = html;
+        
+        const lastMessage = chatContainer.querySelector('.mes:last-child .mes_text');
+        if (lastMessage) {
+            lastMessage.insertAdjacentElement('afterend', wrapper);
+        }
+    } catch (e) {
+        console.error('[ReproHealth] Inject error:', e);
+    }
+}
+
+function onMessageReceived(messageId) {
+    const s = getSettings();
+    if (!s.enabled) return;
+    
+    try {
+        const context = window.SillyTavern?.getContext?.();
+        if (!context?.chat) return;
+        
+        const message = context.chat[messageId];
+        if (!message || message.is_user) return;
+        
+        const text = message.mes || '';
+        const triggers = checkTextForTriggers(text);
+        const partner = getCharacterName();
+        
+        let output = '';
+        
+        // Автоопределение презерватива
+        if (triggers.condomOn && !s.contraception.condom) {
+            s.contraception.condom = true;
+            saveSettingsDebounced();
+            output += `<div class="reprohealth-badge success">${t('condom_on')}</div>`;
+        }
+        if (triggers.condomOff && s.contraception.condom) {
+            s.contraception.condom = false;
+            saveSettingsDebounced();
+            output += `<div class="reprohealth-badge warning">${t('condom_off')}</div>`;
+        }
+        
+        // Автоматический бросок на зачатие
+        if (triggers.conception) {
+            const result = conceptionRoll(true, partner);
+            output += formatConceptionResult(result, true);
+            
+            // Автоматическая проверка ИППП
+            if (s.automation.autoSTICheck && s.sti.enabled) {
+                const stiResult = checkSTITransmission(partner, s.contraception.condom);
+                if (stiResult.checks.length > 0 || stiResult.newInfections.length > 0) {
+                    output += formatSTICheck(stiResult, true);
+                }
+            }
+        }
+        
+        // Вывод статуса беременности
+        if (s.automation.autoPregnancyStatus && s.pregnancy.isPregnant) {
+            const today = getISODate();
+            if (s.pregnancy.lastStatusShown !== today) {
+                const status = getPregnancyStatus();
+                output = formatPregnancyStatus(status, true) + output;
+                s.pregnancy.lastStatusShown = today;
+                saveSettingsDebounced();
+            }
+        }
+        
+        if (output) {
+            setTimeout(() => injectIntoChat(output), 100);
+        }
+        
+        updateStatus();
+        
+    } catch (e) {
+        console.error('[ReproHealth] Message handler error:', e);
+    }
+}
+
+// ==================== SLASH COMMANDS ====================
+
+function registerSlashCommands() {
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'conception',
+        callback: (args) => {
+            const useContra = args.nocontra !== 'true';
+            const partner = args.partner || getCharacterName();
+            return formatConceptionResult(conceptionRoll(useContra, partner));
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('partner', 'Partner name', ARGUMENT_TYPE.STRING, false, false, ''),
+            new SlashCommandNamedArgument('nocontra', 'Skip contraception', ARGUMENT_TYPE.STRING, false, false, 'false'),
+        ],
+        helpString: 'Roll for conception'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'pregnancy',
+        callback: () => formatPregnancyStatus(getPregnancyStatus()),
+        helpString: 'Check pregnancy status'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'period',
+        callback: () => formatMenstruationStatus(getMenstruationStatus()),
+        helpString: 'Check menstruation status'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'sticheck',
+        callback: (args) => {
+            const partner = args.partner || getCharacterName();
+            return formatSTICheck(checkSTITransmission(partner, getSettings().contraception.condom));
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('partner', 'Partner name', ARGUMENT_TYPE.STRING, false, false, ''),
+        ],
+        helpString: 'Check STI transmission'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'complication',
+        callback: (args) => formatComplicationCheck(complicationCheck(parseInt(args.trimester) || 1)),
+        namedArgumentList: [
+            new SlashCommandNamedArgument('trimester', 'Trimester 1-3', ARGUMENT_TYPE.NUMBER, false, false, '1'),
+        ],
+        helpString: 'Check pregnancy complications'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'condom',
+        callback: (args) => {
+            const s = getSettings();
+            if (args.value === 'on') s.contraception.condom = true;
+            else if (args.value === 'off') s.contraception.condom = false;
+            else s.contraception.condom = !s.contraception.condom;
+            saveSettingsDebounced();
+            updateStatus();
+            return `<span class="reprohealth-badge ${s.contraception.condom ? 'success' : 'warning'}">🩹 ${s.contraception.condom ? 'ON' : 'OFF'}</span>`;
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('value', 'on/off', ARGUMENT_TYPE.STRING, false, false, ''),
+        ],
+        helpString: 'Toggle condom'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'pill',
+        callback: (args) => {
+            const s = getSettings();
+            if (args.value === 'on') s.contraception.pill = true;
+            else if (args.value === 'off') { s.contraception.pill = false; s.contraception.pillDaysTaken = 0; }
+            else s.contraception.pill = !s.contraception.pill;
+            saveSettingsDebounced();
+            return `<span class="reprohealth-badge ${s.contraception.pill ? 'success' : 'warning'}">💊 ${s.contraception.pill ? 'ON' : 'OFF'}</span>`;
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('value', 'on/off', ARGUMENT_TYPE.STRING, false, false, ''),
+        ],
+        helpString: 'Toggle birth control pill'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'cycleday',
+        callback: (args) => {
+            const s = getSettings();
+            if (args.day) {
+                const d = parseInt(args.day);
+                if (d >= 1 && d <= s.fertility.cycleLength) {
+                    s.fertility.cycleDay = d;
+                    updateMenstruationStatus();
+                    saveSettingsDebounced();
+                }
+            }
+            const f = getFertilityModifier();
+            const m = getMenstruationStatus();
+            const fClass = f >= 1.5 ? 'danger' : f >= 0.5 ? 'warning' : 'success';
+            updateStatus();
+            return `<span class="reprohealth-badge info">🗓️ ${s.fertility.cycleDay}</span> ${m.isActive ? '<span class="reprohealth-badge danger">🩸</span>' : ''} ${m.isPMS ? '<span class="reprohealth-badge warning">PMS</span>' : ''} <span class="reprohealth-badge ${fClass}">${f >= 1.5 ? 'HIGH' : f >= 0.5 ? 'NORM' : 'LOW'}</span>`;
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('day', 'Day 1-28', ARGUMENT_TYPE.NUMBER, false, false, ''),
+        ],
+        helpString: 'Set/check cycle day'
+    }));
+    
+    SlashCommandParser.addCommandObject(SlashCommand.fromProps({
+        name: 'advanceday',
+        callback: (args) => {
+            const days = parseInt(args.days) || 1;
+            advanceCycleDay(days);
+            updateStatus();
+            return `<span class="reprohealth-badge info">⏩ +${days}d → Day ${getSettings().fertility.cycleDay}</span>`;
+        },
+        namedArgumentList: [
+            new SlashCommandNamedArgument('days', 'Number of days', ARGUMENT_TYPE.NUMBER, false, false, '1'),
+        ],
+        helpString: 'Advance cycle by N days'
+    }));
+}
+
+// ==================== UI ====================
 
 function createSettingsPanel() {
     const html = `
@@ -524,21 +780,33 @@ function createSettingsPanel() {
 <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
 </div>
 <div class="inline-drawer-content">
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-enabled"><span>Enable</span></label></div>
+
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-enabled"><span>Enable System</span></label></div>
 <div class="reprohealth-setting"><label>Language</label><select id="rh-lang"><option value="ru">Русский</option><option value="en">English</option></select></div>
+
+<hr><h4>⚡ Automation</h4>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-auto-conception"><span>Auto conception roll</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-auto-pregnancy"><span>Auto pregnancy status</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-auto-condom"><span>Auto detect condom</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-auto-sti"><span>Auto STI check</span></label></div>
+
 <hr><h4>💊 Contraception</h4>
 <div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-condom"><span>Condom 85%</span></label></div>
 <div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-pill"><span>Pill 91%</span></label></div>
 <div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-iud"><span>IUD 99%</span></label></div>
 <div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-withdrawal"><span>Withdrawal 78%</span></label></div>
+
 <hr><h4>🩸 Menstruation</h4>
 <div class="reprohealth-setting"><label>Duration</label><input type="number" id="rh-period-dur" min="2" max="8" value="5"></div>
 <div class="reprohealth-setting"><label>Irregularity %</label><input type="number" id="rh-irreg" min="0" max="50" value="0"></div>
+
 <hr><h4>🌡️ Fertility</h4>
 <div class="reprohealth-setting"><label>Base %</label><input type="number" id="rh-base-fert" min="1" max="100" value="25"></div>
 <div class="reprohealth-setting"><label>Cycle Day</label><input type="number" id="rh-cycle-day" min="1" max="28" value="1"></div>
+
 <hr><h4>🔬 STI</h4>
 <div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-sti"><span>Enable STI</span></label></div>
+
 <hr>
 <div id="rh-status" class="reprohealth-status"></div>
 <div class="reprohealth-buttons">
@@ -555,6 +823,12 @@ function createSettingsPanel() {
     const s = getSettings;
     $('#rh-enabled').on('change', function() { s().enabled = this.checked; saveSettingsDebounced(); });
     $('#rh-lang').on('change', function() { s().language = this.value; saveSettingsDebounced(); updateStatus(); });
+    
+    $('#rh-auto-conception').on('change', function() { s().automation.autoConception = this.checked; saveSettingsDebounced(); });
+    $('#rh-auto-pregnancy').on('change', function() { s().automation.autoPregnancyStatus = this.checked; saveSettingsDebounced(); });
+    $('#rh-auto-condom').on('change', function() { s().automation.autoDetectCondom = this.checked; saveSettingsDebounced(); });
+    $('#rh-auto-sti').on('change', function() { s().automation.autoSTICheck = this.checked; saveSettingsDebounced(); });
+    
     $('#rh-condom').on('change', function() { s().contraception.condom = this.checked; saveSettingsDebounced(); updateStatus(); });
     $('#rh-pill').on('change', function() { s().contraception.pill = this.checked; saveSettingsDebounced(); });
     $('#rh-iud').on('change', function() { s().contraception.iud = this.checked; saveSettingsDebounced(); });
@@ -574,6 +848,10 @@ function loadUI() {
     const s = getSettings();
     $('#rh-enabled').prop('checked', s.enabled);
     $('#rh-lang').val(s.language);
+    $('#rh-auto-conception').prop('checked', s.automation.autoConception);
+    $('#rh-auto-pregnancy').prop('checked', s.automation.autoPregnancyStatus);
+    $('#rh-auto-condom').prop('checked', s.automation.autoDetectCondom);
+    $('#rh-auto-sti').prop('checked', s.automation.autoSTICheck);
     $('#rh-condom').prop('checked', s.contraception.condom);
     $('#rh-pill').prop('checked', s.contraception.pill);
     $('#rh-iud').prop('checked', s.contraception.iud);
@@ -607,7 +885,7 @@ function updateStatus() {
     const inf = s.sti.user_sti_status.infected;
     if (inf.length) h += `<p>🔬 ${inf.map(x => stiDatabase[x].name[lang]).join(', ')}</p>`;
     
-    h += `<p>🗓️ ${s.fertility.cycleDay} | ${fert >= 1.5 ? '⚠️HIGH' : fert >= 0.5 ? 'norm' : 'low'}</p>`;
+    h += `<p>🗓️ ${s.fertility.cycleDay} | ${fert >= 1.5 ? '⚠️HIGH' : fert >= 0.5 ? 'norm' : 'low'}${s.contraception.condom ? ' | 🩹' : ''}</p>`;
     
     $('#rh-status').html(h);
 }
@@ -617,7 +895,7 @@ window.ReproHealth = {
     getMenstruationStatus, updateMenstruationStatus, formatConceptionResult,
     formatPregnancyStatus, formatSTICheck, formatComplicationCheck, formatMenstruationStatus,
     rollD100, trueRandom, advanceCycleDay, getFertilityModifier, getContraceptionMultiplier,
-    assessPartnerRisk, stiDatabase, t
+    assessPartnerRisk, stiDatabase, t, checkTextForTriggers
 };
 
 jQuery(async () => {
@@ -630,4 +908,10 @@ jQuery(async () => {
     createSettingsPanel();
     loadUI();
     registerSlashCommands();
+    
+    // Подписка на события сообщений
+    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+    eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onMessageReceived);
+    
+    console.log('[ReproHealth] Extension loaded with automation!');
 });

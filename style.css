@@ -337,6 +337,35 @@
     animation: reprohealth-shake 0.3s ease-in-out;
 }
 
+/* ==================== COMPACT BLOCKS ==================== */
+
+.reprohealth-block.compact {
+    padding: 8px 12px;
+    margin: 5px 0;
+    font-size: 12px;
+}
+
+.reprohealth-block.compact span {
+    display: inline;
+}
+
+/* ==================== AUTO-INJECT WRAPPER ==================== */
+
+.reprohealth-auto-inject {
+    margin-top: 15px;
+    padding-top: 10px;
+    border-top: 1px dashed rgba(255,255,255,0.2);
+}
+
+.reprohealth-auto-inject .reprohealth-block {
+    animation: reprohealth-fadein 0.5s ease;
+}
+
+@keyframes reprohealth-fadein {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
 /* ==================== DARK/LIGHT THEME ADJUSTMENTS ==================== */
 
 [data-theme="light"] .reprohealth-block {
