@@ -1,4 +1,4 @@
-import { extension_settings, saveSettings } from "../../../extensions.js";
+import { extension_settings } from "../../../extensions.js";
 import { eventSource, event_types } from "../../../../script.js";
 
 const extensionName = "reproductive-health";
@@ -71,9 +71,13 @@ const defaultSettings = {
 function getSettings() {
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = structuredClone(defaultSettings);
-        saveSettings();
     }
     return extension_settings[extensionName];
+}
+
+function saveSettings() {
+    // Сохраняем в extension_settings - это автоматически сохраняется в ST
+    extension_settings[extensionName] = getSettings();
 }
 
 function matchesAny(text, list) {
@@ -312,8 +316,10 @@ function initialize() {
         }
     }, 500);
 
-    eventSource.on(event_types.MESSAGE_RECEIVED, onMessage);
-    eventSource.on(event_types.MESSAGE_SENT, onMessage);
+    if (eventSource) {
+        eventSource.on(event_types.MESSAGE_RECEIVED, onMessage);
+        eventSource.on(event_types.MESSAGE_SENT, onMessage);
+    }
 
     console.log("[ReproHealth] ✅ Event listeners attached");
 }
