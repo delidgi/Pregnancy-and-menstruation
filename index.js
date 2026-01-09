@@ -338,7 +338,7 @@ function getContraceptionEffect() {
     return { multiplier: (100 - protection) / 100, methods, condomBroke };
 }
 
-function attemptConception() {
+function attemptConception(isPullOut = false) {
     const s = getSettings();
     if (!s) return { attempted: false };
     if (s.pregnancy.isPregnant) return { attempted: false, reason: 'already_pregnant' };
@@ -351,7 +351,13 @@ function attemptConception() {
     
     const contraResult = getContraceptionEffect();
     chance *= contraResult.multiplier;
-    chance = Math.max(0.5, Math.min(85, chance));
+    
+    // Если вытащил - шанс снижается на 78%
+    if (isPullOut) {
+        chance *= 0.22; // withdrawal ~78% effective
+    }
+    
+    chance = Math.max(0.1, Math.min(85, chance));
     
     const roll = rollD100();
     const success = roll <= chance;
@@ -366,7 +372,8 @@ function attemptConception() {
         fertMod,
         contraception: contraResult,
         cycleDay: s.fertility.cycleDay,
-        duringPeriod: s.menstruation.isActive
+        duringPeriod: s.menstruation.isActive,
+        isPullOut
     };
     
     if (success) {
@@ -477,90 +484,89 @@ function getPregnancyStatus() {
     return { weeks, trimester: tri, symptoms, babies: s.pregnancy.babies };
 }
 
-function formatConceptionResult(r) {
+function formatConceptionResult(r, isPullOut = false) {
     const s = getSettings();
     const lang = s?.language || 'ru';
     
     if (!r.attempted) {
-        return `<div class="reprohealth-block info">🤰 ${lang === 'ru' ? 'Уже беременна' : 'Already pregnant'}</div>`;
+        return `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'Уже беременна' : 'Already pregnant'}</pre>`;
     }
     
-    const fertLabel = r.fertMod >= 1.5 ? t('fertility_high') : r.fertMod >= 0.4 ? t('fertility_normal') : t('fertility_low');
-    const fertClass = r.fertMod >= 1.5 ? 'danger' : r.fertMod >= 0.4 ? 'warning' : 'success';
+    let protection = [];
+    if (r.contraception.methods.length > 0) protection = r.contraception.methods;
+    if (isPullOut) protection.push(lang === 'ru' ? 'Прерванный акт' : 'Withdrawal');
+    const protectionText = protection.length > 0 
+        ? protection.join(', ') 
+        : (lang === 'ru' ? 'Без защиты' : 'Unprotected');
     
-    let html = `<div class="reprohealth-block conception ${r.success ? 'success' : 'fail'}">
-<div class="reprohealth-block-header">${t('conception_roll')}</div>
-<div class="reprohealth-roll">
-<span class="reprohealth-roll-dice">🎲</span>
-<span class="reprohealth-roll-result">${r.roll}</span>
-<span class="reprohealth-roll-target">/ ${r.chance}%</span>
-</div>
-<div class="reprohealth-block-row">
-<span class="reprohealth-block-label">${t('cycle_day')}</span>
-<span class="reprohealth-block-value">${r.cycleDay} <span class="reprohealth-badge ${fertClass}">${fertLabel}</span></span>
-</div>`;
+    let result = '';
     
-    if (r.contraception.methods.length > 0) {
-        html += `<div class="reprohealth-block-row"><span class="reprohealth-badge success">${r.contraception.methods.join(', ')}</span></div>`;
+    if (r.success) {
+        const babyCount = r.babies?.length || 1;
+        const babyText = babyCount === 1 ? '' : babyCount === 2 ? (lang === 'ru' ? ' (Близнецы!)' : ' (Twins!)') : (lang === 'ru' ? ' (Тройня!)' : ' (Triplets!)');
+        
+        result = `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'БРОСОК НА ЗАЧАТИЕ' : 'CONCEPTION ROLL'}
+${lang === 'ru' ? 'Бросок' : 'Roll'}: ${r.roll} / ${r.chance}%
+${lang === 'ru' ? 'Защита' : 'Protection'}: ${protectionText}${r.contraception.condomBroke ? (lang === 'ru' ? ' ⚠️ ПОРВАЛСЯ!' : ' ⚠️ BROKE!') : ''}
+${lang === 'ru' ? 'День цикла' : 'Cycle day'}: ${r.cycleDay} (${r.fertMod >= 1.5 ? '🔥' : r.fertMod >= 0.4 ? '•' : '❄️'})
+━━━━━━━━━━━━━━━━━━━━
+✅ ${lang === 'ru' ? 'ЗАЧАТИЕ ПРОИЗОШЛО' : 'CONCEPTION OCCURRED'}${babyText}
+${lang === 'ru' ? 'Дата' : 'Date'}: ${getISODate()}
+${lang === 'ru' ? 'Статус' : 'Status'}: ${lang === 'ru' ? 'Беременность началась (персонажи пока не знают)' : 'Pregnancy initiated (unknown to characters)'}</pre>`;
     } else {
-        html += `<div class="reprohealth-block-row"><span class="reprohealth-badge danger">${t('no_protection')}</span></div>`;
+        result = `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'БРОСОК НА ЗАЧАТИЕ' : 'CONCEPTION ROLL'}
+${lang === 'ru' ? 'Бросок' : 'Roll'}: ${r.roll} / ${r.chance}%
+${lang === 'ru' ? 'Защита' : 'Protection'}: ${protectionText}${r.contraception.condomBroke ? (lang === 'ru' ? ' ⚠️ ПОРВАЛСЯ!' : ' ⚠️ BROKE!') : ''}
+${lang === 'ru' ? 'День цикла' : 'Cycle day'}: ${r.cycleDay} (${r.fertMod >= 1.5 ? '🔥' : r.fertMod >= 0.4 ? '•' : '❄️'})
+━━━━━━━━━━━━━━━━━━━━
+❌ ${lang === 'ru' ? 'НЕ В ЭТОТ РАЗ' : 'NO CONCEPTION'}
+${lang === 'ru' ? 'Беременность не наступила.' : 'No pregnancy this time.'}</pre>`;
     }
     
-    if (r.contraception.condomBroke) {
-        html += `<div class="reprohealth-badge danger">⚠️ ${lang === 'ru' ? 'Презерватив порвался!' : 'Condom broke!'}</div>`;
-    }
-    
-    html += `<div class="reprohealth-result ${r.success ? 'success' : 'fail'}">${r.success ? t('conception_success') : t('conception_fail')}</div>`;
-    
-    if (r.success && r.babies) {
-        const babyCount = r.babies.length;
-        const babyText = babyCount === 1 ? t('single') : babyCount === 2 ? t('twins') : t('triplets');
-        const genders = r.babies.map(b => b.gender === 'boy' ? t('baby_boy') : t('baby_girl')).join(', ');
-        html += `<div class="reprohealth-babies"><div class="reprohealth-badge info">${babyText}</div><div>${genders}</div></div>`;
-    }
-    
-    html += `</div>`;
-    return html;
+    return result;
 }
 
-function formatPregnancyStatus(status, compact = false) {
+function formatPregnancyStatus(status) {
     if (!status) return '';
     
+    const s = getSettings();
+    const lang = s?.language || 'ru';
+    
     const babyCount = status.babies?.length || 1;
-    const babyText = babyCount === 1 ? '' : babyCount === 2 ? ` (${t('twins')})` : ` (${t('triplets')})`;
-    const genders = status.babies?.map(b => b.gender === 'boy' ? '👦' : '👧').join('') || '';
+    const babyText = babyCount === 1 ? '' : babyCount === 2 ? (lang === 'ru' ? ' (Близнецы)' : ' (Twins)') : (lang === 'ru' ? ' (Тройня)' : ' (Triplets)');
     
-    if (compact) {
-        return `<div class="reprohealth-block pregnancy compact">🤰 ${t('week')} ${status.weeks} | ${t('trimester')} ${status.trimester}${babyText} ${genders} | ${status.symptoms}</div>`;
-    }
+    let stage;
+    if (status.weeks < 12) stage = lang === 'ru' ? 'Ранняя' : 'Early';
+    else if (status.weeks < 24) stage = lang === 'ru' ? 'Заметная' : 'Showing';
+    else if (status.weeks < 37) stage = lang === 'ru' ? 'Поздняя' : 'Advanced';
+    else stage = lang === 'ru' ? 'Роды скоро' : 'Labor soon';
     
-    const pct = Math.min(100, Math.round(status.weeks / 40 * 100));
-    return `<div class="reprohealth-block pregnancy">
-<div class="reprohealth-block-header">🤰 ${t('pregnant').toUpperCase()}${babyText}</div>
-<div class="reprohealth-progress"><div class="reprohealth-progress-fill" style="width:${pct}%"></div></div>
-<div class="reprohealth-block-row"><span class="reprohealth-block-label">${t('week')}</span><span class="reprohealth-block-value">${status.weeks}/40 ${genders}</span></div>
-<div class="reprohealth-block-row"><span class="reprohealth-block-label">${t('trimester')}</span><span class="reprohealth-block-value">${status.trimester}</span></div>
-<div class="reprohealth-block-row"><span class="reprohealth-block-label">${t('visible_changes')}</span><span class="reprohealth-block-value">${status.symptoms}</span></div>
-</div>`;
+    return `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'СТАТУС БЕРЕМЕННОСТИ' : 'PREGNANCY STATUS'}${babyText}
+${lang === 'ru' ? 'Неделя' : 'Week'}: ${status.weeks}/40
+${lang === 'ru' ? 'Стадия' : 'Stage'}: ${stage}
+${lang === 'ru' ? 'Триместр' : 'Trimester'}: ${status.trimester}
+${lang === 'ru' ? 'Изменения' : 'Visible'}: ${status.symptoms}</pre>`;
 }
 
 function formatSTIResult(r) {
     if (!r || r.checked.length === 0) return '';
     const lang = getSettings()?.language || 'ru';
     
-    let html = `<div class="reprohealth-block sti ${r.newInfections.length ? 'danger' : ''}">
-<div class="reprohealth-block-header">${t('sti_check')}</div>`;
+    let checks = r.checked.map(c => {
+        const name = stiDatabase[c.sti].name[lang];
+        return `  ${name}: ${c.roll}/${c.chance}% ${c.infected ? '⚠️' : '✅'}`;
+    }).join('\n');
     
-    for (const check of r.checked) {
-        const name = stiDatabase[check.sti].name[lang];
-        html += `<div class="reprohealth-block-row">
-<span class="reprohealth-block-label">${name}</span>
-<span class="reprohealth-block-value">${check.roll}/${check.chance}% 
-<span class="reprohealth-badge ${check.infected ? 'danger' : 'success'}">${check.infected ? t('sti_infected') : t('sti_safe')}</span>
-</span></div>`;
+    let result = `<pre class="reprohealth-code">🔬 ${lang === 'ru' ? 'ПРОВЕРКА ИППП' : 'STI CHECK'}
+${checks}`;
+    
+    if (r.newInfections.length > 0) {
+        const names = r.newInfections.map(x => stiDatabase[x].name[lang]).join(', ');
+        result += `\n━━━━━━━━━━━━━━━━━━━━\n⚠️ ${lang === 'ru' ? 'ЗАРАЖЕНИЕ' : 'INFECTED'}: ${names}`;
     }
-    html += `</div>`;
-    return html;
+    
+    result += `</pre>`;
+    return result;
 }
 
 function injectToChat(html) {
@@ -596,11 +602,13 @@ function processMessage(text, charName) {
         saveSettings();
     }
     
-    if (analysis.isVaginalSex && analysis.isCreampie && !analysis.isPullOut) {
-        console.log('[ReproHealth] Detected creampie, rolling...');
+    // Бросок при ЛЮБОМ вагинальном сексе
+    if (analysis.isVaginalSex) {
+        console.log('[ReproHealth] Detected vaginal sex, rolling...');
         
-        const conception = attemptConception();
-        output += formatConceptionResult(conception);
+        // Если вытащил - показываем это, но бросок всё равно делаем с модификатором
+        const conception = attemptConception(analysis.isPullOut && !analysis.isCreampie);
+        output += formatConceptionResult(conception, analysis.isPullOut && !analysis.isCreampie);
         
         if (s.sti.enabled) {
             const stiResult = checkSTI(charName, s.contraception.condom);
@@ -608,11 +616,12 @@ function processMessage(text, charName) {
         }
     }
     
+    // Статус беременности - раз в день
     if (s.pregnancy.isPregnant) {
         const today = getISODate();
         if (s.pregnancy.lastStatusDay !== today) {
             const status = getPregnancyStatus();
-            output = formatPregnancyStatus(status, true) + output;
+            output = formatPregnancyStatus(status) + output;
             s.pregnancy.lastStatusDay = today;
             saveSettings();
         }
