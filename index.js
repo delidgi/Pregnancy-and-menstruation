@@ -1,9 +1,19 @@
-import { extension_settings, saveSettingsDebounced } from "../../../extensions.js";
+import { extension_settings } from "../../../extensions.js";
 
 const extensionName = "reproductive-health";
-const extensionFolderPath = `scripts/extensions/third-party/sillytavern-${extensionName}`;
 
-console.log('[ReproHealth] Starting to load...');
+console.log('[ReproHealth] Starting...');
+
+function saveSettings() {
+    try {
+        const context = window.SillyTavern?.getContext?.();
+        if (context?.saveSettingsDebounced) {
+            context.saveSettingsDebounced();
+        }
+    } catch (e) {
+        console.log('[ReproHealth] Save settings fallback');
+    }
+}
 
 const defaultSettings = {
     enabled: true,
@@ -38,7 +48,6 @@ const defaultSettings = {
         currentWeek: 0,
         trimester: 1,
         babies: [],
-        complications: [],
         lastStatusDay: null
     },
     
@@ -49,7 +58,6 @@ const defaultSettings = {
     },
     
     stats: {
-        totalEncounters: 0,
         conceptionAttempts: 0,
         successfulConceptions: 0
     }
@@ -69,14 +77,7 @@ const i18n = {
         twins: "Близнецы",
         triplets: "Тройня",
         single: "Один плод",
-        period_started: "🩸 Месячные начались",
-        period_day: "День месячных",
-        pms: "ПМС",
-        ovulation: "🔥 Овуляция!",
-        safe_days: "Безопасные дни",
-        condom_detected: "🩹 Презерватив",
         no_protection: "⚠️ Без защиты",
-        pill_active: "💊 Таблетки",
         fertility_high: "ВЫСОКАЯ",
         fertility_low: "низкая",
         fertility_normal: "норма",
@@ -99,14 +100,7 @@ const i18n = {
         twins: "Twins",
         triplets: "Triplets",
         single: "Single",
-        period_started: "🩸 Period started",
-        period_day: "Period day",
-        pms: "PMS",
-        ovulation: "🔥 Ovulation!",
-        safe_days: "Safe days",
-        condom_detected: "🩹 Condom",
         no_protection: "⚠️ No protection",
-        pill_active: "💊 On the pill",
         fertility_high: "HIGH",
         fertility_low: "low",
         fertility_normal: "normal",
@@ -164,15 +158,12 @@ function trueRandom(min, max) {
     const range = max - min + 1;
     const bytesNeeded = Math.ceil(Math.log2(range) / 8) || 1;
     const maxValid = Math.floor(256 ** bytesNeeded / range) * range - 1;
-    
     let randomValue;
     const arr = new Uint8Array(bytesNeeded);
-    
     do {
         crypto.getRandomValues(arr);
         randomValue = arr.reduce((acc, val, i) => acc + val * (256 ** i), 0);
     } while (randomValue > maxValid);
-    
     return min + (randomValue % range);
 }
 
@@ -238,7 +229,6 @@ const sexKeywords = {
 
 function analyzeMessage(text) {
     const lower = text.toLowerCase();
-    
     let isVaginalSex = false;
     let isCreampie = false;
     let hasCondom = null;
@@ -247,19 +237,15 @@ function analyzeMessage(text) {
     for (const kw of sexKeywords.vaginal) {
         if (lower.includes(kw)) { isVaginalSex = true; break; }
     }
-    
     for (const kw of sexKeywords.creampie) {
         if (lower.includes(kw)) { isCreampie = true; break; }
     }
-    
     for (const kw of sexKeywords.condomOn) {
         if (lower.includes(kw)) { hasCondom = true; break; }
     }
-    
     for (const kw of sexKeywords.condomOff) {
         if (lower.includes(kw)) { hasCondom = false; break; }
     }
-    
     for (const kw of sexKeywords.pullOut) {
         if (lower.includes(kw)) { isPullOut = true; break; }
     }
@@ -270,7 +256,6 @@ function analyzeMessage(text) {
 function updateCycle() {
     const s = getSettings();
     if (!s) return;
-    
     if (s.pregnancy.isPregnant) {
         s.menstruation.isActive = false;
         s.menstruation.isPMS = false;
@@ -288,22 +273,19 @@ function updateCycle() {
         s.menstruation.isActive = false;
         if (day >= 25) {
             s.menstruation.isPMS = true;
-            const lang = s.language;
-            const syms = pmsSymptoms[lang] || pmsSymptoms.en;
+            const syms = pmsSymptoms[s.language] || pmsSymptoms.en;
             s.menstruation.symptoms = [...syms].sort(() => Math.random() - 0.5).slice(0, trueRandom(2, 4));
         } else {
             s.menstruation.isPMS = false;
             s.menstruation.symptoms = [];
         }
     }
-    
-    saveSettingsDebounced();
+    saveSettings();
 }
 
 function getFertilityModifier() {
     const s = getSettings();
     if (!s) return 1;
-    
     const day = s.fertility.cycleDay;
     const [ovS, ovE] = s.fertility.ovulationWindow;
     
@@ -323,7 +305,7 @@ function advanceCycle(days = 1) {
         if (s.contraception.pill) s.contraception.pillDaysTaken++;
     }
     updateCycle();
-    saveSettingsDebounced();
+    saveSettings();
 }
 
 function getContraceptionEffect() {
@@ -337,7 +319,6 @@ function getContraceptionEffect() {
     
     if (c.iud) { protection = Math.max(protection, 99); methods.push('IUD'); }
     if (c.implant) { protection = Math.max(protection, 99); methods.push('Implant'); }
-    
     if (c.pill) {
         let eff = 91;
         if (c.pillDaysTaken < 7) eff = 50;
@@ -345,7 +326,6 @@ function getContraceptionEffect() {
         protection = Math.max(protection, eff);
         methods.push('Pill');
     }
-    
     if (c.condom) {
         if (rollD100() <= 2) {
             condomBroke = true;
@@ -358,13 +338,10 @@ function getContraceptionEffect() {
     return { multiplier: (100 - protection) / 100, methods, condomBroke };
 }
 
-function attemptConception(useContraception = true) {
+function attemptConception() {
     const s = getSettings();
-    if (!s) return { attempted: false, reason: 'no_settings' };
-    
-    if (s.pregnancy.isPregnant) {
-        return { attempted: false, reason: 'already_pregnant' };
-    }
+    if (!s) return { attempted: false };
+    if (s.pregnancy.isPregnant) return { attempted: false, reason: 'already_pregnant' };
     
     s.stats.conceptionAttempts++;
     
@@ -372,18 +349,14 @@ function attemptConception(useContraception = true) {
     const fertMod = getFertilityModifier();
     chance *= fertMod;
     
-    let contraResult = { multiplier: 1, methods: [], condomBroke: false };
-    if (useContraception) {
-        contraResult = getContraceptionEffect();
-        chance *= contraResult.multiplier;
-    }
-    
+    const contraResult = getContraceptionEffect();
+    chance *= contraResult.multiplier;
     chance = Math.max(0.5, Math.min(85, chance));
     
     const roll = rollD100();
     const success = roll <= chance;
     
-    console.log(`[ReproHealth] Conception roll: ${roll} vs ${chance.toFixed(1)}% = ${success ? 'SUCCESS' : 'FAIL'}`);
+    console.log(`[ReproHealth] Roll: ${roll} vs ${chance.toFixed(1)}% = ${success ? 'SUCCESS' : 'FAIL'}`);
     
     const result = {
         attempted: true,
@@ -402,7 +375,6 @@ function attemptConception(useContraception = true) {
         s.pregnancy.conceptionDate = getISODate();
         s.pregnancy.currentWeek = 0;
         s.pregnancy.trimester = 1;
-        s.pregnancy.complications = [];
         s.menstruation.isActive = false;
         s.menstruation.isPMS = false;
         
@@ -413,18 +385,14 @@ function attemptConception(useContraception = true) {
         
         s.pregnancy.babies = [];
         for (let i = 0; i < babyCount; i++) {
-            const genderRoll = rollD100();
             s.pregnancy.babies.push({
-                gender: genderRoll <= 50 ? 'boy' : 'girl',
-                genderRoll
+                gender: rollD100() <= 50 ? 'boy' : 'girl'
             });
         }
-        
         result.babies = s.pregnancy.babies;
-        console.log(`[ReproHealth] Conception successful! Babies: ${babyCount}`);
     }
     
-    saveSettingsDebounced();
+    saveSettings();
     return result;
 }
 
@@ -437,18 +405,13 @@ function getPartnerRisk(name) {
         let risk = 'safe';
         let infections = [];
         
-        if (riskRoll <= 60) {
-            risk = 'safe';
-        } else if (riskRoll <= 80) {
+        if (riskRoll <= 60) risk = 'safe';
+        else if (riskRoll <= 80) {
             risk = 'low';
-            if (rollD100() <= 15) {
-                infections.push(['chlamydia', 'gonorrhea'][trueRandom(0, 1)]);
-            }
+            if (rollD100() <= 15) infections.push(['chlamydia', 'gonorrhea'][trueRandom(0, 1)]);
         } else if (riskRoll <= 95) {
             risk = 'medium';
-            if (rollD100() <= 30) {
-                infections.push(['chlamydia', 'gonorrhea', 'herpes', 'hpv'][trueRandom(0, 3)]);
-            }
+            if (rollD100() <= 30) infections.push(['chlamydia', 'gonorrhea', 'herpes', 'hpv'][trueRandom(0, 3)]);
         } else {
             risk = 'high';
             if (rollD100() <= 50) {
@@ -458,9 +421,8 @@ function getPartnerRisk(name) {
         }
         
         s.sti.partnerProfiles[name] = { risk, infections };
-        saveSettingsDebounced();
+        saveSettings();
     }
-    
     return s.sti.partnerProfiles[name];
 }
 
@@ -480,7 +442,6 @@ function checkSTI(partnerName, usedCondom) {
         
         const roll = rollD100();
         const infected = roll <= chance;
-        
         results.checked.push({ sti, roll, chance: chance.toFixed(2), infected });
         
         if (infected) {
@@ -489,7 +450,7 @@ function checkSTI(partnerName, usedCondom) {
         }
     }
     
-    saveSettingsDebounced();
+    saveSettings();
     return results;
 }
 
@@ -506,22 +467,14 @@ function getPregnancyStatus() {
     if (weeks >= 28) tri = 3;
     s.pregnancy.trimester = tri;
     
-    const lang = s.language;
-    const changes = pregnancyChanges[lang] || pregnancyChanges.en;
+    const changes = pregnancyChanges[s.language] || pregnancyChanges.en;
     let symptoms = changes[0][1];
     for (const [w, desc] of changes) {
         if (weeks >= w) symptoms = desc;
     }
     
-    saveSettingsDebounced();
-    
-    return {
-        weeks,
-        trimester: tri,
-        symptoms,
-        babies: s.pregnancy.babies,
-        dueIn: 40 - weeks
-    };
+    saveSettings();
+    return { weeks, trimester: tri, symptoms, babies: s.pregnancy.babies };
 }
 
 function formatConceptionResult(r) {
@@ -557,21 +510,13 @@ function formatConceptionResult(r) {
         html += `<div class="reprohealth-badge danger">⚠️ ${lang === 'ru' ? 'Презерватив порвался!' : 'Condom broke!'}</div>`;
     }
     
-    if (r.duringPeriod) {
-        html += `<div class="reprohealth-badge info">🩸 ${lang === 'ru' ? 'Во время месячных' : 'During period'}</div>`;
-    }
-    
     html += `<div class="reprohealth-result ${r.success ? 'success' : 'fail'}">${r.success ? t('conception_success') : t('conception_fail')}</div>`;
     
     if (r.success && r.babies) {
         const babyCount = r.babies.length;
-        let babyText = babyCount === 1 ? t('single') : babyCount === 2 ? t('twins') : t('triplets');
-        let genders = r.babies.map(b => b.gender === 'boy' ? t('baby_boy') : t('baby_girl')).join(', ');
-        
-        html += `<div class="reprohealth-babies">
-<div class="reprohealth-badge info">${babyText}</div>
-<div>${genders}</div>
-</div>`;
+        const babyText = babyCount === 1 ? t('single') : babyCount === 2 ? t('twins') : t('triplets');
+        const genders = r.babies.map(b => b.gender === 'boy' ? t('baby_boy') : t('baby_girl')).join(', ');
+        html += `<div class="reprohealth-babies"><div class="reprohealth-badge info">${babyText}</div><div>${genders}</div></div>`;
     }
     
     html += `</div>`;
@@ -581,21 +526,15 @@ function formatConceptionResult(r) {
 function formatPregnancyStatus(status, compact = false) {
     if (!status) return '';
     
-    const s = getSettings();
-    const lang = s?.language || 'ru';
-    
     const babyCount = status.babies?.length || 1;
     const babyText = babyCount === 1 ? '' : babyCount === 2 ? ` (${t('twins')})` : ` (${t('triplets')})`;
     const genders = status.babies?.map(b => b.gender === 'boy' ? '👦' : '👧').join('') || '';
     
     if (compact) {
-        return `<div class="reprohealth-block pregnancy compact">
-🤰 ${t('week')} ${status.weeks} | ${t('trimester')} ${status.trimester}${babyText} ${genders} | ${status.symptoms}
-</div>`;
+        return `<div class="reprohealth-block pregnancy compact">🤰 ${t('week')} ${status.weeks} | ${t('trimester')} ${status.trimester}${babyText} ${genders} | ${status.symptoms}</div>`;
     }
     
     const pct = Math.min(100, Math.round(status.weeks / 40 * 100));
-    
     return `<div class="reprohealth-block pregnancy">
 <div class="reprohealth-block-header">🤰 ${t('pregnant').toUpperCase()}${babyText}</div>
 <div class="reprohealth-progress"><div class="reprohealth-progress-fill" style="width:${pct}%"></div></div>
@@ -607,9 +546,7 @@ function formatPregnancyStatus(status, compact = false) {
 
 function formatSTIResult(r) {
     if (!r || r.checked.length === 0) return '';
-    
-    const s = getSettings();
-    const lang = s?.language || 'ru';
+    const lang = getSettings()?.language || 'ru';
     
     let html = `<div class="reprohealth-block sti ${r.newInfections.length ? 'danger' : ''}">
 <div class="reprohealth-block-header">${t('sti_check')}</div>`;
@@ -622,33 +559,23 @@ function formatSTIResult(r) {
 <span class="reprohealth-badge ${check.infected ? 'danger' : 'success'}">${check.infected ? t('sti_infected') : t('sti_safe')}</span>
 </span></div>`;
     }
-    
     html += `</div>`;
     return html;
 }
 
 function injectToChat(html) {
     if (!html) return;
-    
     try {
         const chat = document.querySelector('#chat');
-        if (!chat) {
-            console.log('[ReproHealth] Chat container not found');
-            return;
-        }
-        
+        if (!chat) return;
         const lastMsg = chat.querySelector('.mes:last-child .mes_text');
-        if (!lastMsg) {
-            console.log('[ReproHealth] Last message not found');
-            return;
-        }
+        if (!lastMsg) return;
         
         const wrapper = document.createElement('div');
         wrapper.className = 'reprohealth-auto-result';
         wrapper.innerHTML = html;
         lastMsg.appendChild(wrapper);
-        
-        console.log('[ReproHealth] Injected result to chat');
+        console.log('[ReproHealth] Injected to chat');
     } catch (e) {
         console.error('[ReproHealth] Inject error:', e);
     }
@@ -658,26 +585,21 @@ function processMessage(text, charName) {
     const s = getSettings();
     if (!s || !s.enabled) return;
     
-    console.log('[ReproHealth] Processing message from:', charName);
-    
     const analysis = analyzeMessage(text);
     let output = '';
     
     if (analysis.hasCondom === true) {
         s.contraception.condom = true;
-        saveSettingsDebounced();
-        console.log('[ReproHealth] Condom detected: ON');
+        saveSettings();
     } else if (analysis.hasCondom === false) {
         s.contraception.condom = false;
-        saveSettingsDebounced();
-        console.log('[ReproHealth] Condom detected: OFF');
+        saveSettings();
     }
     
     if (analysis.isVaginalSex && analysis.isCreampie && !analysis.isPullOut) {
-        console.log('[ReproHealth] Detected vaginal sex + creampie, rolling for conception...');
-        s.stats.totalEncounters++;
+        console.log('[ReproHealth] Detected creampie, rolling...');
         
-        const conception = attemptConception(true);
+        const conception = attemptConception();
         output += formatConceptionResult(conception);
         
         if (s.sti.enabled) {
@@ -692,24 +614,20 @@ function processMessage(text, charName) {
             const status = getPregnancyStatus();
             output = formatPregnancyStatus(status, true) + output;
             s.pregnancy.lastStatusDay = today;
-            saveSettingsDebounced();
+            saveSettings();
         }
     }
     
     if (output) {
         setTimeout(() => injectToChat(output), 200);
     }
-    
     updateStatusPanel();
 }
 
 function onChatMessage(messageIndex) {
     try {
         const context = window.SillyTavern?.getContext?.();
-        if (!context?.chat) {
-            console.log('[ReproHealth] No chat context');
-            return;
-        }
+        if (!context?.chat) return;
         
         const msg = context.chat[messageIndex];
         if (!msg || msg.is_user) return;
@@ -717,12 +635,12 @@ function onChatMessage(messageIndex) {
         const charName = context.name2 || 'Partner';
         processMessage(msg.mes || '', charName);
     } catch (e) {
-        console.error('[ReproHealth] Message handler error:', e);
+        console.error('[ReproHealth] Error:', e);
     }
 }
 
 function createSettingsPanel() {
-    console.log('[ReproHealth] Creating settings panel...');
+    console.log('[ReproHealth] Creating panel...');
     
     const html = `
 <div id="reprohealth-settings" class="extension_settings">
@@ -734,7 +652,7 @@ function createSettingsPanel() {
 <div class="inline-drawer-content">
 
 <div class="reprohealth-setting">
-<label class="checkbox_label"><input type="checkbox" id="rh-enabled"><span>Включить систему</span></label>
+<label class="checkbox_label"><input type="checkbox" id="rh-enabled"><span>Включить</span></label>
 </div>
 
 <div class="reprohealth-setting">
@@ -743,15 +661,14 @@ function createSettingsPanel() {
 </div>
 
 <hr><h4>💊 Контрацепция</h4>
-<p style="font-size:11px;opacity:0.6;margin:5px 0;">Можно выбрать или оставить — определится из текста</p>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-condom"><span>🩹 Презерватив (85%)</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-pill"><span>💊 Таблетки (91%)</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-iud"><span>🔗 Спираль IUD (99%)</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-implant"><span>💉 Имплант (99%)</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-condom"><span>🩹 Презерватив</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-pill"><span>💊 Таблетки</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-iud"><span>🔗 Спираль</span></label></div>
+<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-implant"><span>💉 Имплант</span></label></div>
 
 <hr><h4>🌡️ Цикл</h4>
 <div class="reprohealth-setting">
-<label>День цикла (1-28)</label>
+<label>День цикла</label>
 <input type="number" id="rh-cycle-day" min="1" max="28" value="1">
 </div>
 <div class="reprohealth-setting">
@@ -761,20 +678,19 @@ function createSettingsPanel() {
 
 <hr><h4>🔬 ИППП</h4>
 <div class="reprohealth-setting">
-<label class="checkbox_label"><input type="checkbox" id="rh-sti"><span>Включить проверку ИППП</span></label>
+<label class="checkbox_label"><input type="checkbox" id="rh-sti"><span>Включить ИППП</span></label>
 </div>
 
 <hr>
-<div id="rh-status" class="reprohealth-status"></div>
+<div id="rh-status" style="background:rgba(0,0,0,0.2);padding:10px;border-radius:8px;margin:10px 0;"></div>
 
-<div class="reprohealth-buttons">
+<div style="display:flex;gap:5px;flex-wrap:wrap;">
 <button id="rh-advance-day" class="menu_button">+1 день</button>
-<button id="rh-reset-preg" class="menu_button">Сброс беременности</button>
+<button id="rh-reset-preg" class="menu_button">Сброс берем.</button>
 <button id="rh-reset-all" class="menu_button redWarningBG">Сброс всего</button>
 </div>
 
-<hr>
-<div id="rh-stats" style="text-align:center;opacity:0.5;font-size:11px;"></div>
+<div id="rh-stats" style="text-align:center;opacity:0.5;font-size:11px;margin-top:10px;"></div>
 
 </div>
 </div>
@@ -783,90 +699,39 @@ function createSettingsPanel() {
     const container = document.querySelector('#extensions_settings2');
     if (container) {
         container.insertAdjacentHTML('beforeend', html);
-        console.log('[ReproHealth] Settings panel added to #extensions_settings2');
+        console.log('[ReproHealth] Panel added!');
+        bindEvents();
+        loadUI();
     } else {
-        console.error('[ReproHealth] Container #extensions_settings2 not found!');
+        console.error('[ReproHealth] #extensions_settings2 not found');
     }
-    
-    bindEvents();
-    loadUI();
 }
 
 function bindEvents() {
-    const getS = () => getSettings();
+    const el = (id) => document.querySelector(id);
+    const s = () => getSettings();
     
-    document.querySelector('#rh-enabled')?.addEventListener('change', function() { 
-        getS().enabled = this.checked; 
-        saveSettingsDebounced(); 
-    });
+    el('#rh-enabled')?.addEventListener('change', function() { s().enabled = this.checked; saveSettings(); });
+    el('#rh-lang')?.addEventListener('change', function() { s().language = this.value; saveSettings(); updateStatusPanel(); });
+    el('#rh-condom')?.addEventListener('change', function() { s().contraception.condom = this.checked; saveSettings(); updateStatusPanel(); });
+    el('#rh-pill')?.addEventListener('change', function() { s().contraception.pill = this.checked; if(!this.checked) s().contraception.pillDaysTaken=0; saveSettings(); });
+    el('#rh-iud')?.addEventListener('change', function() { s().contraception.iud = this.checked; saveSettings(); });
+    el('#rh-implant')?.addEventListener('change', function() { s().contraception.implant = this.checked; saveSettings(); });
+    el('#rh-cycle-day')?.addEventListener('change', function() { s().fertility.cycleDay = parseInt(this.value)||1; updateCycle(); saveSettings(); updateStatusPanel(); });
+    el('#rh-base-fert')?.addEventListener('change', function() { s().fertility.baseFertility = parseInt(this.value)||25; saveSettings(); });
+    el('#rh-sti')?.addEventListener('change', function() { s().sti.enabled = this.checked; saveSettings(); });
     
-    document.querySelector('#rh-lang')?.addEventListener('change', function() { 
-        getS().language = this.value; 
-        saveSettingsDebounced(); 
-        updateStatusPanel(); 
-    });
-    
-    document.querySelector('#rh-condom')?.addEventListener('change', function() { 
-        getS().contraception.condom = this.checked; 
-        saveSettingsDebounced(); 
-        updateStatusPanel(); 
-    });
-    
-    document.querySelector('#rh-pill')?.addEventListener('change', function() { 
-        const s = getS();
-        s.contraception.pill = this.checked; 
-        if (!this.checked) s.contraception.pillDaysTaken = 0; 
-        saveSettingsDebounced(); 
-    });
-    
-    document.querySelector('#rh-iud')?.addEventListener('change', function() { 
-        getS().contraception.iud = this.checked; 
-        saveSettingsDebounced(); 
-    });
-    
-    document.querySelector('#rh-implant')?.addEventListener('change', function() { 
-        getS().contraception.implant = this.checked; 
-        saveSettingsDebounced(); 
-    });
-    
-    document.querySelector('#rh-cycle-day')?.addEventListener('change', function() { 
-        getS().fertility.cycleDay = parseInt(this.value) || 1; 
-        updateCycle();
-        saveSettingsDebounced(); 
-        updateStatusPanel(); 
-    });
-    
-    document.querySelector('#rh-base-fert')?.addEventListener('change', function() { 
-        getS().fertility.baseFertility = parseInt(this.value) || 25; 
-        saveSettingsDebounced(); 
-    });
-    
-    document.querySelector('#rh-sti')?.addEventListener('change', function() { 
-        getS().sti.enabled = this.checked; 
-        saveSettingsDebounced(); 
-    });
-    
-    document.querySelector('#rh-advance-day')?.addEventListener('click', () => { 
-        advanceCycle(1); 
-        updateStatusPanel(); 
-        loadUI(); 
-    });
-    
-    document.querySelector('#rh-reset-preg')?.addEventListener('click', () => {
-        if (confirm('Сбросить беременность?')) {
-            const s = getSettings();
-            s.pregnancy = JSON.parse(JSON.stringify(defaultSettings.pregnancy));
-            saveSettingsDebounced();
-            updateStatusPanel();
+    el('#rh-advance-day')?.addEventListener('click', () => { advanceCycle(1); updateStatusPanel(); loadUI(); });
+    el('#rh-reset-preg')?.addEventListener('click', () => {
+        if(confirm('Сбросить беременность?')) {
+            s().pregnancy = JSON.parse(JSON.stringify(defaultSettings.pregnancy));
+            saveSettings(); updateStatusPanel();
         }
     });
-    
-    document.querySelector('#rh-reset-all')?.addEventListener('click', () => {
-        if (confirm('Сбросить ВСЁ?')) {
+    el('#rh-reset-all')?.addEventListener('click', () => {
+        if(confirm('Сбросить ВСЁ?')) {
             extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
-            saveSettingsDebounced();
-            loadUI();
-            updateStatusPanel();
+            saveSettings(); loadUI(); updateStatusPanel();
         }
     });
 }
@@ -875,26 +740,18 @@ function loadUI() {
     const s = getSettings();
     if (!s) return;
     
-    const setChecked = (id, val) => {
-        const el = document.querySelector(id);
-        if (el) el.checked = val;
-    };
+    const set = (id, val) => { const e = document.querySelector(id); if(e) e.checked = val; };
+    const setV = (id, val) => { const e = document.querySelector(id); if(e) e.value = val; };
     
-    const setVal = (id, val) => {
-        const el = document.querySelector(id);
-        if (el) el.value = val;
-    };
-    
-    setChecked('#rh-enabled', s.enabled);
-    setVal('#rh-lang', s.language);
-    setChecked('#rh-condom', s.contraception.condom);
-    setChecked('#rh-pill', s.contraception.pill);
-    setChecked('#rh-iud', s.contraception.iud);
-    setChecked('#rh-implant', s.contraception.implant);
-    setVal('#rh-cycle-day', s.fertility.cycleDay);
-    setVal('#rh-base-fert', s.fertility.baseFertility);
-    setChecked('#rh-sti', s.sti.enabled);
-    
+    set('#rh-enabled', s.enabled);
+    setV('#rh-lang', s.language);
+    set('#rh-condom', s.contraception.condom);
+    set('#rh-pill', s.contraception.pill);
+    set('#rh-iud', s.contraception.iud);
+    set('#rh-implant', s.contraception.implant);
+    setV('#rh-cycle-day', s.fertility.cycleDay);
+    setV('#rh-base-fert', s.fertility.baseFertility);
+    set('#rh-sti', s.sti.enabled);
     updateStatusPanel();
 }
 
@@ -902,35 +759,27 @@ function updateStatusPanel() {
     const s = getSettings();
     if (!s) return;
     
-    const lang = s.language;
     const fert = getFertilityModifier();
-    
     let html = '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
     
     if (s.pregnancy.isPregnant) {
         const ps = getPregnancyStatus();
         const genders = ps?.babies?.map(b => b.gender === 'boy' ? '👦' : '👧').join('') || '';
-        html += `<span style="background:rgba(255,107,157,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 ${ps?.weeks || 0} нед. ${genders}</span>`;
+        html += `<span style="background:rgba(255,107,157,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 ${ps?.weeks||0} нед. ${genders}</span>`;
     } else {
-        html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 Не беременна</span>`;
+        html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 Нет</span>`;
     }
     
-    const cycleIcon = s.menstruation.isActive ? '🩸' : s.menstruation.isPMS ? '😤' : '📅';
-    const fertLevel = fert >= 1.5 ? '🔥' : fert >= 0.4 ? '•' : '❄️';
-    html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">${cycleIcon} День ${s.fertility.cycleDay} ${fertLevel}</span>`;
+    const icon = s.menstruation.isActive ? '🩸' : s.menstruation.isPMS ? '😤' : '📅';
+    const fertIcon = fert >= 1.5 ? '🔥' : fert >= 0.4 ? '•' : '❄️';
+    html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">${icon} День ${s.fertility.cycleDay} ${fertIcon}</span>`;
     
-    const contra = [];
-    if (s.contraception.condom) contra.push('🩹');
-    if (s.contraception.pill) contra.push('💊');
-    if (s.contraception.iud) contra.push('🔗');
-    if (s.contraception.implant) contra.push('💉');
-    if (contra.length) {
-        html += `<span style="background:rgba(123,237,159,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">${contra.join(' ')}</span>`;
-    }
-    
-    if (s.sti.userInfections.length > 0) {
-        html += `<span style="background:rgba(255,71,87,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">🔬 ${s.sti.userInfections.length}</span>`;
-    }
+    const c = [];
+    if (s.contraception.condom) c.push('🩹');
+    if (s.contraception.pill) c.push('💊');
+    if (s.contraception.iud) c.push('🔗');
+    if (s.contraception.implant) c.push('💉');
+    if (c.length) html += `<span style="background:rgba(123,237,159,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">${c.join(' ')}</span>`;
     
     html += '</div>';
     
@@ -938,23 +787,16 @@ function updateStatusPanel() {
     if (statusEl) statusEl.innerHTML = html;
     
     const statsEl = document.querySelector('#rh-stats');
-    if (statsEl) {
-        statsEl.innerHTML = `Попыток: ${s.stats.conceptionAttempts} | Зачатий: ${s.stats.successfulConceptions}`;
-    }
+    if (statsEl) statsEl.innerHTML = `Попыток: ${s.stats.conceptionAttempts} | Зачатий: ${s.stats.successfulConceptions}`;
 }
 
-window.ReproHealth = {
-    rollD100, trueRandom, attemptConception, getPregnancyStatus,
-    checkSTI, advanceCycle, getFertilityModifier, analyzeMessage,
-    getSettings, formatConceptionResult, formatPregnancyStatus
-};
+window.ReproHealth = { rollD100, trueRandom, attemptConception, getPregnancyStatus, checkSTI, advanceCycle, getFertilityModifier, analyzeMessage, getSettings };
 
 (function init() {
-    console.log('[ReproHealth] Initializing...');
+    console.log('[ReproHealth] Init...');
     
     if (!extension_settings[extensionName]) {
         extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
-        console.log('[ReproHealth] Created default settings');
     } else {
         const merged = JSON.parse(JSON.stringify(defaultSettings));
         Object.assign(merged, extension_settings[extensionName]);
@@ -965,38 +807,28 @@ window.ReproHealth = {
         merged.sti = { ...defaultSettings.sti, ...extension_settings[extensionName]?.sti };
         merged.stats = { ...defaultSettings.stats, ...extension_settings[extensionName]?.stats };
         extension_settings[extensionName] = merged;
-        console.log('[ReproHealth] Merged existing settings');
     }
+    saveSettings();
     
-    saveSettingsDebounced();
-    
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', () => {
-            setTimeout(createSettingsPanel, 1000);
-        });
-    } else {
-        setTimeout(createSettingsPanel, 1000);
-    }
-    
-    const setupEventListeners = () => {
-        try {
-            const { eventSource, event_types } = window.SillyTavern?.getContext?.() || {};
-            if (eventSource && event_types) {
-                eventSource.on(event_types.MESSAGE_RECEIVED, onChatMessage);
-                eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, onChatMessage);
-                console.log('[ReproHealth] Event listeners attached via context');
-            } else {
-                console.log('[ReproHealth] Trying jQuery events fallback...');
-                $(document).on('click', '.mes', function() {
-                    console.log('[ReproHealth] Message clicked');
-                });
-            }
-        } catch (e) {
-            console.error('[ReproHealth] Failed to setup events:', e);
+    const waitForUI = setInterval(() => {
+        if (document.querySelector('#extensions_settings2')) {
+            clearInterval(waitForUI);
+            createSettingsPanel();
         }
-    };
+    }, 500);
     
-    setTimeout(setupEventListeners, 2000);
+    setTimeout(() => {
+        try {
+            const context = window.SillyTavern?.getContext?.();
+            if (context?.eventSource && context?.eventTypes) {
+                context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, onChatMessage);
+                context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onChatMessage);
+                console.log('[ReproHealth] Events attached!');
+            }
+        } catch(e) {
+            console.log('[ReproHealth] Events fallback');
+        }
+    }, 3000);
     
-    console.log('[ReproHealth] Extension loaded!');
+    console.log('[ReproHealth] Loaded!');
 })();
