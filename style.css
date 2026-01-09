@@ -1,11 +1,326 @@
-#reprohealth-panel {
-    pointer-events: auto;
+/* ==================== SETTINGS PANEL ==================== */
+
+#reprohealth-settings .inline-drawer-header {
+    background: linear-gradient(135deg, #ff6b9d20, #c44b6c20);
+    border-radius: 8px;
+    padding: 10px;
 }
 
-.message.is_system {
-    background: linear-gradient(135deg, rgba(255, 107, 157, 0.08), rgba(196, 75, 108, 0.12)) !important;
-    border-left: 3px solid rgba(255, 107, 157, 0.4) !important;
-    margin: 8px 0 !important;
-    padding: 8px 12px !important;
-    border-radius: 6px !important;
+.reprohealth-setting {
+    margin: 8px 0;
+}
+
+.reprohealth-setting label {
+    font-size: 13px;
+}
+
+.reprohealth-setting input[type="number"],
+.reprohealth-setting select {
+    width: 100%;
+    padding: 6px 8px;
+    border-radius: 6px;
+    border: 1px solid var(--SmartThemeBorderColor);
+    background: var(--SmartThemeBlurTintColor);
+    color: var(--SmartThemeBodyColor);
+}
+
+.reprohealth-setting .checkbox_label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+}
+
+.reprohealth-hint {
+    font-size: 11px;
+    opacity: 0.6;
+    margin: 5px 0;
+}
+
+#reprohealth-settings h4 {
+    margin: 12px 0 8px 0;
+    font-size: 12px;
+    text-transform: uppercase;
+    opacity: 0.8;
+}
+
+#reprohealth-settings hr {
+    border: none;
+    border-top: 1px solid var(--SmartThemeBorderColor);
+    margin: 12px 0;
+    opacity: 0.3;
+}
+
+/* ==================== STATUS PANEL ==================== */
+
+.reprohealth-status {
+    background: rgba(0,0,0,0.2);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 10px 0;
+}
+
+.reprohealth-status-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.status-item {
+    background: rgba(255,255,255,0.1);
+    padding: 4px 10px;
+    border-radius: 15px;
+    font-size: 12px;
+}
+
+.status-item.pregnant {
+    background: linear-gradient(135deg, #ff6b9d40, #ff9ff340);
+}
+
+.status-item.protection {
+    background: rgba(123, 237, 159, 0.2);
+}
+
+.status-item.infected {
+    background: rgba(255, 71, 87, 0.2);
+}
+
+.reprohealth-stats {
+    text-align: center;
+    opacity: 0.5;
+}
+
+/* ==================== BUTTONS ==================== */
+
+.reprohealth-buttons {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin: 10px 0;
+}
+
+.reprohealth-buttons button {
+    flex: 1;
+    min-width: 80px;
+    padding: 6px 10px;
+    font-size: 11px;
+}
+
+/* ==================== CHAT OUTPUT BLOCKS ==================== */
+
+.reprohealth-auto-result {
+    margin-top: 15px;
+    padding-top: 12px;
+    border-top: 1px dashed rgba(255,255,255,0.15);
+}
+
+.reprohealth-block {
+    background: linear-gradient(135deg, #1a1a2e, #16213e);
+    border-radius: 12px;
+    padding: 15px;
+    margin: 10px 0;
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.5;
+    border-left: 4px solid #667eea;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.3);
+    animation: rh-fadein 0.4s ease;
+}
+
+@keyframes rh-fadein {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.reprohealth-block.compact {
+    padding: 10px 15px;
+    font-size: 12px;
+    border-left-width: 3px;
+}
+
+.reprohealth-block-header {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.reprohealth-block-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 3px 0;
+}
+
+.reprohealth-block-label {
+    color: rgba(255,255,255,0.5);
+}
+
+.reprohealth-block-value {
+    font-weight: 500;
+}
+
+/* ==================== CONCEPTION BLOCK ==================== */
+
+.reprohealth-block.conception {
+    border-left-color: #ff6b9d;
+    background: linear-gradient(135deg, #2d1f3d, #1a1a2e);
+}
+
+.reprohealth-block.conception.success {
+    border-left-color: #ff4757;
+    background: linear-gradient(135deg, #3d1f2d, #2a1020);
+}
+
+.reprohealth-block.conception.success .reprohealth-block-header {
+    color: #ff6b9d;
+}
+
+/* ==================== PREGNANCY BLOCK ==================== */
+
+.reprohealth-block.pregnancy {
+    border-left-color: #ff9ff3;
+    background: linear-gradient(135deg, #2d1f3d, #1f2d3d);
+}
+
+/* ==================== STI BLOCK ==================== */
+
+.reprohealth-block.sti {
+    border-left-color: #5f27cd;
+}
+
+.reprohealth-block.sti.danger {
+    border-left-color: #ff4757;
+    background: linear-gradient(135deg, #3d1f1f, #2a1a1a);
+}
+
+/* ==================== ROLL DISPLAY ==================== */
+
+.reprohealth-roll {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(0,0,0,0.3);
+    padding: 10px 15px;
+    border-radius: 8px;
+    margin: 10px 0;
+}
+
+.reprohealth-roll-dice {
+    font-size: 22px;
+}
+
+.reprohealth-roll-result {
+    font-size: 28px;
+    font-weight: 700;
+    font-family: 'Courier New', monospace;
+}
+
+.reprohealth-roll-target {
+    color: rgba(255,255,255,0.4);
+    font-size: 16px;
+}
+
+/* ==================== RESULT ==================== */
+
+.reprohealth-result {
+    text-align: center;
+    padding: 10px;
+    margin-top: 10px;
+    border-radius: 8px;
+    font-weight: 600;
+    font-size: 15px;
+}
+
+.reprohealth-result.success {
+    background: linear-gradient(135deg, rgba(255,107,157,0.3), rgba(255,71,87,0.3));
+    color: #ff6b9d;
+}
+
+.reprohealth-result.fail {
+    background: rgba(123, 237, 159, 0.15);
+    color: #7bed9f;
+}
+
+/* ==================== BABIES ==================== */
+
+.reprohealth-babies {
+    text-align: center;
+    padding: 10px;
+    margin-top: 10px;
+    background: rgba(255,159,243,0.1);
+    border-radius: 8px;
+}
+
+.reprohealth-babies div {
+    margin-top: 5px;
+    font-size: 18px;
+}
+
+/* ==================== BADGES ==================== */
+
+.reprohealth-badge {
+    display: inline-block;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 500;
+}
+
+.reprohealth-badge.success {
+    background: rgba(123, 237, 159, 0.2);
+    color: #7bed9f;
+}
+
+.reprohealth-badge.danger {
+    background: rgba(255, 71, 87, 0.2);
+    color: #ff6b6b;
+}
+
+.reprohealth-badge.warning {
+    background: rgba(255, 165, 2, 0.2);
+    color: #ffa502;
+}
+
+.reprohealth-badge.info {
+    background: rgba(116, 185, 255, 0.2);
+    color: #74b9ff;
+}
+
+/* ==================== PROGRESS BAR ==================== */
+
+.reprohealth-progress {
+    width: 100%;
+    height: 6px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 3px;
+    overflow: hidden;
+    margin: 8px 0;
+}
+
+.reprohealth-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #ff6b9d, #ff9ff3);
+    border-radius: 3px;
+    transition: width 0.5s ease;
+}
+
+/* ==================== LIGHT THEME ==================== */
+
+[data-theme="light"] .reprohealth-block {
+    background: linear-gradient(135deg, #f8f9fa, #e9ecef);
+    color: #212529;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+[data-theme="light"] .reprohealth-block-label {
+    color: rgba(0,0,0,0.5);
+}
+
+[data-theme="light"] .reprohealth-roll {
+    background: rgba(0,0,0,0.05);
+}
+
+[data-theme="light"] .reprohealth-status {
+    background: rgba(0,0,0,0.05);
 }
