@@ -574,45 +574,46 @@ function setupUI() {
 </style>
 `;
         
-        $('#extensions_settings2').append(settingsHtml);
+$('#extensions_settings2').append(settingsHtml);
+$('#repro-enabled').on('change', function() {
+    getSettings().isEnabled = this.checked;
+    saveSettingsDebounced();
+    updatePromptInjection();
+});
 
-        $('#repro-enabled').on('change', function() {
-            getSettings().isEnabled = this.checked;
-            saveSettingsDebounced();
-            updatePromptInjection();
-        });
-        
-        $('#repro-notify').on('change', function() {
-            getSettings().showNotifications = this.checked;
-            saveSettingsDebounced();
-        });
-        
-        $('#repro-contraception').on('change', function() {
-            const value = this.value;
-            console.log('[Reproductive] Contraception changed to:', value);
-            getSettings().contraception = value;
-            saveSettingsDebounced();
-            updatePromptInjection();
-            syncUI();
-        });
-        
-        $('#repro-setcycle').on('click', function() {
-            const input = document.getElementById('repro-cycleday');
-            const value = parseInt(input.value) || 14;
-            const clamped = Math.max(1, Math.min(28, value));
-            input.value = clamped;
-            getSettings().cycleDay = clamped;
-            saveSettingsDebounced();
-            syncUI();
-            showNotification(`День цикла: ${clamped}`, 'info');
-        });
-        
-        $('#repro-reset').on('click', function() {
-            if (confirm('Сбросить беременность?')) {
-                resetPregnancy();
-                showNotification('Беременность сброшена', 'info');
-            }
-        });
+$('#repro-notify').on('change', function() {
+    getSettings().showNotifications = this.checked;
+    saveSettingsDebounced();
+});
+
+$('#repro-contraception').on('change', function() {
+    const value = this.value;
+    console.log('[Reproductive] Contraception changed to:', value);
+    getSettings().contraception = value;
+    saveSettingsDebounced();
+    updatePromptInjection();
+    syncUI();
+});
+
+$('#repro-setcycle').on('click', function() {
+    const input = document.getElementById('repro-cycleday');
+    const value = parseInt(input.value) || 14;
+    const clamped = Math.max(1, Math.min(28, value));
+    input.value = clamped;
+    getSettings().cycleDay = clamped;
+    console.log('[Reproductive] Cycle day set to:', clamped); 
+    saveSettingsDebounced();
+    updatePromptInjection(); 
+    syncUI();
+    showNotification(`День цикла: ${clamped}`, 'info');
+});
+
+$('#repro-reset').on('click', function() {
+    if (confirm('Сбросить беременность?')) {
+        resetPregnancy();
+        showNotification('Беременность сброшена', 'info');
+    }
+});
         
         syncUI();
         
