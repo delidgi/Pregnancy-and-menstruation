@@ -416,7 +416,7 @@ function getPregnancyPrompt() {
                     s.fetusCount === 2 ? 'двойней!' :
                     'тройней! (о боже)';
     
-    let prompt = `\n\n[OOC: {{char}} беременна ${fetusText}\n`;
+    let prompt = `\n\n[OOC: {{user}} беременна ${fetusText}\n`;
     prompt += `Дата зачатия: ${s.conceptionDate}\n`;
     prompt += `⚠️ ДОБАВЬ В СТАТУС:\n`;
     prompt += `🤰 Беременна: ${fetusText}\n`;
