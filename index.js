@@ -11,28 +11,28 @@ const defaultSettings = {
     isPregnant: false,
     conceptionDate: null,
     fetusCount: 1,
-    fetusSex: [], 
+    fetusSex: [],
     cycleDay: 1,
     totalChecks: 0,
     totalConceptions: 0
 };
 
 const CHANCES = {
-    base: 20, 
+    base: 20,
     cycleModifier: {
-        '1-7': { low: 0.25 },   
-        '8-11': { medium: 0.5 },  
-        '12-16': { high: 1.65 }, 
-        '17-28': { luteal: 0.25 } 
+        '1-7': { low: 0.25 },
+        '8-11': { medium: 0.5 },
+        '12-16': { high: 1.65 },
+        '17-28': { luteal: 0.25 }
     },
     contraception: {
-        none: 0,    
-        condom: 85,  
-        pill: 91,    
-        iud: 99     
+        none: 0,
+        condom: 85,
+        pill: 91,
+        iud: 99
     },
-    twins: 3,     
-    triplets: 0.1  
+    twins: 3,
+    triplets: 0.1
 };
 
 const LANG = {
@@ -48,10 +48,6 @@ const LANG = {
             iud: '🩹 ВМС (99%)'
         },
         cycleDay: 'День цикла',
-        cycleDays: {
-            fertile: 'Фертильные дни (12-16)',
-            safe: 'Безопасные дни'
-        },
         status: 'Статус',
         notPregnant: 'Не беременна',
         pregnant: 'Беременна',
@@ -73,14 +69,10 @@ const LANG = {
             iud: '🩹 IUD (99%)'
         },
         cycleDay: 'Cycle day',
-        cycleDays: {
-            fertile: 'Fertile days (12-16)',
-            safe: 'Safe days'
-        },
         status: 'Status',
         notPregnant: 'Not pregnant',
         pregnant: 'Pregnant',
-        conceptionSuccess: '✨ CONCEPTION OCCURRED!',
+        conceptionSuccess: '✨ CONCEPTION!',
         conceptionFail: '❌ No conception',
         contraceptionFailed: '⚠️ Contraception failed!',
         stats: 'Checks: {checks} | Conceptions: {conceptions}',
@@ -103,7 +95,7 @@ function L(key) {
         }
         return result || key;
     } catch (e) {
-        console.error('[Reproductive] L() error for key:', key, e);
+        console.error('[Reproductive] L() error:', key, e);
         return key;
     }
 }
@@ -119,6 +111,124 @@ function getCycleModifier(day) {
     return CHANCES.cycleModifier['1-7'].low;
 }
 
+function initCustomNotifications() {
+    if ($('#custom-notification-container').length > 0) return;
+    
+    $('body').append('<div id="custom-notification-container"></div>');
+    
+    $('head').append(`<style id="repro-notifications-style">
+#custom-notification-container {
+    position: fixed;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999999;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    pointer-events: none;
+}
+
+.custom-notification {
+    min-width: 300px;
+    max-width: 500px;
+    padding: 16px 22px;
+    border-radius: 15px;
+    font-size: 14px;
+    font-weight: 600;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    animation: slideIn 0.3s ease-out;
+    pointer-events: all;
+    position: relative;
+    cursor: pointer;
+}
+
+.custom-notification.success {
+    background: rgba(0, 255, 136, 0.15);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+    color: #00ff88;
+    box-shadow: 0 8px 32px rgba(0, 255, 136, 0.2);
+}
+
+.custom-notification.warning {
+    background: rgba(255, 170, 0, 0.15);
+    border: 1px solid rgba(255, 170, 0, 0.3);
+    color: #ffaa00;
+    box-shadow: 0 8px 32px rgba(255, 170, 0, 0.2);
+}
+
+.custom-notification.info {
+    background: rgba(74, 158, 255, 0.15);
+    border: 1px solid rgba(74, 158, 255, 0.3);
+    color: #4a9eff;
+    box-shadow: 0 8px 32px rgba(74, 158, 255, 0.2);
+}
+
+.custom-notification .close-btn {
+    position: absolute;
+    top: 10px;
+    right: 12px;
+    background: none;
+    border: none;
+    color: inherit;
+    font-size: 18px;
+    cursor: pointer;
+    opacity: 0.7;
+    line-height: 1;
+}
+
+.custom-notification .close-btn:hover {
+    opacity: 1;
+}
+
+@keyframes slideIn {
+    from {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    to {
+        transform: translateY(-100%);
+        opacity: 0;
+    }
+}
+</style>`);
+}
+
+function showNotification(message, type = 'info') {
+    const s = getSettings();
+    if (!s.showNotifications) return;
+    
+    initCustomNotifications();
+    
+    const container = $('#custom-notification-container');
+    const notification = $(`
+        <div class="custom-notification ${type}">
+            <button class="close-btn">×</button>
+            <div>${message}</div>
+        </div>
+    `);
+    
+    container.append(notification);
+    
+    notification.find('.close-btn').on('click', function() {
+        notification.css('animation', 'slideOut 0.3s ease-in');
+        setTimeout(() => notification.remove(), 300);
+    });
+    
+    setTimeout(() => {
+        notification.css('animation', 'slideOut 0.3s ease-in');
+        setTimeout(() => notification.remove(), 300);
+    }, 4000);
+}
+
 function checkConception() {
     const s = getSettings();
     
@@ -129,8 +239,10 @@ function checkConception() {
     }
     
     s.totalChecks++;
+    
     const cycleModifier = getCycleModifier(s.cycleDay);
     let chance = Math.round(CHANCES.base * cycleModifier);
+    
     const contraceptionEff = CHANCES.contraception[s.contraception];
     let contraceptionFailed = false;
     
@@ -145,7 +257,7 @@ function checkConception() {
             chance = Math.round(chance * (1 - contraceptionEff / 100));
         }
     }
-
+    
     const conceptionRoll = roll(100);
     const success = conceptionRoll <= chance;
     
@@ -161,11 +273,10 @@ function checkConception() {
     };
     
     if (success) {
-
         s.isPregnant = true;
         s.conceptionDate = new Date().toISOString();
         s.totalConceptions++;
-
+        
         const multiplesRoll = roll(1000) / 10;
         if (multiplesRoll <= CHANCES.triplets) {
             s.fetusCount = 3;
@@ -174,7 +285,7 @@ function checkConception() {
         } else {
             s.fetusCount = 1;
         }
-
+        
         s.fetusSex = [];
         for (let i = 0; i < s.fetusCount; i++) {
             const sexRoll = roll(2);
@@ -182,11 +293,13 @@ function checkConception() {
         }
         
         if (s.showNotifications) {
-            showNotification(L('conceptionSuccess'), 'success');
+            let msg = `✅ PREGNANT! День ${s.cycleDay}, roll ${conceptionRoll}/${chance}`;
+            if (s.fetusCount > 1) msg += ` (${s.fetusCount === 2 ? 'двойня' : 'тройня'}!)`;
+            showNotification(msg, 'success');
         }
     } else {
         if (s.showNotifications) {
-            showNotification(L('conceptionFail'), 'info');
+            showNotification(`❌ NO. День ${s.cycleDay}, roll ${conceptionRoll}/${chance}`, 'info');
         }
     }
     
@@ -221,10 +334,16 @@ function onMessageReceived() {
     if (!lastMessage || lastMessage.is_user) return;
     
     const text = lastMessage.mes;
-
-    if (text.includes('[CONCEPTION_CHECK]') || text.includes('[CONCEPTIONCHECK]')) {
+    
+    console.log('[Reproductive] Checking message for tags...');
+    
+    const hasTag = text.includes('[CONCEPTION_CHECK]') || 
+                   text.includes('[CONCEPTIONCHECK]') ||
+                   (text.includes('<!--') && text.includes('CONCEPTION_CHECK'));
+    
+    if (hasTag) {
         console.log('[Reproductive] Tag detected! Rolling conception check...');
-
+        
         const cycleDayMatch = text.match(/\[CYCLE_DAY:(\d+)\]/);
         if (cycleDayMatch) {
             const aiCycleDay = parseInt(cycleDayMatch[1]);
@@ -242,18 +361,21 @@ function onMessageReceived() {
     }
 }
 
-
 function getBasePrompt() {
     const s = getSettings();
+    
+    console.log('[Reproductive] getBasePrompt() called');
+    console.log('[Reproductive] Current cycleDay:', s.cycleDay);
+    
     if (!s.isEnabled) return '';
-
+    
     const day = s.cycleDay;
     let phase = '';
     if (day <= 5) phase = '🔴 Менструация';
     else if (day <= 11) phase = 'Фолликулярная';
     else if (day <= 16) phase = '🔥 Овуляция';
     else phase = 'Лютеиновая';
-
+    
     const contraEmoji = 
         s.contraception === 'condom' ? '🛡️ Презерватив' :
         s.contraception === 'pill' ? '💊 Таблетки' :
@@ -262,24 +384,26 @@ function getBasePrompt() {
     let prompt = `[OOC: 🩺 РЕПРОДУКТИВНАЯ СИСТЕМА — ACTIVE\n`;
     prompt += `⚠️ В статус-блок {{char}} добавь:\n`;
     prompt += `🩸 Цикл: День ${day} | ${phase} | ${contraEmoji}\n\n`;
-
+    
     prompt += `📅 ЦИКЛ: 1-5 менструация, 6-11 фолликулярная, 12-16 овуляция (высокое либидо!), 17-28 лютеиновая. День 28 → день 1.\n`;
     
     if (s.contraception === 'condom') {
         prompt += `🛡️ ПРЕЗЕРВАТИВ: {{char}} достаёт/надевает при сексе. Может порваться (~15%).\n`;
     }
-
-   prompt += `\n🎲 ЗАЧАТИЕ: Если вагинальный секс + эякуляция внутрь`;
-if (s.contraception !== 'none') {
-    prompt += ` + контрацепция ПОДВЕЛА`;
-}
-prompt += `, добавь В КОНЦЕ как СКРЫТЫЙ HTML-комментарий:\n`;
-prompt += `<!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
+    
+    prompt += `\n🎲 ЗАЧАТИЕ: Если вагинальный секс + эякуляция внутрь`;
+    if (s.contraception !== 'none') {
+        prompt += ` + контрацепция ПОДВЕЛА`;
+    }
+    prompt += `, добавь В КОНЦЕ как скрытый HTML-комментарий:\n`;
+    prompt += `<!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
     prompt += `❌ НЕ добавляй при: оральном/анальном, прерванном акте, эякуляции снаружи`;
     if (s.contraception !== 'none') {
         prompt += `, успешной контрацепции`;
     }
     prompt += `.]`;
+    
+    console.log('[Reproductive] Generated prompt with day:', day);
     
     return prompt;
 }
@@ -300,22 +424,14 @@ function getPregnancyPrompt() {
     prompt += `\n`;
     prompt += `СИМПТОМЫ ПО НЕДЕЛЯМ:\n`;
     prompt += `1-4 нед: Задержка, тошнота, усталость.\n`;
-    prompt += `5-8 нед: Токсикоз, чувствительность груди, частое мочеиспускание.\n`;
-    prompt += `9-12 нед: Живот округляется, токсикоз уходит.\n`;
+    prompt += `5-8 нед: Токсикоз, чувствительность груди.\n`;
+    prompt += `9-12 нед: Живот округляется.\n`;
     prompt += `13-16 нед: Шевеления, либидо растёт.\n`;
-    prompt += `17-20 нед: Живот заметен! Движения плода.\n`;
+    prompt += `17-20 нед: Живот заметен!\n`;
     prompt += `21-27 нед: Тяжесть, отёки, боли в спине.\n`;
-    prompt += `28-36 нед: Усталость, одышка, частые походы в туалет.\n`;
-    prompt += `37-40 нед: Схватки Брэкстона, готовность к родам.\n`;
-    prompt += `41+ нед: Перенашивание! Риск осложнений.\n`;
-    prompt += `\n`;
-    prompt += `РОДЫ: d100 (1-100):\n`;
-    prompt += `1-5: Мертворождение\n`;
-    prompt += `6-15: Тяжёлые осложнения (разрывы, кровотечение, смерть матери)\n`;
-    prompt += `16-25: Осложнения (долгие роды, боль, слабость)\n`;
-    prompt += `26-100: Успешные роды (разная степень боли/усталости).\n`;
-    prompt += `\n`;
-    prompt += `Роли реалистичны, болезненны, долгие. Описывай подробно.]`;
+    prompt += `28-36 нед: Усталость, одышка.\n`;
+    prompt += `37-40 нед: Готовность к родам.\n`;
+    prompt += `41+ нед: Перенашивание!]`;
     
     return prompt;
 }
@@ -324,39 +440,40 @@ function updatePromptInjection() {
     try {
         const s = getSettings();
         
-        if (!s.isEnabled) {
-            setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
-            return;
-        }
+        setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
+        
+        if (!s.isEnabled) return;
         
         const fullPrompt = getBasePrompt() + getPregnancyPrompt();
         
         console.log('[Reproductive] Injecting prompt, length:', fullPrompt.length);
+        console.log('[Reproductive] Day in prompt:', s.cycleDay);
         
-        setExtensionPrompt(
-            extensionName,
-            fullPrompt,
-            extension_prompt_types.IN_CHAT,
-            0 
-        );
-        
-        console.log('[Reproductive] Prompt injected successfully');
+        setTimeout(() => {
+            setExtensionPrompt(
+                extensionName,
+                fullPrompt,
+                extension_prompt_types.IN_CHAT,
+                0
+            );
+            console.log('[Reproductive] Prompt injected');
+        }, 50);
         
     } catch (error) {
         console.error('[Reproductive] updatePromptInjection error:', error);
     }
 }
+
 function injectConceptionResult(result) {
     const s = getSettings();
     
-    // Фаза цикла
     const getPhase = (day) => {
         if (day <= 5) return '🔴 Менструация';
         if (day <= 11) return 'Фолликулярная';
         if (day <= 16) return '🔥 Овуляция';
         return 'Лютеиновая';
     };
-
+    
     let codeBlock = '```\n';
     codeBlock += `🤰 ПРОВЕРКА ЗАЧАТИЯ (День ${result.cycleDay} — ${getPhase(result.cycleDay)})\n`;
     codeBlock += `🎲 Roll: ${result.roll} | Порог: ${result.chance}\n`;
@@ -375,70 +492,34 @@ function injectConceptionResult(result) {
     }
     
     codeBlock += '```';
-
+    
     const oocPrompt = `[OOC: ОБЯЗАТЕЛЬНО выведи этот блок В НАЧАЛЕ своего ответа, БЕЗ изменений:\n${codeBlock}]`;
     
     setExtensionPrompt(
         extensionName + '-result',
         oocPrompt,
         extension_prompt_types.IN_CHAT,
-        0 
+        0
     );
-
-    if (s.showNotifications) {
-        if (result.success) {
-            let msg = `✅ PREGNANT! День ${result.cycleDay}, roll ${result.roll}/${result.chance}`;
-            if (s.fetusCount > 1) msg += ` (${s.fetusCount === 2 ? 'двойня' : 'тройня'}!)`;
-            showNotification(msg, 'success');
-        } else {
-            showNotification(`❌ NO. День ${result.cycleDay}, roll ${result.roll}/${result.chance}`, 'info');
-        }
-    }
     
     updatePromptInjection();
-
+    
     setTimeout(() => {
         setExtensionPrompt(extensionName + '-result', '', extension_prompt_types.IN_CHAT, 0);
     }, 2000);
 }
 
-function showNotification(message, type = 'info') {
-    if (typeof toastr !== 'undefined') {
-        const options = {
-            timeOut: 4000,
-            positionClass: 'toast-top-center',
-            closeButton: true
-        };
-        
-        switch(type) {
-            case 'success':
-                toastr.success(message, '', options);
-                break;
-            case 'warning':
-                toastr.warning(message, '', options);
-                break;
-            case 'error':
-                toastr.error(message, '', options);
-                break;
-            default:
-                toastr.info(message, '', options);
-        }
-    }
-}
-
 function syncUI() {
     const s = getSettings();
-
+    
     const enabled = document.getElementById('repro-enabled');
     const notify = document.getElementById('repro-notify');
     if (enabled) enabled.checked = s.isEnabled;
     if (notify) notify.checked = s.showNotifications;
     
-    // Контрацепция
     const contraSelect = document.getElementById('repro-contraception');
     if (contraSelect) contraSelect.value = s.contraception;
     
-    // День цикла
     const cycleInput = document.getElementById('repro-cycleday');
     const currentCycle = document.getElementById('repro-currentcycle');
     
@@ -464,7 +545,7 @@ function syncUI() {
         
         currentCycle.innerHTML = `${emoji} <strong>${day}</strong>/28 — ${phase}`;
     }
-
+    
     const status = document.getElementById('repro-status');
     if (status) {
         if (s.isPregnant) {
@@ -473,12 +554,12 @@ function syncUI() {
             status.innerHTML = `<span style="opacity: 0.7;">${L('notPregnant')}</span>`;
         }
     }
-
+    
     const resetBtn = document.getElementById('repro-reset');
     if (resetBtn) {
         resetBtn.style.display = s.isPregnant ? 'block' : 'none';
     }
-
+    
     const stats = document.getElementById('repro-stats');
     if (stats) {
         stats.textContent = `${L('stats').replace('{checks}', s.totalChecks).replace('{conceptions}', s.totalConceptions)}`;
@@ -497,7 +578,6 @@ function setupUI() {
             <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
         </div>
         <div class="inline-drawer-content">
-            <!-- Включение/Уведомления -->
             <div class="flex-container">
                 <label class="checkbox_label">
                     <input type="checkbox" id="repro-enabled">
@@ -510,7 +590,6 @@ function setupUI() {
             </div>
             <hr>
             
-            <!-- Контрацепция -->
             <div class="flex-container flexFlowColumn">
                 <label><strong>${L('contraceptionTitle')}</strong></label>
                 <select id="repro-contraception" class="text_pole">
@@ -522,7 +601,6 @@ function setupUI() {
             </div>
             <hr>
             
-            <!-- День цикла -->
             <div class="flex-container flexFlowColumn">
                 <label><strong>${L('cycleDay')}</strong></label>
                 <div id="repro-currentcycle" style="padding: 5px; background: var(--SmartThemeBlurTintColor); border-radius: 5px;">
@@ -530,9 +608,7 @@ function setupUI() {
                 </div>
             </div>
             
-            <!-- Ручная установка -->
             <div class="flex-container flexFlowColumn" style="margin-top: 10px;">
-                <label style="opacity: 0.7;"><small>${L('cycleDays.fertile')}</small></label>
                 <div class="flex-container" style="gap: 5px; align-items: center;">
                     <input type="number" id="repro-cycleday" min="1" max="28" value="${s.cycleDay}" class="text_pole" style="width: 60px;">
                     <button id="repro-setcycle" class="menu_button" style="padding: 5px 10px;">✓</button>
@@ -540,7 +616,6 @@ function setupUI() {
             </div>
             <hr>
             
-            <!-- Статус -->
             <div class="flex-container flexFlowColumn">
                 <label><strong>${L('status')}</strong></label>
                 <div id="repro-status">
@@ -553,7 +628,7 @@ function setupUI() {
             </button>
             
             <hr>
-            <small id="repro-stats" style="opacity: 0.5;">${s.totalChecks} / ${s.totalConceptions}</small>
+            <small id="repro-stats" style="opacity: 0.5;">0 / 0</small>
         </div>
     </div>
 </div>
@@ -574,46 +649,55 @@ function setupUI() {
 </style>
 `;
         
-$('#extensions_settings2').append(settingsHtml);
-$('#repro-enabled').on('change', function() {
-    getSettings().isEnabled = this.checked;
-    saveSettingsDebounced();
-    updatePromptInjection();
-});
-
-$('#repro-notify').on('change', function() {
-    getSettings().showNotifications = this.checked;
-    saveSettingsDebounced();
-});
-
-$('#repro-contraception').on('change', function() {
-    const value = this.value;
-    console.log('[Reproductive] Contraception changed to:', value);
-    getSettings().contraception = value;
-    saveSettingsDebounced();
-    updatePromptInjection();
-    syncUI();
-});
-
-$('#repro-setcycle').on('click', function() {
-    const input = document.getElementById('repro-cycleday');
-    const value = parseInt(input.value) || 14;
-    const clamped = Math.max(1, Math.min(28, value));
-    input.value = clamped;
-    getSettings().cycleDay = clamped;
-    console.log('[Reproductive] Cycle day set to:', clamped); 
-    saveSettingsDebounced();
-    updatePromptInjection(); 
-    syncUI();
-    showNotification(`День цикла: ${clamped}`, 'info');
-});
-
-$('#repro-reset').on('click', function() {
-    if (confirm('Сбросить беременность?')) {
-        resetPregnancy();
-        showNotification('Беременность сброшена', 'info');
-    }
-});
+        $('#extensions_settings2').append(settingsHtml);
+        
+        $('#repro-enabled').on('change', function() {
+            getSettings().isEnabled = this.checked;
+            saveSettingsDebounced();
+            updatePromptInjection();
+        });
+        
+        $('#repro-notify').on('change', function() {
+            getSettings().isEnabled = this.checked;
+            saveSettingsDebounced();
+        });
+        
+        $('#repro-contraception').on('change', function() {
+            const value = this.value;
+            console.log('[Reproductive] Contraception changed to:', value);
+            getSettings().contraception = value;
+            saveSettingsDebounced();
+            updatePromptInjection();
+            syncUI();
+        });
+        
+        $('#repro-setcycle').on('click', function() {
+            const input = document.getElementById('repro-cycleday');
+            const value = parseInt(input.value) || 14;
+            const clamped = Math.max(1, Math.min(28, value));
+            input.value = clamped;
+            
+            const s = getSettings();
+            s.cycleDay = clamped;
+            
+            console.log('[Reproductive] Cycle day set to:', clamped);
+            console.log('[Reproductive] Settings object:', s);
+            
+            saveSettingsDebounced();
+            
+            setTimeout(() => {
+                updatePromptInjection();
+                syncUI();
+                showNotification(`День цикла: ${clamped}`, 'info');
+            }, 100);
+        });
+        
+        $('#repro-reset').on('click', function() {
+            if (confirm('Сбросить беременность?')) {
+                resetPregnancy();
+                showNotification('Беременность сброшена', 'info');
+            }
+        });
         
         syncUI();
         
@@ -647,12 +731,15 @@ jQuery(async () => {
         loadSettings();
         console.log('[Reproductive] Settings OK');
         
+        initCustomNotifications();
+        console.log('[Reproductive] Notifications OK');
+        
         setupUI();
         console.log('[Reproductive] UI OK');
         
         updatePromptInjection();
         console.log('[Reproductive] Initial prompt injection OK');
-
+        
         eventSource.on(event_types.MESSAGE_SENT, () => {
             console.log('[Reproductive] MESSAGE_SENT - refreshing prompt');
             updatePromptInjection();
@@ -668,7 +755,7 @@ jQuery(async () => {
             });
         }
         
-        console.log('[Reproductive] System Ready! AI will trigger on [CONCEPTION_CHECK] tag.');
+        console.log('[Reproductive] System Ready! Glassmorphism notifications enabled.');
         
     } catch (error) {
         console.error('[Reproductive] System FATAL ERROR:', error);
