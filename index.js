@@ -137,14 +137,19 @@ function getSettings() {
 }
 
 function L(key) {
-    const s = getSettings();
-    const lang = s?.language || 'ru';
-    const keys = key.split('.');
-    let result = LANG[lang];
-    for (const k of keys) {
-        result = result?.[k];
+    try {
+        const s = getSettings();
+        const lang = s?.language || 'ru';
+        const keys = key.split('.');
+        let result = LANG[lang];
+        for (const k of keys) {
+            result = result?.[k];
+        }
+        return result || key;
+    } catch (e) {
+        console.error('[Reproductive] L() error for key:', key, e);
+        return key;
     }
-    return result || key;
 }
 
 function roll(max = 100) {
@@ -301,58 +306,55 @@ function getBasePrompt() {
     if (!s.isEnabled) return '';
     
     const contraceptionInstructions = {
-        'none': `КОНТРАЦЕПЦИЯ: ❌ НЕ ИСПОЛЬЗУЕТСЯ
-Персонаж НЕ предохраняется. При вагинальном сексе — риск беременности.`,
-        'condom': `КОНТРАЦЕПЦИЯ: 🎈 ПРЕЗЕРВАТИВ
-Персонаж ВСЕГДА использует презерватив при вагинальном сексе.
-ОБЯЗАТЕЛЬНО описывай: достаёт презерватив, надевает, и т.д.
-Презерватив может ПОРВАТЬСЯ или СОСКОЛЬЗНУТЬ (редко, ~15% шанс провала).
-Если презерватив порвался/соскользнул — опиши это явно в сцене.`,
-        'pill': `КОНТРАЦЕПЦИЯ: 💊 ПРОТИВОЗАЧАТОЧНЫЕ ТАБЛЕТКИ
-Персонаж принимает оральные контрацептивы ежедневно.
-Таблетки могут не сработать (~9% шанс провала): пропуск приёма, лекарства, болезнь.`,
-        'iud': `КОНТРАЦЕПЦИЯ: 🔷 ВНУТРИМАТОЧНАЯ СПИРАЛЬ (ВМС)
-У персонажа установлена спираль. Очень надёжно (~99%).
-Крайне редко может сместиться или выпасть.`
+        'none': `НЕТ ЗАЩИТЫ — секс без контрацепции`,
+        'condom': `ПРЕЗЕРВАТИВ — ВСЕГДА описывай как надевает/использует. Может порваться (~15% шанс)`,
+        'pill': `ТАБЛЕТКИ — принимает ОК. Могут не сработать (~9% при пропуске)`,
+        'iud': `СПИРАЛЬ — установлена ВМС. Очень надёжно (~99%)`
     };
     
-    let prompt = `[OOC: 🩺 REPRODUCTIVE SYSTEM — ACTIVE
+    let prompt = `[OOC: 🩺 РЕПРОДУКТИВНАЯ СИСТЕМА — ACTIVE
 
-${contraceptionInstructions[s.contraception]}
+══════════════════════════════════════════
+⚠️ ОБЯЗАТЕЛЬНО ДОБАВЬ В СТАТУС-БЛОК Татьяна Вейгель:
+🩸 Цикл: День [1-28] | [Фаза] | 🛡️ ${s.contraception === 'none' ? 'Без защиты' : s.contraception === 'condom' ? 'Презерватив' : s.contraception === 'pill' ? 'Таблетки' : 'Спираль'}
 
-═══════════════════════════════════════
-📅 МЕНСТРУАЛЬНЫЙ ЦИКЛ — ОТСЛЕЖИВАЙ АВТОМАТИЧЕСКИ
+ПРИМЕР ДОБАВЛЕНИЯ В ТВОЙ КОД-БЛОК:
+👤 Татьяна Вейгель:
+🍽 55% | 🚿 75% | 😴 55% | 🔥 40%
+🩸 Цикл: День 14 | 🔥Овуляция | 🛡️ Презерватив
+👔 Clothes: [outfit]
+══════════════════════════════════════════
 
-В НАЧАЛЕ КАЖДОГО ответа (или когда прошло время) показывай:
-\`\`\`
-🩸 ЦИКЛ: День [1-28] | Фаза: [название]
-   Фертильность: [низкая/средняя/ВЫСОКАЯ]
-\`\`\`
+📅 МЕНСТРУАЛЬНЫЙ ЦИКЛ (веди автоматически):
+• День 1-5: 🔴 Менструация (кровь, спазмы, усталость)
+• День 6-11: Фолликулярная (энергия растёт)
+• День 12-16: 🔥 ОВУЛЯЦИЯ (высокое либидо, фертильность!)
+• День 17-28: Лютеиновая (ПМС к концу)
+После дня 28 → начинай с дня 1.
 
-ФАЗЫ ЦИКЛА (28 дней):
-• День 1-5: 🔴 Менструация (кровотечение, спазмы, усталость)
-• День 6-11: Фолликулярная (энергия растёт, настроение улучшается)  
-• День 12-16: 🔥 ОВУЛЯЦИЯ (пик либидо, ВЫСОКАЯ фертильность!)
-• День 17-28: Лютеиновая (ПМС к концу: раздражительность, отёки, тяга к еде)
-
-После 28 дня → цикл начинается заново с дня 1.
-Учитывай симптомы фазы в поведении/ощущениях персонажа.
-
-═══════════════════════════════════════
+🛡️ КОНТРАЦЕПЦИЯ: ${contraceptionInstructions[s.contraception]}
+${s.contraception === 'condom' ? `
+⚠️ ПРЕЗЕРВАТИВ ОБЯЗАТЕЛЕН! При сексе ВСЕГДА:
+- Описывай как достаёт упаковку
+- Описывай как надевает на член
+- Может порваться/соскользнуть (опиши если случилось)
+` : ''}
+══════════════════════════════════════════
 🎲 ПРОВЕРКА ЗАЧАТИЯ
 
-Когда происходит ВАГИНАЛЬНЫЙ СЕКС с ЭЯКУЛЯЦИЕЙ ВНУТРЬ:
-${s.contraception === 'none' ? 
-'• Без защиты → ВСЕГДА добавляй тег проверки' :
-'• Сначала опиши использование контрацепции\n• Если защита ПОДВЕЛА (порвалась/забыла/сместилась) → добавляй тег'}
+КОГДА: Вагинальный секс + эякуляция внутрь ${s.contraception !== 'none' ? '+ контрацепция ПОДВЕЛА' : ''}
 
-ФОРМАТ (в конце ответа):
+ФОРМАТ — добавь В КОНЦЕ ответа (после </details>):
 [CYCLE_DAY:число][CONCEPTION_CHECK]
 
 Пример: [CYCLE_DAY:14][CONCEPTION_CHECK]
 
-НЕ добавляй тег при: оральном, анальном, прерванном акте, эякуляции снаружи, успешной контрацепции.
-]`;
+❌ НЕ ДОБАВЛЯЙ тег при:
+- Оральном/анальном сексе
+- Прерванном акте
+- Эякуляции снаружи
+- Успешной контрацепции (презерватив НЕ порвался)
+══════════════════════════════════════════]`;
     
     return prompt;
 }
@@ -362,67 +364,74 @@ function getPregnancyPrompt() {
     
     if (!s.isPregnant) return '';
     
-    let fetusText = s.fetusCount > 1 ? `\nМногоплодная: ${s.fetusCount === 2 ? 'ДВОЙНЯ' : 'ТРОЙНЯ'}` : '';
+    let fetusText = s.fetusCount > 1 ? ` | ${s.fetusCount === 2 ? 'ДВОЙНЯ!' : 'ТРОЙНЯ!'}` : '';
     
     let prompt = `
 
-═══════════════════════════════════════
-🤰 БЕРЕМЕННОСТЬ — АКТИВНА
-═══════════════════════════════════════
-Дата зачатия (реальная): ${s.conceptionDate}${fetusText}
+══════════════════════════════════════════
+🤰 БЕРЕМЕННОСТЬ — АКТИВНА${fetusText}
+══════════════════════════════════════════
+Дата зачатия: ${s.conceptionDate}
 
-ОТСЛЕЖИВАЙ АВТОМАТИЧЕСКИ! В начале КАЖДОГО ответа показывай:
-\`\`\`
-🤰 БЕРЕМЕННОСТЬ: Неделя [X] | Триместр [1/2/3]
-   Стадия: [название]
-   Симптомы: [текущие]
-   Видимость: [не видно / едва заметно / заметно / очевидно]
-\`\`\`
+⚠️ ЗАМЕНИТЬ строку цикла в статусе Татьяна Вейгель на:
+🤰 Беременность: Неделя [X] | Триместр [1/2/3] | [Симптомы]
 
-РАЗВИТИЕ ПО НЕДЕЛЯМ:
-• 1-4: Имплантация. Симптомов нет. Персонаж НЕ ЗНАЕТ.
-• 5-8: Эмбрион. Тошнота, усталость, задержка. Можно заподозрить.
-• 9-12: Ранний плод. Токсикоз. Живот не виден.
-• 13-16: Токсикоз уходит. Живот начинает расти. Первые шевеления (повторнород.)
-• 17-20: Шевеления ощутимы. Живот заметен. Пол виден на УЗИ.
-• 21-27: Активные шевеления. Живот очевиден. Отёки, боли в спине.
-• 28-36: Большой живот. Одышка. Тренировочные схватки.
-• 37-40: Доношенный. Опущение живота. Предвестники родов.
-• 41+: Переношенный. Нужна стимуляция.
+ПРИМЕР:
+👤 Татьяна Вейгель:
+🍽 55% | 🚿 75% | 😴 55% | 🔥 20%
+🤰 Неделя 8 | Триместр 1 | Токсикоз, усталость
+👔 Clothes: [outfit]
 
-ПРОВЕРКИ ОСЛОЖНЕНИЙ — в начале каждого триместра (нед. 1, 13, 28):
+РАЗВИТИЕ (веди автоматически от даты зачатия):
+• Нед 1-4: Имплантация. Персонаж НЕ ЗНАЕТ. Симптомов нет.
+• Нед 5-8: Тошнота, усталость, задержка. Можно заподозрить.
+• Нед 9-12: Токсикоз пик. Живот не виден.
+• Нед 13-16: Токсикоз уходит. Живот начинает расти.
+• Нед 17-20: Шевеления! Живот заметен. Пол виден на УЗИ.
+• Нед 21-27: Активные шевеления. Большой живот.
+• Нед 28-36: Огромный живот. Одышка. Тренировочные схватки.
+• Нед 37-40: Доношенный срок. Роды могут начаться.
+• Нед 41+: Переношенный! Нужна стимуляция.
+
+ПРОВЕРКА ОСЛОЖНЕНИЙ — бросай d100 в начале триместра:
 \`\`\`
-⚠️ ПРОВЕРКА ОСЛОЖНЕНИЙ | Триместр [#]
-Бросок: [1-100]
-├─ 1-5: 🔴 КРИТИЧЕСКОЕ (выкидыш, внематочная, отслойка...)
-├─ 6-15: 🟡 СЕРЬЁЗНОЕ (кровотечение, преэклампсия, диабет...)
-├─ 16-25: 🟠 УМЕРЕННОЕ (сильный токсикоз, анемия, тонус...)
-└─ 26-100: 🟢 НОРМА
+⚠️ ОСЛОЖНЕНИЯ | Триместр [#] | Бросок: [1-100]
+1-5: 🔴 КРИТИЧЕСКОЕ | 6-15: 🟡 СЕРЬЁЗНОЕ | 16-25: 🟠 УМЕРЕННОЕ | 26-100: 🟢 НОРМА
 \`\`\`
 
-Персонаж НЕ ЗНАЕТ о беременности пока нет явных симптомов или теста!
-При осложнениях — описывай симптомы реалистично и драматично.
-]`;
+Осложнения: выкидыш, внематочная, преэклампсия, диабет, отслойка, предлежание...
+
+ПОМНИ: Персонаж НЕ ЗНАЕТ о беременности до симптомов/теста!
+══════════════════════════════════════════]`;
     
     return prompt;
 }
 
 function updatePromptInjection() {
-    const s = getSettings();
-    
-    if (!s.isEnabled) {
-        setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
-        return;
+    try {
+        const s = getSettings();
+        
+        if (!s.isEnabled) {
+            setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
+            return;
+        }
+        
+        const fullPrompt = getBasePrompt() + getPregnancyPrompt();
+        
+        console.log('[Reproductive] Injecting prompt, length:', fullPrompt.length);
+        
+        // Инжектим с высоким приоритетом (ближе к последнему сообщению)
+        setExtensionPrompt(
+            extensionName,
+            fullPrompt,
+            extension_prompt_types.IN_CHAT,
+            9999  // Высокий приоритет = ближе к концу = AI лучше помнит
+        );
+        
+        console.log('[Reproductive] Prompt injected successfully');
+    } catch (error) {
+        console.error('[Reproductive] updatePromptInjection error:', error);
     }
-    
-    const fullPrompt = getBasePrompt() + getPregnancyPrompt();
-    
-    setExtensionPrompt(
-        extensionName,
-        fullPrompt,
-        extension_prompt_types.IN_CHAT,
-        0
-    );
 }
 
 function injectConceptionResult(result) {
@@ -549,9 +558,10 @@ function syncUI() {
 }
 
 function setupUI() {
-    const s = getSettings();
-    
-    const settingsHtml = `
+    try {
+        const s = getSettings();
+        
+        const settingsHtml = `
         <div class="repro_system_settings">
             <div class="inline-drawer">
                 <div class="inline-drawer-toggle inline-drawer-header">
@@ -685,33 +695,51 @@ function setupUI() {
     });
     
     syncUI();
+    } catch (error) {
+        console.error('[Reproductive] setupUI error:', error);
+    }
 }
 
 // ==================== ИНИЦИАЛИЗАЦИЯ ====================
 
 function loadSettings() {
-    if (!extension_settings[extensionName]) {
-        extension_settings[extensionName] = structuredClone(defaultSettings);
-    }
-    
-    for (const key in defaultSettings) {
-        if (extension_settings[extensionName][key] === undefined) {
-            extension_settings[extensionName][key] = defaultSettings[key];
+    try {
+        if (!extension_settings[extensionName]) {
+            // structuredClone может не работать в старых браузерах
+            extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
         }
+        
+        for (const key in defaultSettings) {
+            if (extension_settings[extensionName][key] === undefined) {
+                extension_settings[extensionName][key] = defaultSettings[key];
+            }
+        }
+        
+        console.log('[Reproductive] Settings loaded:', extension_settings[extensionName]);
+    } catch (error) {
+        console.error('[Reproductive] Error loading settings:', error);
+        extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
     }
-    
-    console.log('[Reproductive] Settings loaded:', extension_settings[extensionName]);
 }
 
 jQuery(async () => {
-    console.log('[Reproductive System] Loading...');
-    
-    loadSettings();
-    setupUI();
-    updatePromptInjection();
-    
-    // Слушаем сообщения от AI
-    eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
-    
-    console.log('[Reproductive System] Ready! AI will trigger [CONCEPTION_CHECK] tag.');
+    try {
+        console.log('[Reproductive System] Loading...');
+        
+        loadSettings();
+        console.log('[Reproductive] Settings OK');
+        
+        setupUI();
+        console.log('[Reproductive] UI OK');
+        
+        updatePromptInjection();
+        console.log('[Reproductive] Prompt injection OK');
+        
+        // Слушаем сообщения от AI
+        eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
+        
+        console.log('[Reproductive System] ✓ Ready! AI will trigger [CONCEPTION_CHECK] tag.');
+    } catch (error) {
+        console.error('[Reproductive System] ✗ FATAL ERROR:', error);
+    }
 });
