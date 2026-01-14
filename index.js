@@ -1,941 +1,1124 @@
-import { extension_settings } from "../../../extensions.js";
+import { 
+    eventSource, 
+    event_types,
+    saveSettingsDebounced,
+    setExtensionPrompt,
+    extension_prompt_types
+} from '../../../../script.js';
+import { 
+    extension_settings
+} from '../../../extensions.js';
 
-const extensionName = "reproductive-health";
+const extensionName = "reproductive_system";
 
-console.log('[ReproHealth] Starting...');
-
-function saveSettings() {
-    try {
-        const context = window.SillyTavern?.getContext?.();
-        if (context?.saveSettingsDebounced) {
-            context.saveSettingsDebounced();
-        }
-    } catch (e) {
-        console.log('[ReproHealth] Save settings fallback');
-    }
-}
-
+// ==================== НАСТРОЙКИ ПО УМОЛЧАНИЮ ====================
 const defaultSettings = {
-    enabled: true,
-    language: 'ru',
+    isEnabled: true,
+    showNotifications: true,
+    injectToChat: true,
+    language: 'ru', // ru / en
     
+    // Цикл
+    cycleDay: 1,
+    cycleLength: 28,
+    ovulationDay: 14,
+    
+    // Контрацепция
+    contraception: 'none', // none, condom, pill, iud
+    
+    // Беременность
+    isPregnant: false,
+    conceptionDay: 0,
+    pregnancyDay: 0,
+    fetusCount: 1,
+    fetusSex: [], // ['male'], ['female'], ['male', 'female']
+    complications: [],
+    
+    // Счётчик дней
+    currentDay: 1,
+    
+    // История событий
+    eventLog: []
+};
+
+// ==================== ШАНСЫ И МОДИФИКАТОРЫ ====================
+const CHANCES = {
+    // Базовые шансы зачатия по фазе цикла (%)
+    conception: {
+        ovulation: 33,      // День овуляции (пик)
+        fertile: 20,        // Фертильное окно (±3 дня от овуляции)
+        luteal: 5,          // Лютеиновая фаза
+        menstrual: 2,       // Менструация
+        safe: 3             // "Безопасные" дни
+    },
+    
+    // Эффективность контрацепции (снижение шанса в %)
     contraception: {
-        condom: false,
-        pill: false,
-        pillDaysTaken: 0,
-        iud: false,
-        implant: false
+        none: 0,
+        condom: 85,         // 85% эффективность (15% шанс провала)
+        pill: 91,           // 91% эффективность
+        iud: 99             // 99% эффективность
     },
     
-    fertility: {
-        baseFertility: 25,
-        cycleDay: 1,
-        cycleLength: 28,
-        ovulationWindow: [12, 16]
+    // Шансы осложнений по триместрам (%)
+    complications: {
+        trimester1: {
+            miscarriage: 15,        // Выкидыш
+            ectopic: 2,             // Внематочная
+            molar: 0.5,             // Пузырный занос
+            bleeding: 10,           // Кровотечение
+            hyperemesis: 3          // Сильный токсикоз
+        },
+        trimester2: {
+            miscarriage: 3,
+            preterm_risk: 5,        // Риск преждевременных
+            gestational_diabetes: 6,
+            preeclampsia_early: 2,
+            cervical_insufficiency: 1,
+            placenta_previa: 0.5
+        },
+        trimester3: {
+            preterm_labor: 10,      // Преждевременные роды
+            preeclampsia: 5,        // Преэклампсия
+            placental_abruption: 1, // Отслойка плаценты
+            stillbirth: 0.5,        // Мертворождение
+            cord_issues: 2,         // Проблемы с пуповиной
+            breech: 4               // Тазовое предлежание
+        },
+        labor: {
+            prolonged: 8,           // Затяжные роды
+            emergency_csection: 5,  // Экстренное кесарево
+            hemorrhage: 3,          // Кровотечение
+            cord_prolapse: 0.5,     // Выпадение пуповины
+            shoulder_dystocia: 1,   // Дистоция плечиков
+            uterine_rupture: 0.1    // Разрыв матки
+        }
     },
     
-    menstruation: {
-        isActive: false,
-        duration: 5,
-        intensity: 'normal',
-        isPMS: false,
-        symptoms: []
-    },
-    
-    pregnancy: {
-        isPregnant: false,
-        conceptionDate: null,
-        currentWeek: 0,
-        trimester: 1,
-        babies: [],
-        lastStatusDay: null
-    },
-    
-    sti: {
-        enabled: true,
-        userInfections: [],
-        partnerProfiles: {}
-    },
-    
-    stats: {
-        conceptionAttempts: 0,
-        successfulConceptions: 0
+    // Шанс многоплодной беременности
+    multiples: {
+        twins: 3,
+        triplets: 0.1
     }
 };
 
-const i18n = {
+// ==================== ЛОКАЛИЗАЦИЯ ====================
+const LANG = {
     ru: {
-        conception_roll: "🎲 БРОСОК НА ЗАЧАТИЕ",
-        conception_success: "✅ ЗАЧАТИЕ!",
-        conception_fail: "❌ Не в этот раз",
-        pregnant: "беременна",
-        not_pregnant: "не беременна",
-        week: "неделя",
-        trimester: "триместр",
-        baby_boy: "👦 Мальчик",
-        baby_girl: "👧 Девочка",
-        twins: "Близнецы",
-        triplets: "Тройня",
-        single: "Один плод",
-        no_protection: "⚠️ Без защиты",
-        fertility_high: "ВЫСОКАЯ",
-        fertility_low: "низкая",
-        fertility_normal: "норма",
-        sti_check: "🔬 Проверка ИППП",
-        sti_infected: "⚠️ ЗАРАЖЕНИЕ",
-        sti_safe: "✅ Чисто",
-        visible_changes: "Симптомы",
-        cycle_day: "День цикла"
+        title: "🩺 Репродуктивная система",
+        enabled: "Включить систему",
+        notifications: "Показывать уведомления",
+        injectChat: "Инжект в чат",
+        
+        // Цикл
+        cycleTitle: "🩸 Менструальный цикл",
+        cycleDay: "День цикла",
+        cycleLength: "Длина цикла",
+        ovulationDay: "День овуляции",
+        phase: "Фаза",
+        
+        phases: {
+            menstrual: "Менструация",
+            follicular: "Фолликулярная",
+            ovulation: "Овуляция",
+            luteal: "Лютеиновая"
+        },
+        
+        // Контрацепция
+        contraceptionTitle: "🛡️ Контрацепция",
+        contraceptionTypes: {
+            none: "Без защиты",
+            condom: "Презерватив",
+            pill: "Таблетки (КОК)",
+            iud: "Спираль (ВМС)"
+        },
+        
+        // Кнопки
+        checkConception: "🎲 Проверить зачатие",
+        advanceDay: "⏭️ +1 день",
+        advanceWeek: "⏭️ +7 дней",
+        checkComplications: "⚠️ Проверить осложнения",
+        labor: "👶 Начать роды",
+        reset: "🔄 Сбросить всё",
+        
+        // Беременность
+        pregnancyTitle: "🤰 Беременность",
+        notPregnant: "Не беременна",
+        pregnant: "Беременна",
+        week: "Неделя",
+        trimester: "Триместр",
+        fetusCount: "Плодов",
+        fetusSex: "Пол",
+        sexMale: "♂ Мальчик",
+        sexFemale: "♀ Девочка",
+        sexUnknown: "Неизвестен (до 12 нед)",
+        
+        // Стадии
+        stages: {
+            implantation: "Имплантация",
+            embryo: "Эмбрион",
+            fetus_early: "Ранний плод",
+            fetus_mid: "Плод (шевеления)",
+            fetus_late: "Поздний плод",
+            term: "Доношенный",
+            overdue: "Переношенный"
+        },
+        
+        // Уведомления
+        conceptionSuccess: "✅ ЗАЧАТИЕ ПРОИЗОШЛО!",
+        conceptionFail: "❌ Зачатие не произошло",
+        contraceptionFail: "⚠️ Контрацепция подвела!",
+        complicationDetected: "🚨 ОСЛОЖНЕНИЕ:",
+        laborStarted: "👶 РОДЫ НАЧАЛИСЬ!",
+        
+        // Осложнения
+        complications: {
+            miscarriage: "Выкидыш",
+            ectopic: "Внематочная беременность",
+            molar: "Пузырный занос",
+            bleeding: "Кровотечение",
+            hyperemesis: "Тяжёлый токсикоз",
+            preterm_risk: "Угроза преждевременных родов",
+            gestational_diabetes: "Гестационный диабет",
+            preeclampsia_early: "Ранняя преэклампсия",
+            preeclampsia: "Преэклампсия",
+            cervical_insufficiency: "Истмико-цервикальная недостаточность",
+            placenta_previa: "Предлежание плаценты",
+            preterm_labor: "Преждевременные роды",
+            placental_abruption: "Отслойка плаценты",
+            stillbirth: "Мертворождение",
+            cord_issues: "Обвитие пуповиной",
+            breech: "Тазовое предлежание",
+            prolonged: "Затяжные роды",
+            emergency_csection: "Экстренное кесарево сечение",
+            hemorrhage: "Послеродовое кровотечение",
+            cord_prolapse: "Выпадение пуповины",
+            shoulder_dystocia: "Дистоция плечиков",
+            uterine_rupture: "Разрыв матки"
+        },
+        
+        // Симптомы по неделям
+        symptoms: {
+            week4: "Задержка менструации",
+            week6: "Тошнота, усталость, чувствительность груди",
+            week8: "Токсикоз, частое мочеиспускание",
+            week12: "Токсикоз отступает, живот начинает расти",
+            week16: "Первые шевеления (повторнородящие)",
+            week20: "Отчётливые шевеления, виден пол на УЗИ",
+            week24: "Живот заметен, боли в спине",
+            week28: "Отёки, одышка, частые шевеления",
+            week32: "Тренировочные схватки, усталость",
+            week36: "Опущение живота, давление на таз",
+            week40: "Срок родов, предвестники"
+        }
     },
     en: {
-        conception_roll: "🎲 CONCEPTION ROLL",
-        conception_success: "✅ CONCEIVED!",
-        conception_fail: "❌ Not this time",
-        pregnant: "pregnant",
-        not_pregnant: "not pregnant",
-        week: "week",
-        trimester: "trimester",
-        baby_boy: "👦 Boy",
-        baby_girl: "👧 Girl",
-        twins: "Twins",
-        triplets: "Triplets",
-        single: "Single",
-        no_protection: "⚠️ No protection",
-        fertility_high: "HIGH",
-        fertility_low: "low",
-        fertility_normal: "normal",
-        sti_check: "🔬 STI Check",
-        sti_infected: "⚠️ INFECTED",
-        sti_safe: "✅ Clear",
-        visible_changes: "Symptoms",
-        cycle_day: "Cycle day"
+        title: "🩺 Reproductive System",
+        enabled: "Enable system",
+        notifications: "Show notifications",
+        injectChat: "Inject to chat",
+        
+        cycleTitle: "🩸 Menstrual Cycle",
+        cycleDay: "Cycle day",
+        cycleLength: "Cycle length",
+        ovulationDay: "Ovulation day",
+        phase: "Phase",
+        
+        phases: {
+            menstrual: "Menstrual",
+            follicular: "Follicular",
+            ovulation: "Ovulation",
+            luteal: "Luteal"
+        },
+        
+        contraceptionTitle: "🛡️ Contraception",
+        contraceptionTypes: {
+            none: "None",
+            condom: "Condom",
+            pill: "Birth control pill",
+            iud: "IUD"
+        },
+        
+        checkConception: "🎲 Check conception",
+        advanceDay: "⏭️ +1 day",
+        advanceWeek: "⏭️ +7 days",
+        checkComplications: "⚠️ Check complications",
+        labor: "👶 Start labor",
+        reset: "🔄 Reset all",
+        
+        pregnancyTitle: "🤰 Pregnancy",
+        notPregnant: "Not pregnant",
+        pregnant: "Pregnant",
+        week: "Week",
+        trimester: "Trimester",
+        fetusCount: "Fetuses",
+        fetusSex: "Sex",
+        sexMale: "♂ Boy",
+        sexFemale: "♀ Girl",
+        sexUnknown: "Unknown (before 12w)",
+        
+        stages: {
+            implantation: "Implantation",
+            embryo: "Embryo",
+            fetus_early: "Early fetus",
+            fetus_mid: "Fetus (movement)",
+            fetus_late: "Late fetus",
+            term: "Full term",
+            overdue: "Overdue"
+        },
+        
+        conceptionSuccess: "✅ CONCEPTION OCCURRED!",
+        conceptionFail: "❌ No conception",
+        contraceptionFail: "⚠️ Contraception failed!",
+        complicationDetected: "🚨 COMPLICATION:",
+        laborStarted: "👶 LABOR STARTED!",
+        
+        complications: {
+            miscarriage: "Miscarriage",
+            ectopic: "Ectopic pregnancy",
+            molar: "Molar pregnancy",
+            bleeding: "Bleeding",
+            hyperemesis: "Severe morning sickness",
+            preterm_risk: "Preterm labor risk",
+            gestational_diabetes: "Gestational diabetes",
+            preeclampsia_early: "Early preeclampsia",
+            preeclampsia: "Preeclampsia",
+            cervical_insufficiency: "Cervical insufficiency",
+            placenta_previa: "Placenta previa",
+            preterm_labor: "Preterm labor",
+            placental_abruption: "Placental abruption",
+            stillbirth: "Stillbirth",
+            cord_issues: "Cord entanglement",
+            breech: "Breech presentation",
+            prolonged: "Prolonged labor",
+            emergency_csection: "Emergency C-section",
+            hemorrhage: "Postpartum hemorrhage",
+            cord_prolapse: "Cord prolapse",
+            shoulder_dystocia: "Shoulder dystocia",
+            uterine_rupture: "Uterine rupture"
+        },
+        
+        symptoms: {
+            week4: "Missed period",
+            week6: "Nausea, fatigue, breast tenderness",
+            week8: "Morning sickness, frequent urination",
+            week12: "Nausea subsiding, belly starting to show",
+            week16: "First movements (experienced mothers)",
+            week20: "Clear movements, sex visible on ultrasound",
+            week24: "Visible belly, back pain",
+            week28: "Swelling, shortness of breath, frequent movements",
+            week32: "Braxton Hicks, fatigue",
+            week36: "Baby dropping, pelvic pressure",
+            week40: "Due date, labor signs"
+        }
     }
 };
 
-const stiDatabase = {
-    chlamydia: { name: { ru: 'Хламидиоз', en: 'Chlamydia' }, rate: 40, condomBlock: 80 },
-    gonorrhea: { name: { ru: 'Гонорея', en: 'Gonorrhea' }, rate: 50, condomBlock: 80 },
-    herpes: { name: { ru: 'Герпес', en: 'Herpes' }, rate: 10, condomBlock: 30 },
-    hpv: { name: { ru: 'ВПЧ', en: 'HPV' }, rate: 20, condomBlock: 70 },
-    hiv: { name: { ru: 'ВИЧ', en: 'HIV' }, rate: 0.1, condomBlock: 85 }
-};
-
-const pregnancyChanges = {
-    ru: [
-        [0, 'Пока ничего не заметно'],
-        [4, 'Лёгкая тошнота по утрам, усталость'],
-        [8, 'Грудь увеличилась, частые походы в туалет'],
-        [12, 'Животик слегка округлился'],
-        [16, 'Живот заметен, первые шевеления'],
-        [20, 'Живот явно виден, активные шевеления'],
-        [24, 'Большой живот, отёки ног'],
-        [28, 'Тяжело дышать, частые пинки'],
-        [32, 'Очень большой живот, бессонница'],
-        [36, 'Живот опустился, скоро роды'],
-        [40, 'Полный срок, роды в любой момент']
-    ],
-    en: [
-        [0, 'Nothing noticeable yet'],
-        [4, 'Morning sickness, fatigue'],
-        [8, 'Breasts enlarged, frequent urination'],
-        [12, 'Slight belly bump'],
-        [16, 'Visible bump, first movements'],
-        [20, 'Obvious belly, active kicks'],
-        [24, 'Large belly, swollen feet'],
-        [28, 'Shortness of breath, strong kicks'],
-        [32, 'Very large belly, insomnia'],
-        [36, 'Belly dropped, labor soon'],
-        [40, 'Full term, labor imminent']
-    ]
-};
-
-const pmsSymptoms = {
-    ru: ['раздражительность', 'перепады настроения', 'усталость', 'вздутие', 'головная боль', 'тяга к сладкому', 'плаксивость'],
-    en: ['irritability', 'mood swings', 'fatigue', 'bloating', 'headache', 'cravings', 'tearfulness']
-};
-
-function trueRandom(min, max) {
-    const range = max - min + 1;
-    const bytesNeeded = Math.ceil(Math.log2(range) / 8) || 1;
-    const maxValid = Math.floor(256 ** bytesNeeded / range) * range - 1;
-    let randomValue;
-    const arr = new Uint8Array(bytesNeeded);
-    do {
-        crypto.getRandomValues(arr);
-        randomValue = arr.reduce((acc, val, i) => acc + val * (256 ** i), 0);
-    } while (randomValue > maxValid);
-    return min + (randomValue % range);
-}
-
-function rollD100() {
-    return trueRandom(1, 100);
-}
-
-function t(key) {
-    const lang = extension_settings[extensionName]?.language || 'ru';
-    return i18n[lang]?.[key] || i18n.en[key] || key;
-}
+// ==================== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ====================
 
 function getSettings() {
     return extension_settings[extensionName];
 }
 
-function getISODate() {
-    return new Date().toISOString().split('T')[0];
-}
-
-function daysDiff(d1, d2) {
-    return Math.floor((new Date(d2) - new Date(d1)) / 86400000);
-}
-
-const sexKeywords = {
-    vaginal: [
-        'вошёл в неё', 'вошел в нее', 'входит в неё', 'входит в нее',
-        'проникает', 'проник в', 'внутри неё', 'внутри нее',
-        'толкается в', 'двигается в ней', 'двигается внутри',
-        'заполняет её', 'заполняет ее', 'растягивает её',
-        'enters her', 'inside her', 'penetrates', 'thrusts into',
-        'fills her', 'deep inside', 'pushes into her',
-        'член внутри', 'член в ней', 'вагин', 'влагалищ',
-        'киск', 'pussy', 'между ног', 'раздвинув ноги'
-    ],
-    creampie: [
-        'кончил внутрь', 'кончает внутрь', 'излился внутрь',
-        'изливается внутрь', 'спустил внутрь', 'наполнил её',
-        'наполняет её', 'заполнил её тёплым', 'семя внутри',
-        'сперма внутри', 'горячая струя внутри', 'пульсирует внутри',
-        'creampie', 'came inside', 'cums inside', 'cum inside',
-        'fills her with', 'seed inside', 'spills inside',
-        'releasing inside', 'finishes inside', 'pumps into her',
-        'глубоко внутрь', 'до самого конца'
-    ],
-    condomOn: [
-        'надел презерватив', 'надевает презерватив', 'натянул презерватив',
-        'достал презерватив', 'раскатал презерватив', 'в презервативе',
-        'защищённый', 'с защитой', 'put on condom', 'puts on condom',
-        'wearing condom', 'with protection', 'wrapped'
-    ],
-    condomOff: [
-        'снял презерватив', 'снимает презерватив', 'без презерватива',
-        'без защиты', 'незащищённый', 'removed condom', 'without condom',
-        'no condom', 'raw', 'unprotected', 'bareback'
-    ],
-    pullOut: [
-        'вытащил', 'успел вытащить', 'кончил снаружи', 'на живот',
-        'на спину', 'на грудь', 'на лицо', 'pulled out', 'pulls out',
-        'came on her', 'outside', 'withdrew'
-    ]
-};
-
-function analyzeMessage(text) {
-    const lower = text.toLowerCase();
-    let isVaginalSex = false;
-    let isCreampie = false;
-    let hasCondom = null;
-    let isPullOut = false;
-    
-    for (const kw of sexKeywords.vaginal) {
-        if (lower.includes(kw)) { isVaginalSex = true; break; }
-    }
-    for (const kw of sexKeywords.creampie) {
-        if (lower.includes(kw)) { isCreampie = true; break; }
-    }
-    for (const kw of sexKeywords.condomOn) {
-        if (lower.includes(kw)) { hasCondom = true; break; }
-    }
-    for (const kw of sexKeywords.condomOff) {
-        if (lower.includes(kw)) { hasCondom = false; break; }
-    }
-    for (const kw of sexKeywords.pullOut) {
-        if (lower.includes(kw)) { isPullOut = true; break; }
-    }
-    
-    return { isVaginalSex, isCreampie, hasCondom, isPullOut };
-}
-
-function updateCycle() {
+function L(key) {
     const s = getSettings();
-    if (!s) return;
-    if (s.pregnancy.isPregnant) {
-        s.menstruation.isActive = false;
-        s.menstruation.isPMS = false;
-        return;
+    const lang = s.language || 'ru';
+    const keys = key.split('.');
+    let result = LANG[lang];
+    for (const k of keys) {
+        result = result?.[k];
     }
-    
-    const day = s.fertility.cycleDay;
-    const dur = s.menstruation.duration;
-    
-    if (day >= 1 && day <= dur) {
-        s.menstruation.isActive = true;
-        s.menstruation.isPMS = false;
-        s.menstruation.intensity = day <= 2 ? 'heavy' : day >= dur - 1 ? 'light' : 'normal';
-    } else {
-        s.menstruation.isActive = false;
-        if (day >= 25) {
-            s.menstruation.isPMS = true;
-            const syms = pmsSymptoms[s.language] || pmsSymptoms.en;
-            s.menstruation.symptoms = [...syms].sort(() => Math.random() - 0.5).slice(0, trueRandom(2, 4));
-        } else {
-            s.menstruation.isPMS = false;
-            s.menstruation.symptoms = [];
-        }
-    }
-    saveSettings();
+    return result || key;
 }
 
-function getFertilityModifier() {
+function roll(max = 100) {
+    return Math.floor(Math.random() * max) + 1;
+}
+
+function rollChance(percent) {
+    return roll(100) <= percent;
+}
+
+// ==================== ЛОГИКА ЦИКЛА ====================
+
+function getCyclePhase() {
     const s = getSettings();
-    if (!s) return 1;
-    const day = s.fertility.cycleDay;
-    const [ovS, ovE] = s.fertility.ovulationWindow;
+    const day = s.cycleDay;
+    const ovDay = s.ovulationDay;
     
-    if (s.menstruation.isActive) return 0.05;
-    if (day >= ovS && day <= ovE) return 3.0;
-    if (day >= ovS - 2 && day <= ovE + 1) return 1.8;
-    if (day <= 7 || day >= 24) return 0.15;
-    return 0.4;
+    if (day <= 5) return 'menstrual';
+    if (day >= ovDay - 1 && day <= ovDay + 1) return 'ovulation';
+    if (day < ovDay) return 'follicular';
+    return 'luteal';
+}
+
+function getFertilityWindow() {
+    const s = getSettings();
+    const ovDay = s.ovulationDay;
+    return {
+        start: ovDay - 5,
+        peak: ovDay,
+        end: ovDay + 1
+    };
+}
+
+function isInFertileWindow() {
+    const s = getSettings();
+    const day = s.cycleDay;
+    const window = getFertilityWindow();
+    return day >= window.start && day <= window.end;
+}
+
+function getBaseConceptionChance() {
+    const phase = getCyclePhase();
+    if (phase === 'ovulation') return CHANCES.conception.ovulation;
+    if (isInFertileWindow()) return CHANCES.conception.fertile;
+    if (phase === 'luteal') return CHANCES.conception.luteal;
+    if (phase === 'menstrual') return CHANCES.conception.menstrual;
+    return CHANCES.conception.safe;
 }
 
 function advanceCycle(days = 1) {
     const s = getSettings();
-    if (!s || s.pregnancy.isPregnant) return;
     
     for (let i = 0; i < days; i++) {
-        s.fertility.cycleDay = (s.fertility.cycleDay % s.fertility.cycleLength) + 1;
-        if (s.contraception.pill) s.contraception.pillDaysTaken++;
-    }
-    updateCycle();
-    saveSettings();
-}
-
-function getContraceptionEffect() {
-    const s = getSettings();
-    if (!s) return { multiplier: 1, methods: [], condomBroke: false };
-    
-    const c = s.contraception;
-    let protection = 0;
-    let methods = [];
-    let condomBroke = false;
-    
-    if (c.iud) { protection = Math.max(protection, 99); methods.push('IUD'); }
-    if (c.implant) { protection = Math.max(protection, 99); methods.push('Implant'); }
-    if (c.pill) {
-        let eff = 91;
-        if (c.pillDaysTaken < 7) eff = 50;
-        else if (c.pillDaysTaken < 21) eff = 75;
-        protection = Math.max(protection, eff);
-        methods.push('Pill');
-    }
-    if (c.condom) {
-        if (rollD100() <= 2) {
-            condomBroke = true;
-        } else {
-            protection = Math.max(protection, 85);
-            methods.push('Condom');
+        s.cycleDay++;
+        s.currentDay++;
+        
+        // Сброс цикла
+        if (s.cycleDay > s.cycleLength) {
+            s.cycleDay = 1;
+        }
+        
+        // Продвижение беременности
+        if (s.isPregnant) {
+            s.pregnancyDay++;
         }
     }
     
-    return { multiplier: (100 - protection) / 100, methods, condomBroke };
+    saveSettingsDebounced();
+    syncUI();
+    injectStatusToChat();
 }
 
-function attemptConception(isPullOut = false) {
+// ==================== ЛОГИКА ЗАЧАТИЯ ====================
+
+function checkConception() {
     const s = getSettings();
-    if (!s) return { attempted: false };
-    if (s.pregnancy.isPregnant) return { attempted: false, reason: 'already_pregnant' };
     
-    s.stats.conceptionAttempts++;
-    
-    let chance = s.fertility.baseFertility;
-    const fertMod = getFertilityModifier();
-    chance *= fertMod;
-    
-    const contraResult = getContraceptionEffect();
-    chance *= contraResult.multiplier;
-    
-    // Если вытащил - шанс снижается на 78%
-    if (isPullOut) {
-        chance *= 0.22; // withdrawal ~78% effective
+    if (s.isPregnant) {
+        showNotification("⚠️ Уже беременна!", "warning");
+        return null;
     }
     
-    chance = Math.max(0.1, Math.min(85, chance));
+    const baseChance = getBaseConceptionChance();
+    const contraceptionEff = CHANCES.contraception[s.contraception];
     
-    const roll = rollD100();
-    const success = roll <= chance;
+    // Проверка провала контрацепции
+    let contraceptionFailed = false;
+    let finalChance = baseChance;
     
-    console.log(`[ReproHealth] Roll: ${roll} vs ${chance.toFixed(1)}% = ${success ? 'SUCCESS' : 'FAIL'}`);
+    if (s.contraception !== 'none') {
+        const failRoll = roll(100);
+        if (failRoll > contraceptionEff) {
+            // Контрацепция подвела!
+            contraceptionFailed = true;
+            showNotification(L('contraceptionFail'), "warning");
+        } else {
+            // Контрацепция сработала
+            finalChance = Math.round(baseChance * (1 - contraceptionEff / 100));
+        }
+    }
+    
+    const conceptionRoll = roll(100);
+    const success = conceptionRoll <= finalChance;
     
     const result = {
-        attempted: true,
-        roll,
-        chance: chance.toFixed(1),
-        success,
-        fertMod,
-        contraception: contraResult,
-        cycleDay: s.fertility.cycleDay,
-        duringPeriod: s.menstruation.isActive,
-        isPullOut
+        phase: getCyclePhase(),
+        cycleDay: s.cycleDay,
+        baseChance,
+        contraception: s.contraception,
+        contraceptionFailed,
+        finalChance,
+        roll: conceptionRoll,
+        success
     };
     
     if (success) {
-        s.stats.successfulConceptions++;
-        s.pregnancy.isPregnant = true;
-        s.pregnancy.conceptionDate = getISODate();
-        s.pregnancy.currentWeek = 0;
-        s.pregnancy.trimester = 1;
-        s.menstruation.isActive = false;
-        s.menstruation.isPMS = false;
+        // Зачатие произошло!
+        s.isPregnant = true;
+        s.conceptionDay = s.currentDay;
+        s.pregnancyDay = 0;
+        s.complications = [];
         
-        const multipleRoll = rollD100();
-        let babyCount = 1;
-        if (multipleRoll <= 2) babyCount = 3;
-        else if (multipleRoll <= 5) babyCount = 2;
-        
-        s.pregnancy.babies = [];
-        for (let i = 0; i < babyCount; i++) {
-            s.pregnancy.babies.push({
-                gender: rollD100() <= 50 ? 'boy' : 'girl'
-            });
+        // Определяем количество плодов
+        const multiplesRoll = roll(100);
+        if (multiplesRoll <= CHANCES.multiples.triplets) {
+            s.fetusCount = 3;
+        } else if (multiplesRoll <= CHANCES.multiples.twins) {
+            s.fetusCount = 2;
+        } else {
+            s.fetusCount = 1;
         }
-        result.babies = s.pregnancy.babies;
+        
+        // Пол определим позже (после 12 недель)
+        s.fetusSex = [];
+        
+        showNotification(L('conceptionSuccess'), "success");
+        logEvent('conception', result);
+    } else {
+        showNotification(L('conceptionFail'), "info");
     }
     
-    saveSettings();
+    saveSettingsDebounced();
+    syncUI();
+    injectStatusToChat();
+    
     return result;
 }
 
-function getPartnerRisk(name) {
+// ==================== ЛОГИКА БЕРЕМЕННОСТИ ====================
+
+function getPregnancyWeek() {
     const s = getSettings();
-    if (!s) return { risk: 'safe', infections: [] };
-    
-    if (!s.sti.partnerProfiles[name]) {
-        const riskRoll = rollD100();
-        let risk = 'safe';
-        let infections = [];
-        
-        if (riskRoll <= 60) risk = 'safe';
-        else if (riskRoll <= 80) {
-            risk = 'low';
-            if (rollD100() <= 15) infections.push(['chlamydia', 'gonorrhea'][trueRandom(0, 1)]);
-        } else if (riskRoll <= 95) {
-            risk = 'medium';
-            if (rollD100() <= 30) infections.push(['chlamydia', 'gonorrhea', 'herpes', 'hpv'][trueRandom(0, 3)]);
-        } else {
-            risk = 'high';
-            if (rollD100() <= 50) {
-                const possible = Object.keys(stiDatabase);
-                infections.push(possible[trueRandom(0, possible.length - 1)]);
-            }
-        }
-        
-        s.sti.partnerProfiles[name] = { risk, infections };
-        saveSettings();
-    }
-    return s.sti.partnerProfiles[name];
+    // +2 недели т.к. отсчёт от последней менструации
+    return Math.floor(s.pregnancyDay / 7) + 2;
 }
 
-function checkSTI(partnerName, usedCondom) {
+function getTrimester() {
+    const week = getPregnancyWeek();
+    if (week <= 12) return 1;
+    if (week <= 27) return 2;
+    return 3;
+}
+
+function getPregnancyStage() {
+    const week = getPregnancyWeek();
+    if (week <= 4) return 'implantation';
+    if (week <= 8) return 'embryo';
+    if (week <= 12) return 'fetus_early';
+    if (week <= 20) return 'fetus_mid';
+    if (week <= 36) return 'fetus_late';
+    if (week <= 42) return 'term';
+    return 'overdue';
+}
+
+function getSymptoms() {
+    const week = getPregnancyWeek();
     const s = getSettings();
-    if (!s) return { checked: [], newInfections: [] };
+    const lang = s.language || 'ru';
     
-    const partner = getPartnerRisk(partnerName);
-    const results = { checked: [], newInfections: [] };
+    if (week < 4) return "";
+    if (week < 6) return LANG[lang].symptoms.week4;
+    if (week < 8) return LANG[lang].symptoms.week6;
+    if (week < 12) return LANG[lang].symptoms.week8;
+    if (week < 16) return LANG[lang].symptoms.week12;
+    if (week < 20) return LANG[lang].symptoms.week16;
+    if (week < 24) return LANG[lang].symptoms.week20;
+    if (week < 28) return LANG[lang].symptoms.week24;
+    if (week < 32) return LANG[lang].symptoms.week28;
+    if (week < 36) return LANG[lang].symptoms.week32;
+    if (week < 40) return LANG[lang].symptoms.week36;
+    return LANG[lang].symptoms.week40;
+}
+
+function determineSex() {
+    const s = getSettings();
+    if (s.fetusSex.length === 0 && getPregnancyWeek() >= 12) {
+        s.fetusSex = [];
+        for (let i = 0; i < s.fetusCount; i++) {
+            s.fetusSex.push(rollChance(50) ? 'male' : 'female');
+        }
+        saveSettingsDebounced();
+    }
+    return s.fetusSex;
+}
+
+// ==================== ЛОГИКА ОСЛОЖНЕНИЙ ====================
+
+function checkComplications() {
+    const s = getSettings();
+    if (!s.isPregnant) return null;
     
-    for (const sti of partner.infections) {
-        if (s.sti.userInfections.includes(sti)) continue;
-        
-        const info = stiDatabase[sti];
-        let chance = info.rate;
-        if (usedCondom) chance *= (100 - info.condomBlock) / 100;
-        
-        const roll = rollD100();
-        const infected = roll <= chance;
-        results.checked.push({ sti, roll, chance: chance.toFixed(2), infected });
-        
-        if (infected) {
-            results.newInfections.push(sti);
-            s.sti.userInfections.push(sti);
+    const trimester = getTrimester();
+    const week = getPregnancyWeek();
+    let complicationPool;
+    
+    if (week >= 40) {
+        complicationPool = CHANCES.complications.labor;
+    } else if (trimester === 1) {
+        complicationPool = CHANCES.complications.trimester1;
+    } else if (trimester === 2) {
+        complicationPool = CHANCES.complications.trimester2;
+    } else {
+        complicationPool = CHANCES.complications.trimester3;
+    }
+    
+    const results = [];
+    
+    for (const [complication, chance] of Object.entries(complicationPool)) {
+        const complicationRoll = roll(1000) / 10; // Точность 0.1%
+        if (complicationRoll <= chance) {
+            results.push({
+                type: complication,
+                chance,
+                roll: complicationRoll,
+                week,
+                trimester
+            });
+            
+            s.complications.push({
+                type: complication,
+                detectedWeek: week,
+                detectedDay: s.currentDay
+            });
+            
+            showNotification(`${L('complicationDetected')} ${L('complications.' + complication)}`, "error");
+            
+            // Критические осложнения прерывают беременность
+            if (['miscarriage', 'ectopic', 'molar', 'stillbirth', 'uterine_rupture'].includes(complication)) {
+                endPregnancy(complication);
+                break;
+            }
         }
     }
     
-    saveSettings();
+    if (results.length === 0) {
+        showNotification("✅ Осложнений не выявлено", "success");
+    }
+    
+    saveSettingsDebounced();
+    syncUI();
+    injectStatusToChat();
+    logEvent('complication_check', results);
+    
     return results;
 }
 
-function getPregnancyStatus() {
+function endPregnancy(reason) {
     const s = getSettings();
-    if (!s || !s.pregnancy.isPregnant) return null;
+    s.isPregnant = false;
     
-    const days = daysDiff(s.pregnancy.conceptionDate, getISODate());
-    const weeks = Math.max(0, Math.floor(days / 7));
-    s.pregnancy.currentWeek = weeks;
+    logEvent('pregnancy_end', {
+        reason,
+        week: getPregnancyWeek(),
+        day: s.pregnancyDay
+    });
     
-    let tri = 1;
-    if (weeks >= 12) tri = 2;
-    if (weeks >= 28) tri = 3;
-    s.pregnancy.trimester = tri;
+    // Сброс данных беременности
+    s.pregnancyDay = 0;
+    s.fetusCount = 1;
+    s.fetusSex = [];
     
-    const changes = pregnancyChanges[s.language] || pregnancyChanges.en;
-    let symptoms = changes[0][1];
-    for (const [w, desc] of changes) {
-        if (weeks >= w) symptoms = desc;
-    }
-    
-    saveSettings();
-    return { weeks, trimester: tri, symptoms, babies: s.pregnancy.babies };
+    saveSettingsDebounced();
+    syncUI();
 }
 
-function formatConceptionResult(r, isPullOut = false) {
+function startLabor() {
     const s = getSettings();
-    const lang = s?.language || 'ru';
+    if (!s.isPregnant) return null;
     
-    if (!r.attempted) {
-        return `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'Уже беременна' : 'Already pregnant'}</pre>`;
+    const week = getPregnancyWeek();
+    if (week < 24) {
+        showNotification("⚠️ Слишком ранний срок для родов", "warning");
+        return null;
     }
     
-    let protection = [];
-    if (r.contraception.methods.length > 0) protection = r.contraception.methods;
-    if (isPullOut) protection.push(lang === 'ru' ? 'Прерванный акт' : 'Withdrawal');
-    const protectionText = protection.length > 0 
-        ? protection.join(', ') 
-        : (lang === 'ru' ? 'Без защиты' : 'Unprotected');
+    showNotification(L('laborStarted'), "success");
     
-    let result = '';
+    // Проверяем осложнения родов
+    const laborComplications = checkComplications();
     
-    if (r.success) {
-        const babyCount = r.babies?.length || 1;
-        const babyText = babyCount === 1 ? '' : babyCount === 2 ? (lang === 'ru' ? ' (Близнецы!)' : ' (Twins!)') : (lang === 'ru' ? ' (Тройня!)' : ' (Triplets!)');
-        
-        result = `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'БРОСОК НА ЗАЧАТИЕ' : 'CONCEPTION ROLL'}
-${lang === 'ru' ? 'Бросок' : 'Roll'}: ${r.roll} / ${r.chance}%
-${lang === 'ru' ? 'Защита' : 'Protection'}: ${protectionText}${r.contraception.condomBroke ? (lang === 'ru' ? ' ⚠️ ПОРВАЛСЯ!' : ' ⚠️ BROKE!') : ''}
-${lang === 'ru' ? 'День цикла' : 'Cycle day'}: ${r.cycleDay} (${r.fertMod >= 1.5 ? '🔥' : r.fertMod >= 0.4 ? '•' : '❄️'})
-━━━━━━━━━━━━━━━━━━━━
-✅ ${lang === 'ru' ? 'ЗАЧАТИЕ ПРОИЗОШЛО' : 'CONCEPTION OCCURRED'}${babyText}
-${lang === 'ru' ? 'Дата' : 'Date'}: ${getISODate()}
-${lang === 'ru' ? 'Статус' : 'Status'}: ${lang === 'ru' ? 'Беременность началась (персонажи пока не знают)' : 'Pregnancy initiated (unknown to characters)'}</pre>`;
-    } else {
-        result = `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'БРОСОК НА ЗАЧАТИЕ' : 'CONCEPTION ROLL'}
-${lang === 'ru' ? 'Бросок' : 'Roll'}: ${r.roll} / ${r.chance}%
-${lang === 'ru' ? 'Защита' : 'Protection'}: ${protectionText}${r.contraception.condomBroke ? (lang === 'ru' ? ' ⚠️ ПОРВАЛСЯ!' : ' ⚠️ BROKE!') : ''}
-${lang === 'ru' ? 'День цикла' : 'Cycle day'}: ${r.cycleDay} (${r.fertMod >= 1.5 ? '🔥' : r.fertMod >= 0.4 ? '•' : '❄️'})
-━━━━━━━━━━━━━━━━━━━━
-❌ ${lang === 'ru' ? 'НЕ В ЭТОТ РАЗ' : 'NO CONCEPTION'}
-${lang === 'ru' ? 'Беременность не наступила.' : 'No pregnancy this time.'}</pre>`;
-    }
+    const result = {
+        week,
+        fetusCount: s.fetusCount,
+        fetusSex: s.fetusSex,
+        complications: laborComplications,
+        preterm: week < 37,
+        outcome: determineLaborOutcome(week, laborComplications)
+    };
+    
+    logEvent('labor', result);
+    endPregnancy('birth');
     
     return result;
 }
 
-function formatPregnancyStatus(status) {
-    if (!status) return '';
+function determineLaborOutcome(week, complications) {
+    const hasSerious = complications?.some(c => 
+        ['emergency_csection', 'hemorrhage', 'cord_prolapse', 'shoulder_dystocia', 'uterine_rupture'].includes(c.type)
+    );
     
+    if (week < 28) return 'critical';
+    if (week < 32) return hasSerious ? 'critical' : 'serious';
+    if (week < 37) return hasSerious ? 'serious' : 'preterm';
+    return hasSerious ? 'complicated' : 'normal';
+}
+
+// ==================== ЛОГИРОВАНИЕ ====================
+
+function logEvent(type, data) {
     const s = getSettings();
-    const lang = s?.language || 'ru';
+    s.eventLog.push({
+        type,
+        data,
+        day: s.currentDay,
+        timestamp: Date.now()
+    });
     
-    const babyCount = status.babies?.length || 1;
-    const babyText = babyCount === 1 ? '' : babyCount === 2 ? (lang === 'ru' ? ' (Близнецы)' : ' (Twins)') : (lang === 'ru' ? ' (Тройня)' : ' (Triplets)');
-    
-    let stage;
-    if (status.weeks < 12) stage = lang === 'ru' ? 'Ранняя' : 'Early';
-    else if (status.weeks < 24) stage = lang === 'ru' ? 'Заметная' : 'Showing';
-    else if (status.weeks < 37) stage = lang === 'ru' ? 'Поздняя' : 'Advanced';
-    else stage = lang === 'ru' ? 'Роды скоро' : 'Labor soon';
-    
-    return `<pre class="reprohealth-code">🤰 ${lang === 'ru' ? 'СТАТУС БЕРЕМЕННОСТИ' : 'PREGNANCY STATUS'}${babyText}
-${lang === 'ru' ? 'Неделя' : 'Week'}: ${status.weeks}/40
-${lang === 'ru' ? 'Стадия' : 'Stage'}: ${stage}
-${lang === 'ru' ? 'Триместр' : 'Trimester'}: ${status.trimester}
-${lang === 'ru' ? 'Изменения' : 'Visible'}: ${status.symptoms}</pre>`;
-}
-
-function formatSTIResult(r) {
-    if (!r || r.checked.length === 0) return '';
-    const lang = getSettings()?.language || 'ru';
-    
-    let checks = r.checked.map(c => {
-        const name = stiDatabase[c.sti].name[lang];
-        return `  ${name}: ${c.roll}/${c.chance}% ${c.infected ? '⚠️' : '✅'}`;
-    }).join('\n');
-    
-    let result = `<pre class="reprohealth-code">🔬 ${lang === 'ru' ? 'ПРОВЕРКА ИППП' : 'STI CHECK'}
-${checks}`;
-    
-    if (r.newInfections.length > 0) {
-        const names = r.newInfections.map(x => stiDatabase[x].name[lang]).join(', ');
-        result += `\n━━━━━━━━━━━━━━━━━━━━\n⚠️ ${lang === 'ru' ? 'ЗАРАЖЕНИЕ' : 'INFECTED'}: ${names}`;
+    // Ограничиваем размер лога
+    if (s.eventLog.length > 100) {
+        s.eventLog = s.eventLog.slice(-100);
     }
     
-    result += `</pre>`;
-    return result;
+    saveSettingsDebounced();
 }
 
-function injectToChat(html) {
-    if (!html) return;
-    try {
-        const chat = document.querySelector('#chat');
-        if (!chat) return;
-        const lastMsg = chat.querySelector('.mes:last-child .mes_text');
-        if (!lastMsg) return;
-        
-        const wrapper = document.createElement('div');
-        wrapper.className = 'reprohealth-auto-result';
-        wrapper.innerHTML = html;
-        lastMsg.appendChild(wrapper);
-        console.log('[ReproHealth] Injected to chat');
-    } catch (e) {
-        console.error('[ReproHealth] Inject error:', e);
-    }
-}
+// ==================== UI ====================
 
-function processMessage(text, charName) {
+function showNotification(message, type = "info") {
     const s = getSettings();
-    if (!s || !s.enabled) return;
+    if (!s.showNotifications) return;
     
-    const analysis = analyzeMessage(text);
-    let output = '';
-    
-    if (analysis.hasCondom === true) {
-        s.contraception.condom = true;
-        saveSettings();
-    } else if (analysis.hasCondom === false) {
-        s.contraception.condom = false;
-        saveSettings();
-    }
-    
-    // Бросок при ЛЮБОМ вагинальном сексе
-    if (analysis.isVaginalSex) {
-        console.log('[ReproHealth] Detected vaginal sex, rolling...');
+    if (typeof toastr !== 'undefined') {
+        const options = {
+            timeOut: 5000,
+            positionClass: 'toast-top-center',
+            closeButton: true
+        };
         
-        // Если вытащил - показываем это, но бросок всё равно делаем с модификатором
-        const conception = attemptConception(analysis.isPullOut && !analysis.isCreampie);
-        output += formatConceptionResult(conception, analysis.isPullOut && !analysis.isCreampie);
-        
-        if (s.sti.enabled) {
-            const stiResult = checkSTI(charName, s.contraception.condom);
-            output += formatSTIResult(stiResult);
+        switch(type) {
+            case 'success': toastr.success(message, '', options); break;
+            case 'warning': toastr.warning(message, '', options); break;
+            case 'error': toastr.error(message, '', options); break;
+            default: toastr.info(message, '', options);
         }
-    }
-    
-    // Статус беременности - раз в день
-    if (s.pregnancy.isPregnant) {
-        const today = getISODate();
-        if (s.pregnancy.lastStatusDay !== today) {
-            const status = getPregnancyStatus();
-            output = formatPregnancyStatus(status) + output;
-            s.pregnancy.lastStatusDay = today;
-            saveSettings();
-        }
-    }
-    
-    if (output) {
-        setTimeout(() => injectToChat(output), 200);
-        injectPrompt(); // Update prompt after events
-    }
-    updateStatusPanel();
-}
-
-const processedMessages = new Set();
-
-function onChatMessage(messageIndex) {
-    try {
-        const context = window.SillyTavern?.getContext?.();
-        if (!context?.chat) return;
-        
-        const msg = context.chat[messageIndex];
-        if (!msg || msg.is_user) return;
-        
-        // Защита от двойной обработки
-        const msgId = `${messageIndex}-${msg.mes?.length || 0}`;
-        if (processedMessages.has(msgId)) return;
-        processedMessages.add(msgId);
-        
-        // Очищаем старые ID чтобы не забивать память
-        if (processedMessages.size > 50) {
-            const arr = Array.from(processedMessages);
-            arr.slice(0, 25).forEach(id => processedMessages.delete(id));
-        }
-        
-        const charName = context.name2 || 'Partner';
-        processMessage(msg.mes || '', charName);
-    } catch (e) {
-        console.error('[ReproHealth] Error:', e);
-    }
-}
-
-function createSettingsPanel() {
-    console.log('[ReproHealth] Creating panel...');
-    
-    const html = `
-<div id="reprohealth-settings" class="extension_settings">
-<div class="inline-drawer">
-<div class="inline-drawer-toggle inline-drawer-header">
-<b>🤰 Reproductive Health</b>
-<div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-</div>
-<div class="inline-drawer-content">
-
-<div class="reprohealth-setting">
-<label class="checkbox_label"><input type="checkbox" id="rh-enabled"><span>Включить</span></label>
-</div>
-
-<div class="reprohealth-setting">
-<label>Язык</label>
-<select id="rh-lang"><option value="ru">Русский</option><option value="en">English</option></select>
-</div>
-
-<hr><h4>💊 Контрацепция</h4>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-condom"><span>🩹 Презерватив</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-pill"><span>💊 Таблетки</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-iud"><span>🔗 Спираль</span></label></div>
-<div class="reprohealth-setting"><label class="checkbox_label"><input type="checkbox" id="rh-implant"><span>💉 Имплант</span></label></div>
-
-<hr><h4>🌡️ Цикл</h4>
-<div class="reprohealth-setting">
-<label>День цикла</label>
-<input type="number" id="rh-cycle-day" min="1" max="28" value="1">
-</div>
-<div class="reprohealth-setting">
-<label>Базовый шанс %</label>
-<input type="number" id="rh-base-fert" min="5" max="50" value="25">
-</div>
-
-<hr><h4>🔬 ИППП</h4>
-<div class="reprohealth-setting">
-<label class="checkbox_label"><input type="checkbox" id="rh-sti"><span>Включить ИППП</span></label>
-</div>
-
-<hr>
-<div id="rh-status" style="background:rgba(0,0,0,0.2);padding:10px;border-radius:8px;margin:10px 0;"></div>
-
-<div style="display:flex;gap:5px;flex-wrap:wrap;">
-<button id="rh-advance-day" class="menu_button">+1 день</button>
-<button id="rh-reset-preg" class="menu_button">Сброс берем.</button>
-<button id="rh-reset-all" class="menu_button redWarningBG">Сброс всего</button>
-</div>
-
-<div id="rh-stats" style="text-align:center;opacity:0.5;font-size:11px;margin-top:10px;"></div>
-
-</div>
-</div>
-</div>`;
-    
-    const container = document.querySelector('#extensions_settings2');
-    if (container) {
-        container.insertAdjacentHTML('beforeend', html);
-        console.log('[ReproHealth] Panel added!');
-        bindEvents();
-        loadUI();
     } else {
-        console.error('[ReproHealth] #extensions_settings2 not found');
+        console.log(`[Reproductive System] ${type}: ${message}`);
     }
 }
 
-function bindEvents() {
-    const el = (id) => document.querySelector(id);
-    const s = () => getSettings();
+function syncUI() {
+    const s = getSettings();
     
-    el('#rh-enabled')?.addEventListener('change', function() { s().enabled = this.checked; saveSettings(); injectPrompt(); });
-    el('#rh-lang')?.addEventListener('change', function() { s().language = this.value; saveSettings(); updateStatusPanel(); injectPrompt(); });
-    el('#rh-condom')?.addEventListener('change', function() { s().contraception.condom = this.checked; saveSettings(); updateStatusPanel(); injectPrompt(); });
-    el('#rh-pill')?.addEventListener('change', function() { s().contraception.pill = this.checked; if(!this.checked) s().contraception.pillDaysTaken=0; saveSettings(); injectPrompt(); });
-    el('#rh-iud')?.addEventListener('change', function() { s().contraception.iud = this.checked; saveSettings(); injectPrompt(); });
-    el('#rh-implant')?.addEventListener('change', function() { s().contraception.implant = this.checked; saveSettings(); injectPrompt(); });
-    el('#rh-cycle-day')?.addEventListener('change', function() { s().fertility.cycleDay = parseInt(this.value)||1; updateCycle(); saveSettings(); updateStatusPanel(); injectPrompt(); });
-    el('#rh-base-fert')?.addEventListener('change', function() { s().fertility.baseFertility = parseInt(this.value)||25; saveSettings(); });
-    el('#rh-sti')?.addEventListener('change', function() { s().sti.enabled = this.checked; saveSettings(); });
+    // Основные чекбоксы
+    const enabled = document.getElementById('repro_enabled');
+    const notify = document.getElementById('repro_notify');
+    const inject = document.getElementById('repro_inject');
     
-    el('#rh-advance-day')?.addEventListener('click', () => { advanceCycle(1); updateStatusPanel(); loadUI(); injectPrompt(); });
-    el('#rh-reset-preg')?.addEventListener('click', () => {
-        if(confirm('Сбросить беременность?')) {
-            s().pregnancy = JSON.parse(JSON.stringify(defaultSettings.pregnancy));
-            saveSettings(); updateStatusPanel(); injectPrompt();
+    if (enabled) enabled.checked = s.isEnabled;
+    if (notify) notify.checked = s.showNotifications;
+    if (inject) inject.checked = s.injectToChat;
+    
+    // Цикл
+    const cycleDay = document.getElementById('repro_cycle_day');
+    const cyclePhase = document.getElementById('repro_cycle_phase');
+    
+    if (cycleDay) cycleDay.textContent = `${s.cycleDay}/${s.cycleLength}`;
+    if (cyclePhase) cyclePhase.textContent = L('phases.' + getCyclePhase());
+    
+    // Контрацепция
+    const contraSelect = document.getElementById('repro_contraception');
+    if (contraSelect) contraSelect.value = s.contraception;
+    
+    // Статус беременности
+    const pregStatus = document.getElementById('repro_pregnancy_status');
+    if (pregStatus) {
+        if (s.isPregnant) {
+            const week = getPregnancyWeek();
+            const trimester = getTrimester();
+            const stage = getPregnancyStage();
+            determineSex();
+            
+            let sexText = s.fetusSex.length > 0 
+                ? s.fetusSex.map(sex => sex === 'male' ? L('sexMale') : L('sexFemale')).join(', ')
+                : L('sexUnknown');
+            
+            pregStatus.innerHTML = `
+                <div class="repro-pregnant-info">
+                    <div><strong>${L('week')}:</strong> ${week}</div>
+                    <div><strong>${L('trimester')}:</strong> ${trimester}</div>
+                    <div><strong>Стадия:</strong> ${L('stages.' + stage)}</div>
+                    <div><strong>${L('fetusCount')}:</strong> ${s.fetusCount}</div>
+                    <div><strong>${L('fetusSex')}:</strong> ${sexText}</div>
+                    <div class="repro-symptoms"><em>${getSymptoms()}</em></div>
+                    ${s.complications.length > 0 ? `
+                        <div class="repro-complications">
+                            <strong>⚠️ Осложнения:</strong>
+                            ${s.complications.map(c => L('complications.' + c.type)).join(', ')}
+                        </div>
+                    ` : ''}
+                </div>
+            `;
+        } else {
+            pregStatus.innerHTML = `<em>${L('notPregnant')}</em>`;
+        }
+    }
+    
+    // Текущий день
+    const dayCounter = document.getElementById('repro_day_counter');
+    if (dayCounter) dayCounter.textContent = s.currentDay;
+}
+
+function setupUI() {
+    const settingsHtml = `
+        <div class="repro_system_settings">
+            <div class="inline-drawer">
+                <div class="inline-drawer-toggle inline-drawer-header">
+                    <b>${L('title')}</b>
+                    <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+                </div>
+                <div class="inline-drawer-content">
+                    
+                    <!-- Основные настройки -->
+                    <div class="flex-container">
+                        <label class="checkbox_label">
+                            <input type="checkbox" id="repro_enabled">
+                            <span>${L('enabled')}</span>
+                        </label>
+                    </div>
+                    <div class="flex-container">
+                        <label class="checkbox_label">
+                            <input type="checkbox" id="repro_notify">
+                            <span>${L('notifications')}</span>
+                        </label>
+                    </div>
+                    <div class="flex-container">
+                        <label class="checkbox_label">
+                            <input type="checkbox" id="repro_inject">
+                            <span>${L('injectChat')}</span>
+                        </label>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Счётчик дней -->
+                    <div class="flex-container flexFlowColumn">
+                        <label><strong>📅 Игровой день:</strong> <span id="repro_day_counter">1</span></label>
+                        <div class="flex-container">
+                            <button id="repro_advance_day" class="menu_button">${L('advanceDay')}</button>
+                            <button id="repro_advance_week" class="menu_button">${L('advanceWeek')}</button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Цикл -->
+                    <div class="flex-container flexFlowColumn">
+                        <label><strong>${L('cycleTitle')}</strong></label>
+                        <div>${L('cycleDay')}: <span id="repro_cycle_day">1/28</span></div>
+                        <div>${L('phase')}: <span id="repro_cycle_phase">-</span></div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Контрацепция -->
+                    <div class="flex-container flexFlowColumn">
+                        <label><strong>${L('contraceptionTitle')}</strong></label>
+                        <select id="repro_contraception" class="text_pole">
+                            <option value="none">${L('contraceptionTypes.none')}</option>
+                            <option value="condom">${L('contraceptionTypes.condom')}</option>
+                            <option value="pill">${L('contraceptionTypes.pill')}</option>
+                            <option value="iud">${L('contraceptionTypes.iud')}</option>
+                        </select>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Кнопка зачатия -->
+                    <div class="flex-container">
+                        <button id="repro_check_conception" class="menu_button menu_button_icon">
+                            ${L('checkConception')}
+                        </button>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Статус беременности -->
+                    <div class="flex-container flexFlowColumn">
+                        <label><strong>${L('pregnancyTitle')}</strong></label>
+                        <div id="repro_pregnancy_status">
+                            <em>${L('notPregnant')}</em>
+                        </div>
+                    </div>
+                    
+                    <!-- Кнопки беременности -->
+                    <div class="flex-container" id="repro_pregnancy_buttons" style="display: none;">
+                        <button id="repro_check_complications" class="menu_button">
+                            ${L('checkComplications')}
+                        </button>
+                        <button id="repro_labor" class="menu_button">
+                            ${L('labor')}
+                        </button>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- Сброс -->
+                    <div class="flex-container">
+                        <button id="repro_reset" class="menu_button redWarningBG">
+                            ${L('reset')}
+                        </button>
+                    </div>
+                    
+                </div>
+            </div>
+        </div>
+        
+        <style>
+            .repro_system_settings .inline-drawer-content {
+                padding: 10px;
+            }
+            .repro_system_settings hr {
+                margin: 10px 0;
+                border-color: var(--SmartThemeBorderColor);
+            }
+            .repro_system_settings .menu_button {
+                margin: 2px;
+            }
+            .repro-pregnant-info {
+                background: var(--SmartThemeBlurTintColor);
+                padding: 10px;
+                border-radius: 5px;
+                margin-top: 5px;
+            }
+            .repro-pregnant-info div {
+                margin: 3px 0;
+            }
+            .repro-symptoms {
+                color: var(--SmartThemeQuoteColor);
+                margin-top: 8px !important;
+            }
+            .repro-complications {
+                color: #ff6b6b;
+                margin-top: 8px !important;
+            }
+        </style>
+    `;
+    
+    $('#extensions_settings').append(settingsHtml);
+    
+    // Обработчики
+    $('#repro_enabled').on('change', function() {
+        getSettings().isEnabled = this.checked;
+        saveSettingsDebounced();
+    });
+    
+    $('#repro_notify').on('change', function() {
+        getSettings().showNotifications = this.checked;
+        saveSettingsDebounced();
+    });
+    
+    $('#repro_inject').on('change', function() {
+        getSettings().injectToChat = this.checked;
+        saveSettingsDebounced();
+        injectStatusToChat();
+    });
+    
+    $('#repro_contraception').on('change', function() {
+        getSettings().contraception = this.value;
+        saveSettingsDebounced();
+    });
+    
+    $('#repro_advance_day').on('click', () => advanceCycle(1));
+    $('#repro_advance_week').on('click', () => advanceCycle(7));
+    
+    $('#repro_check_conception').on('click', () => {
+        const result = checkConception();
+        if (result) {
+            injectConceptionResult(result);
         }
     });
-    el('#rh-reset-all')?.addEventListener('click', () => {
-        if(confirm('Сбросить ВСЁ?')) {
-            extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
-            saveSettings(); loadUI(); updateStatusPanel(); injectPrompt();
+    
+    $('#repro_check_complications').on('click', () => {
+        checkComplications();
+    });
+    
+    $('#repro_labor').on('click', () => {
+        if (confirm('Начать роды? Это действие нельзя отменить.')) {
+            const result = startLabor();
+            if (result) {
+                injectLaborResult(result);
+            }
         }
     });
-}
-
-function loadUI() {
-    const s = getSettings();
-    if (!s) return;
     
-    const set = (id, val) => { const e = document.querySelector(id); if(e) e.checked = val; };
-    const setV = (id, val) => { const e = document.querySelector(id); if(e) e.value = val; };
-    
-    set('#rh-enabled', s.enabled);
-    setV('#rh-lang', s.language);
-    set('#rh-condom', s.contraception.condom);
-    set('#rh-pill', s.contraception.pill);
-    set('#rh-iud', s.contraception.iud);
-    set('#rh-implant', s.contraception.implant);
-    setV('#rh-cycle-day', s.fertility.cycleDay);
-    setV('#rh-base-fert', s.fertility.baseFertility);
-    set('#rh-sti', s.sti.enabled);
-    updateStatusPanel();
-}
-
-function updateStatusPanel() {
-    const s = getSettings();
-    if (!s) return;
-    
-    const fert = getFertilityModifier();
-    let html = '<div style="display:flex;flex-wrap:wrap;gap:8px;">';
-    
-    if (s.pregnancy.isPregnant) {
-        const ps = getPregnancyStatus();
-        const genders = ps?.babies?.map(b => b.gender === 'boy' ? '👦' : '👧').join('') || '';
-        html += `<span style="background:rgba(255,107,157,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 ${ps?.weeks||0} нед. ${genders}</span>`;
-    } else {
-        html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">🤰 Нет</span>`;
-    }
-    
-    const icon = s.menstruation.isActive ? '🩸' : s.menstruation.isPMS ? '😤' : '📅';
-    const fertIcon = fert >= 1.5 ? '🔥' : fert >= 0.4 ? '•' : '❄️';
-    html += `<span style="background:rgba(255,255,255,0.1);padding:4px 10px;border-radius:15px;font-size:12px;">${icon} День ${s.fertility.cycleDay} ${fertIcon}</span>`;
-    
-    const c = [];
-    if (s.contraception.condom) c.push('🩹');
-    if (s.contraception.pill) c.push('💊');
-    if (s.contraception.iud) c.push('🔗');
-    if (s.contraception.implant) c.push('💉');
-    if (c.length) html += `<span style="background:rgba(123,237,159,0.2);padding:4px 10px;border-radius:15px;font-size:12px;">${c.join(' ')}</span>`;
-    
-    html += '</div>';
-    
-    const statusEl = document.querySelector('#rh-status');
-    if (statusEl) statusEl.innerHTML = html;
-    
-    const statsEl = document.querySelector('#rh-stats');
-    if (statsEl) statsEl.innerHTML = `Попыток: ${s.stats.conceptionAttempts} | Зачатий: ${s.stats.successfulConceptions}`;
-}
-
-window.ReproHealth = { rollD100, trueRandom, attemptConception, getPregnancyStatus, checkSTI, advanceCycle, getFertilityModifier, analyzeMessage, getSettings };
-
-function getSystemPromptInjection() {
-    const s = getSettings();
-    if (!s || !s.enabled) return '';
-    
-    const lang = s.language;
-    let lines = [];
-    
-    // Контрацепция - только ВИДИМОЕ для НПС
-    // Презерватив - видно, спираль/имплант/таблетки - НЕ видно
-    if (s.contraception.condom) {
-        lines.push(lang === 'ru' 
-            ? `[На партнёре надет презерватив]`
-            : `[Partner is wearing a condom]`);
-    }
-    
-    // Цикл - только если ВИДНО (месячные, явные симптомы ПМС)
-    const day = s.fertility.cycleDay;
-    if (s.menstruation.isActive) {
-        lines.push(lang === 'ru' 
-            ? `[У неё сейчас месячные]`
-            : `[She is currently on her period]`);
-    } else if (s.menstruation.isPMS && s.menstruation.symptoms.length > 0) {
-        // ПМС видно по поведению
-        lines.push(lang === 'ru'
-            ? `[Она выглядит ${s.menstruation.symptoms.slice(0,2).join(', ')}]`
-            : `[She seems ${s.menstruation.symptoms.slice(0,2).join(', ')}]`);
-    }
-    // Овуляцию НПС НЕ видит - это внутренний процесс
-    
-    // Беременность - ТОЛЬКО если есть ВИДИМЫЕ признаки
-    if (s.pregnancy.isPregnant) {
-        const ps = getPregnancyStatus();
-        const weeks = ps?.weeks || 0;
-        
-        if (weeks >= 16) {
-            // Живот явно виден - беременность очевидна
-            const count = ps?.babies?.length || 1;
-            const sizeText = weeks >= 28 ? (lang === 'ru' ? 'большой' : 'large') : 
-                            weeks >= 20 ? (lang === 'ru' ? 'заметный' : 'noticeable') :
-                            (lang === 'ru' ? 'округлившийся' : 'rounded');
-            lines.push(lang === 'ru'
-                ? `[У неё ${sizeText} беременный живот${count > 1 ? ', беременность многоплодная' : ''}]`
-                : `[She has a ${sizeText} pregnant belly${count > 1 ? ', carrying multiples' : ''}]`);
-        } else if (weeks >= 12) {
-            // Живот начинает округляться - можно заподозрить
-            lines.push(lang === 'ru'
-                ? `[Её живот немного округлился]`
-                : `[Her belly is slightly rounded]`);
-        } else if (weeks >= 4) {
-            // Только симптомы - тошнота, усталость (НПС не знает что это беременность)
-            lines.push(lang === 'ru'
-                ? `[Она выглядит уставшей, её иногда тошнит]`
-                : `[She looks tired, sometimes feels nauseous]`);
+    $('#repro_reset').on('click', () => {
+        if (confirm('Сбросить все данные репродуктивной системы?')) {
+            extension_settings[extensionName] = structuredClone(defaultSettings);
+            saveSettingsDebounced();
+            syncUI();
+            injectStatusToChat();
+            showNotification("Данные сброшены", "info");
         }
-        // До 4 недель - НИЧЕГО не видно, НПС не знает
-    }
+    });
     
-    // ИППП - только если есть видимые симптомы (герпес, например)
-    const visibleSTI = s.sti.userInfections.filter(x => ['herpes', 'syphilis'].includes(x));
-    if (visibleSTI.length > 0) {
-        lines.push(lang === 'ru'
-            ? `[На теле есть подозрительные высыпания]`
-            : `[There are suspicious rashes on her body]`);
-    }
+    syncUI();
     
-    return lines.length > 0 ? '\n' + lines.join('\n') : '';
-}
-
-function injectPrompt() {
-    try {
-        const context = window.SillyTavern?.getContext?.();
-        if (!context?.setExtensionPrompt) return;
-        
-        const injection = getSystemPromptInjection();
-        context.setExtensionPrompt(extensionName, injection, 1, 0); // position 1 = after main prompt
-        console.log('[ReproHealth] Prompt injected:', injection);
-    } catch (e) {
-        console.log('[ReproHealth] Prompt injection not available');
-    }
-}
-
-(function init() {
-    console.log('[ReproHealth] Init...');
-    
-    if (!extension_settings[extensionName]) {
-        extension_settings[extensionName] = JSON.parse(JSON.stringify(defaultSettings));
-    } else {
-        const merged = JSON.parse(JSON.stringify(defaultSettings));
-        Object.assign(merged, extension_settings[extensionName]);
-        merged.contraception = { ...defaultSettings.contraception, ...extension_settings[extensionName]?.contraception };
-        merged.fertility = { ...defaultSettings.fertility, ...extension_settings[extensionName]?.fertility };
-        merged.menstruation = { ...defaultSettings.menstruation, ...extension_settings[extensionName]?.menstruation };
-        merged.pregnancy = { ...defaultSettings.pregnancy, ...extension_settings[extensionName]?.pregnancy };
-        merged.sti = { ...defaultSettings.sti, ...extension_settings[extensionName]?.sti };
-        merged.stats = { ...defaultSettings.stats, ...extension_settings[extensionName]?.stats };
-        extension_settings[extensionName] = merged;
-    }
-    saveSettings();
-    
-    const waitForUI = setInterval(() => {
-        if (document.querySelector('#extensions_settings2')) {
-            clearInterval(waitForUI);
-            createSettingsPanel();
+    // Следим за состоянием беременности для показа/скрытия кнопок
+    const observer = new MutationObserver(() => {
+        const s = getSettings();
+        const buttons = document.getElementById('repro_pregnancy_buttons');
+        if (buttons) {
+            buttons.style.display = s.isPregnant ? 'flex' : 'none';
         }
-    }, 500);
+    });
+    
+    const statusEl = document.getElementById('repro_pregnancy_status');
+    if (statusEl) {
+        observer.observe(statusEl, { childList: true, subtree: true });
+    }
+}
+
+// ==================== ИНЖЕКТ В ЧАТ ====================
+
+function generateStatusBlock() {
+    const s = getSettings();
+    const lang = s.language || 'ru';
+    
+    let status = '';
+    
+    // Цикл
+    const phase = getCyclePhase();
+    const fertility = isInFertileWindow() ? '🔴 ФЕРТИЛЬНОЕ ОКНО' : '';
+    
+    status += `## 🩺 РЕПРОДУКТИВНЫЙ СТАТУС\n`;
+    status += `📅 День: ${s.currentDay} | Цикл: ${s.cycleDay}/${s.cycleLength}\n`;
+    status += `🩸 Фаза: ${L('phases.' + phase)} ${fertility}\n`;
+    status += `🛡️ Контрацепция: ${L('contraceptionTypes.' + s.contraception)}\n`;
+    
+    if (s.isPregnant) {
+        const week = getPregnancyWeek();
+        const trimester = getTrimester();
+        const stage = getPregnancyStage();
+        determineSex();
+        
+        let sexText = s.fetusSex.length > 0 
+            ? s.fetusSex.map(sex => sex === 'male' ? '♂' : '♀').join(' ')
+            : '?';
+        
+        status += `\n### 🤰 БЕРЕМЕННОСТЬ\n`;
+        status += `Неделя: ${week} | Триместр: ${trimester}\n`;
+        status += `Стадия: ${L('stages.' + stage)}\n`;
+        status += `Плодов: ${s.fetusCount} | Пол: ${sexText}\n`;
+        status += `Симптомы: ${getSymptoms()}\n`;
+        
+        if (s.complications.length > 0) {
+            status += `⚠️ ОСЛОЖНЕНИЯ: ${s.complications.map(c => L('complications.' + c.type)).join(', ')}\n`;
+        }
+    } else {
+        status += `🤰 Беременность: Нет\n`;
+    }
+    
+    return status;
+}
+
+function injectStatusToChat() {
+    const s = getSettings();
+    
+    if (!s.isEnabled || !s.injectToChat) {
+        setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
+        return;
+    }
+    
+    const status = generateStatusBlock();
+    const prompt = `[OOC: Текущий статус персонажа для отслеживания. Учитывай это в описаниях и реакциях, но не упоминай явно числа/статистику:\n\`\`\`\n${status}\n\`\`\`]`;
+    
+    setExtensionPrompt(
+        extensionName,
+        prompt,
+        extension_prompt_types.IN_CHAT,
+        0
+    );
+}
+
+function injectConceptionResult(result) {
+    const s = getSettings();
+    if (!s.injectToChat) return;
+    
+    let message = `[OOC: ПРОВЕРКА ЗАЧАТИЯ\n`;
+    message += `День цикла: ${result.cycleDay} (${L('phases.' + result.phase)})\n`;
+    message += `Базовый шанс: ${result.baseChance}%\n`;
+    message += `Контрацепция: ${L('contraceptionTypes.' + result.contraception)}`;
+    if (result.contraceptionFailed) message += ` (ПОДВЕЛА!)`;
+    message += `\nИтоговый шанс: ${result.finalChance}%\n`;
+    message += `Бросок: ${result.roll}\n`;
+    message += `РЕЗУЛЬТАТ: ${result.success ? '✅ ЗАЧАТИЕ!' : '❌ Нет зачатия'}\n`;
+    
+    if (result.success) {
+        message += `Плодов: ${s.fetusCount}`;
+    }
+    message += `]`;
+    
+    // Временный инжект результата
+    setExtensionPrompt(
+        extensionName + '_result',
+        message,
+        extension_prompt_types.IN_CHAT,
+        1
+    );
+    
+    // Очистим через некоторое время
+    setTimeout(() => {
+        setExtensionPrompt(extensionName + '_result', '', extension_prompt_types.IN_CHAT, 1);
+    }, 100);
+}
+
+function injectLaborResult(result) {
+    const s = getSettings();
+    if (!s.injectToChat) return;
+    
+    let message = `[OOC: РОДЫ\n`;
+    message += `Неделя: ${result.week}${result.preterm ? ' (ПРЕЖДЕВРЕМЕННЫЕ)' : ''}\n`;
+    message += `Детей: ${result.fetusCount}\n`;
+    message += `Пол: ${result.fetusSex.map(sex => sex === 'male' ? '♂ Мальчик' : '♀ Девочка').join(', ')}\n`;
+    message += `Исход: ${result.outcome}\n`;
+    
+    if (result.complications && result.complications.length > 0) {
+        message += `⚠️ Осложнения: ${result.complications.map(c => L('complications.' + c.type)).join(', ')}\n`;
+    }
+    message += `]`;
+    
+    setExtensionPrompt(
+        extensionName + '_result',
+        message,
+        extension_prompt_types.IN_CHAT,
+        1
+    );
     
     setTimeout(() => {
-        try {
-            const context = window.SillyTavern?.getContext?.();
-            if (context?.eventSource && context?.eventTypes) {
-                context.eventSource.on(context.eventTypes.MESSAGE_RECEIVED, onChatMessage);
-                context.eventSource.on(context.eventTypes.CHARACTER_MESSAGE_RENDERED, onChatMessage);
-                console.log('[ReproHealth] Events attached!');
-            }
-        } catch(e) {
-            console.log('[ReproHealth] Events fallback');
+        setExtensionPrompt(extensionName + '_result', '', extension_prompt_types.IN_CHAT, 1);
+    }, 100);
+}
+
+// ==================== ИНИЦИАЛИЗАЦИЯ ====================
+
+function loadSettings() {
+    if (!extension_settings[extensionName]) {
+        extension_settings[extensionName] = structuredClone(defaultSettings);
+    }
+    
+    // Добавляем недостающие поля
+    for (const key in defaultSettings) {
+        if (extension_settings[extensionName][key] === undefined) {
+            extension_settings[extensionName][key] = defaultSettings[key];
         }
-    }, 3000);
+    }
+}
+
+jQuery(async () => {
+    console.log('[Reproductive System] Loading...');
     
-    console.log('[ReproHealth] Loaded!');
+    loadSettings();
+    setupUI();
     
-    // Inject prompt on init
-    setTimeout(injectPrompt, 4000);
-})();
+    // Инжектим статус при загрузке
+    injectStatusToChat();
+    
+    // Обновляем статус при отправке сообщения
+    eventSource.on(event_types.MESSAGE_SENT, () => {
+        injectStatusToChat();
+    });
+    
+    console.log('[Reproductive System] Ready!');
+});
