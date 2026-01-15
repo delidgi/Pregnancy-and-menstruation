@@ -13,6 +13,7 @@ const defaultSettings = {
     fetusCount: 1,
     fetusSex: [],
     cycleDay: 1,
+    lastCycleUpdate: null,
     totalChecks: 0,
     totalConceptions: 0
 };
@@ -110,6 +111,45 @@ function getCycleModifier(day) {
     if (day >= 17) return CHANCES.cycleModifier['17-28'].luteal;
     return CHANCES.cycleModifier['1-7'].low;
 }
+function updateCycleDay() {
+    const s = getSettings();
+    if (!s.isEnabled) return;
+    
+    const now = Date.now();
+    
+    if (!s.lastCycleUpdate) {
+        s.lastCycleUpdate = now;
+        saveSettingsDebounced();
+        console.log('[Reproductive] Cycle timer initialized');
+        return;
+    }
+    
+    const timeDiff = now - s.lastCycleUpdate;
+    const daysPassed = Math.floor(timeDiff / 86400000);
+    
+    if (daysPassed > 0) {
+        const oldDay = s.cycleDay;
+        
+        s.cycleDay += daysPassed;
+        
+        while (s.cycleDay > 28) {
+            s.cycleDay -= 28;
+        }
+        
+        s.lastCycleUpdate = now;
+        
+        console.log(`[Reproductive] Auto-update: ${oldDay} → ${s.cycleDay} (${daysPassed} days passed)`);
+        
+        saveSettingsDebounced();
+        syncUI();
+        updatePromptInjection();
+        
+        if (s.showNotifications) {
+            showNotification(`📅 День цикла обновлён: ${s.cycleDay}`, 'info');
+        }
+    }
+}
+
 
 function initCustomNotifications() {
     if ($('#custom-notification-container').length > 0) return;
@@ -349,6 +389,7 @@ function onMessageReceived() {
             const aiCycleDay = parseInt(cycleDayMatch[1]);
             if (aiCycleDay >= 1 && aiCycleDay <= 28) {
                 s.cycleDay = aiCycleDay;
+                s.lastCycleUpdate = Date.now();
                 saveSettingsDebounced();
                 syncUI();
                 console.log('[Reproductive] Cycle day from AI:', aiCycleDay);
@@ -445,6 +486,8 @@ function updatePromptInjection() {
         
         if (!s.isEnabled) return;
         
+        updateCycleDay();
+        
         const fullPrompt = getBasePrompt() + getPregnancyPrompt();
         
         console.log('[Reproductive] Injecting prompt, length:', fullPrompt.length);
@@ -480,16 +523,16 @@ function injectConceptionResult(result) {
     codeBlock += `🎲 Roll: ${result.roll} | Порог: ${result.chance}\n`;
     
     if (result.contraceptionFailed) {
-        codeBlock += `⚠️ Контрацепция ПОДВЕЛА!\n`;
+        codeBlock += `Контрацепция ПОДВЕЛА!\n`;
     }
     
     if (result.success) {
-        codeBlock += `✅ PREGNANT\n`;
+        codeBlock += `Беременна!\n`;
         codeBlock += `- Embryos: ${s.fetusCount}\n`;
         const sexes = s.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
         if (sexes) codeBlock += `- Sex: ${sexes}\n`;
     } else {
-        codeBlock += `❌ NO CONCEPTION\n`;
+        codeBlock += `❌ Нет контрацепции\n`;
     }
     
     codeBlock += '```';
@@ -696,6 +739,7 @@ function setupUI() {
             
             const s = getSettings();
             s.cycleDay = clamped;
+            s.lastCycleUpdate = Date.now(); 
             
             console.log('[Reproductive] Cycle day set to:', clamped);
             
@@ -786,7 +830,7 @@ jQuery(async () => {
         setupUI();
         console.log('[Reproductive] UI OK');
         
-        updatePromptInjection();
+        updatePromptInjection(); 
         console.log('[Reproductive] Initial prompt injection OK');
         
         eventSource.on(event_types.MESSAGE_SENT, () => {
@@ -799,15 +843,14 @@ jQuery(async () => {
         if (event_types.CHAT_CHANGED) {
             eventSource.on(event_types.CHAT_CHANGED, () => {
                 console.log('[Reproductive] CHAT_CHANGED - refreshing prompt');
-                updatePromptInjection();
+                updatePromptInjection(); 
                 syncUI();
             });
         }
         
-        console.log('[Reproductive] System Ready! Glassmorphism notifications enabled.');
+        console.log('[Reproductive] System Ready! Auto cycle tracking enabled.');
         
     } catch (error) {
         console.error('[Reproductive] System FATAL ERROR:', error);
     }
 });
-
