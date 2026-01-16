@@ -1,6 +1,16 @@
 import { eventSource, event_types, saveSettingsDebounced, setExtensionPrompt, extension_prompt_types } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
-
+function getSeededRandomSymptoms(arr, count, seed) {
+    function seededRandom(s) {
+        const x = Math.sin(s) * 10000;
+        return x - Math.floor(x);
+    }
+    const indexed = arr.map((item, idx) => ({ item, idx }));
+    indexed.sort((a, b) => {
+        return seededRandom(seed * 1000 + a.idx) - seededRandom(seed * 1000 + b.idx);
+    });
+    return indexed.slice(0, count).map(x => x.item).join(', ');
+}
 const extensionName = 'reproductive-system';
 
 const defaultSettings = {
@@ -638,29 +648,70 @@ function getPregnancyPrompt() {
     const s = getSettings();
     if (!s.isPregnant) return '';
 
-    let fetusText = s.fetusCount === 1 ? 'одним плодом' : 
-                    s.fetusCount === 2 ? 'двойней!' :
-                    'тройней! (о боже)';
+    const conceptionDate = new Date(s.conceptionDate);
+    const today = new Date();
+    const diffTime = Math.abs(today - conceptionDate);
+    const weeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
 
-    let prompt = `\n\n[OOC: {{user}} беременна ${fetusText}\n`;
-    prompt += `Дата зачатия: ${s.conceptionDate}\n`;
-    prompt += `⚠️ ДОБАВЬ В СТАТУС:\n`;
-    prompt += `🤰 Беременна: ${fetusText}\n`;
-    prompt += `📆 Срок: [X недель]\n`;
-    prompt += `\n`;
-    prompt += `СИМПТОМЫ ПО НЕДЕЛЯМ:\n`;
-    prompt += `1-4 нед: Задержка, тошнота, усталость.\n`;
-    prompt += `5-8 нед: Токсикоз, чувствительность груди.\n`;
-    prompt += `9-12 нед: Живот округляется.\n`;
-    prompt += `13-16 нед: Шевеления, либидо растёт.\n`;
-    prompt += `17-20 нед: Живот заметен!\n`;
-    prompt += `21-27 нед: Тяжесть, отёки, боли в спине.\n`;
-    prompt += `28-36 нед: Усталость, одышка.\n`;
-    prompt += `37-40 нед: Готовность к родам.\n`;
-    prompt += `41+ нед: Перенашивание!]`;
+    const fetusText = s.fetusCount === 1 ? 'одним плодом' : s.fetusCount === 2 ? 'двойней!' : 'тройней!';
+
+    let symptoms = '';
+    let recommendations = '';
+    if (weeks <= 4) {
+        const early = ['задержка менструации', 'лёгкая тошнота по утрам', 'повышенная усталость', 'перепады настроения', 'обострение обоняния', 'покалывание в груди', 'сонливость днём', 'лёгкие спазмы внизу живота'];
+        symptoms = getSeededRandomSymptoms(early, 3, weeks);
+        recommendations = 'Фолиевая кислота 400 мкг/день, тест на ХГЧ, избегать алкоголя/курения';
+    } else if (weeks <= 8) {
+        const firstTrim = ['токсикоз (рвота 2-5 раз в день)', 'чувствительность и набухание груди', 'частое мочеиспускание', 'металлический привкус во рту', 'отвращение к запахам', 'повышенное слюноотделение', 'головокружение', 'запоры', 'эмоциональная нестабильность'];
+        symptoms = getSeededRandomSymptoms(firstTrim, 4, weeks);
+        recommendations = 'Встать на учёт до 12 недель, первый скрининг УЗИ, дробное питание, имбирный чай от тошноты';
+    } else if (weeks <= 12) {
+        const earlySecond = ['живот начинает округляться', 'токсикоз ослабевает', 'эмоциональные перепады', 'пигментация кожи', 'венозная сетка на груди', 'повышенный аппетит', 'одышка при подъёме по лестнице', 'кровоточивость дёсен'];
+        symptoms = getSeededRandomSymptoms(earlySecond, 4, weeks);
+        recommendations = 'Контроль веса (+0.3-0.5 кг/неделю), кальцийсодержащие продукты, избегать горячих ванн';
+    } else if (weeks <= 16) {
+        const midSecond = ['первые шевеления плода (бабочки в животе)', 'либидо возрастает', 'энергия возвращается', 'грудь увеличивается на 1-2 размера', 'кожа становится чище', 'волосы гуще и блестят', 'судороги в икрах по ночам', 'заложенность носа'];
+        symptoms = getSeededRandomSymptoms(midSecond, 4, weeks);
+        recommendations = 'Второй скрининг (18-21 неделя) определит пол, массаж от растяжек, витамин D3';
+    } else if (weeks <= 20) {
+        const lateSecond = ['живот заметно увеличен', 'учащённое сердцебиение', 'округление лица', 'растяжки на коже живота/бёдер', 'молозиво из сосков', 'судороги в ногах', 'изжога после жирной еды', 'потемнение ареол', 'пигментные пятна на лице'];
+        symptoms = getSeededRandomSymptoms(lateSecond, 5, weeks);
+        recommendations = 'Бандаж для поддержки живота, железосодержащие продукты, крем от растяжек';
+    } else if (weeks <= 27) {
+        const thirdStart = ['тяжесть в животе', 'отёки ног к вечеру', 'боли в пояснице', 'одышка при ходьбе', 'изжога усиливается', 'бессонница (трудно найти позу)', 'зуд кожи живота (растяжение)', 'активные толчки плода (видны через живот)', 'варикозное расширение вен', 'геморрой'];
+        symptoms = getSeededRandomSymptoms(thirdStart, 5, weeks);
+        recommendations = 'Сон на левом боку, компрессионные чулки, дробное питание, КТГ';
+    } else if (weeks <= 36) {
+        const lateThird = ['сильная усталость', 'частые походы в туалет (каждые 30-60 мин)', 'тренировочные схватки Брэкстона-Хикса', 'тяжело дышать (матка давит на диафрагму)', 'отёки рук/лица по утрам', 'бессонница', 'боли в тазу (расхождение костей)', 'выделения усиливаются', 'пупок выворачивается наружу', 'походка утиная'];
+        symptoms = getSeededRandomSymptoms(lateThird, 6, weeks);
+        recommendations = 'Сбор сумки в роддом, упражнения Кегеля, КТГ еженедельно';
+    } else if (weeks <= 40) {
+        const preBirth = ['живот опустился (головка в таз)', 'отхождение слизистой пробки', 'схватки каждые 10-15 минут', 'подтекание околоплодных вод', 'диарея (организм чистится)', 'тянущие боли внизу живота', 'резкий прилив энергии (синдром гнездования)', 'потеря веса 1-2 кг', 'тошнота/рвота', 'давление на прямую кишку'];
+        symptoms = getSeededRandomSymptoms(preBirth, 5, weeks);
+        recommendations = 'НЕ УХОДИТЬ ДАЛЕКО! Телефон роддома под рукой, считать схватки';
+    } else {
+        symptoms = '⚠️ ПЕРЕНАШИВАНИЕ (>40 недель)! Риск гипоксии плода';
+        recommendations = '⚠️ СРОЧНО К ВРАЧУ! КТГ ежедневно, возможна стимуляция';
+    }
+
+    let prompt = `
+
+🤰 БЕРЕМЕННОСТЬ АКТИВНА
+📅 Срок: ${weeks} недель / 40
+👶 Плодов: ${s.fetusCount}
+📆 Зачатие: ${s.conceptionDate}
+
+💊 СИМПТОМЫ:
+${symptoms}
+
+✓ РЕКОМЕНДАЦИИ:
+${recommendations}
+
+⚠️ Персонаж ДОЛЖЕН демонстрировать эти симптомы!`;
 
     return prompt;
 }
+
 
 function updatePromptInjection() {
     try {
@@ -788,163 +839,174 @@ function syncUI() {
     const monitorContent = document.getElementById('repro-pregnancy-content');
 
     if (monitorBlock && monitorContent) {
-        if (s.isPregnant && s.conceptionDate) {
-            monitorBlock.style.display = 'block';
+    if (s.isPregnant && s.conceptionDate) {
+        monitorBlock.style.display = 'block';
 
-            const conceptionTime = new Date(s.conceptionDate).getTime();
-            const now = Date.now();
-            const diffMs = now - conceptionTime;
-            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-            const weeks = Math.floor(diffDays / 7);
-            const days = diffDays % 7;
+        const conceptionTime = new Date(s.conceptionDate).getTime();
+        const now = Date.now();
+        const diffMs = now - conceptionTime;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        const weeks = Math.floor(diffDays / 7);
+        const days = diffDays % 7;
 
-            const dueDate = new Date(conceptionTime + (280 * 24 * 60 * 60 * 1000));
-            const dueDateStr = dueDate.toLocaleDateString('ru-RU', { 
-                day: 'numeric', 
-                month: 'long', 
-                year: 'numeric' 
-            });
+        const dueDate = new Date(conceptionTime + (280 * 24 * 60 * 60 * 1000));
+        const dueDateStr = dueDate.toLocaleDateString('ru-RU', { 
+            day: 'numeric', 
+            month: 'long', 
+            year: 'numeric' 
+        });
 
-            const progressPercent = Math.min(100, Math.round((weeks / 40) * 100));
+        const progressPercent = Math.min(100, Math.round((weeks / 40) * 100));
 
-            const sexIcons = s.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
+        const sexIcons = s.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
 
-            let fetusText = s.fetusCount === 1 ? 'Один плод' :
-                           s.fetusCount === 2 ? 'Двойня' : 'Тройня';
+        let fetusText = s.fetusCount === 1 ? 'Один плод' :
+                       s.fetusCount === 2 ? 'Двойня' : 'Тройня';
 
-            let symptoms = '';
-            if (weeks <= 4) {
-                symptoms = 'Задержка менструации, лёгкая тошнота по утрам, повышенная усталость.';
-            } else if (weeks <= 8) {
-                symptoms = 'Токсикоз, чувствительность и набухание груди, частое мочеиспускание.';
-            } else if (weeks <= 12) {
-                symptoms = 'Живот начинает округляться, токсикоз ослабевает, эмоциональные перепады.';
-            } else if (weeks <= 16) {
-                symptoms = 'Первые шевеления плода! Либидо может возрасти, энергия возвращается.';
-            } else if (weeks <= 20) {
-                symptoms = 'Живот заметно увеличен, учащённое сердцебиение, округление лица.';
-            } else if (weeks <= 27) {
-                symptoms = 'Тяжесть в животе, отёки ног, боли в пояснице, одышка при ходьбе.';
-            } else if (weeks <= 36) {
-                symptoms = 'Сильная усталость, частые походы в туалет, тренировочные схватки (Брэкстона-Хикса).';
-            } else if (weeks <= 40) {
-                symptoms = 'Живот опустился, готовность к родам. Возможны предвестники: отхождение пробки, схватки.';
-            } else {
-                symptoms = '⚠️ ПЕРЕНАШИВАНИЕ! Необходим контроль врача, возможна стимуляция родов.';
-            }
+let symptoms = '';
+let recommendations = '';
 
-            let recommendations = '';
-            if (weeks <= 12) {
-                recommendations = '✓ Приём фолиевой кислоты, избегать стрессов, встать на учёт в ЖК.';
-            } else if (weeks <= 27) {
-                recommendations = '✓ Регулярные прогулки, контроль веса, скрининг 2 триместра.';
-            } else {
-                recommendations = '✓ Подготовка к родам, сбор сумки в роддом, КТГ плода еженедельно.';
-            }
+if (weeks <= 4) {
+    const early = ['задержка менструации', 'лёгкая тошнота по утрам', 'повышенная усталость', 'перепады настроения', 'обострение обоняния', 'покалывание в груди', 'сонливость днём', 'лёгкие спазмы внизу живота'];
+    symptoms = getSeededRandomSymptoms(early, 3, weeks);
+    recommendations = '✓ Фолиевая кислота 400 мкг/день, тест на ХГЧ, избегать алкоголя/курения.';
+} else if (weeks <= 8) {
+    const firstTrim = ['токсикоз (рвота 2-5 раз в день)', 'чувствительность и набухание груди', 'частое мочеиспускание', 'металлический привкус во рту', 'отвращение к запахам', 'повышенное слюноотделение', 'головокружение', 'запоры', 'эмоциональная нестабильность'];
+    symptoms = getSeededRandomSymptoms(firstTrim, 4, weeks);
+    recommendations = '✓ Встать на учёт до 12 недель, первый скрининг УЗИ, дробное питание, имбирный чай от тошноты.';
+} else if (weeks <= 12) {
+    const earlySecond = ['живот начинает округляться', 'токсикоз ослабевает', 'эмоциональные перепады', 'пигментация кожи', 'венозная сетка на груди', 'повышенный аппетит', 'одышка при подъёме по лестнице', 'кровоточивость дёсен'];
+    symptoms = getSeededRandomSymptoms(earlySecond, 4, weeks);
+    recommendations = '✓ Контроль веса (+0.3-0.5 кг/неделю), кальцийсодержащие продукты, избегать горячих ванн, секс разрешён.';
+} else if (weeks <= 16) {
+    const midSecond = ['первые шевеления плода (бабочки в животе)', 'либидо возрастает', 'энергия возвращается', 'грудь увеличивается на 1-2 размера', 'кожа становится чище', 'волосы гуще и блестят', 'судороги в икрах по ночам', 'заложенность носа'];
+    symptoms = getSeededRandomSymptoms(midSecond, 4, weeks);
+    recommendations = '✓ Второй скрининг (18-21 неделя) определит пол, массаж от растяжек, витамин D3, общение с малышом.';
+} else if (weeks <= 20) {
+    const lateSecond = ['живот заметно увеличен', 'учащённое сердцебиение', 'округление лица', 'растяжки на коже живота/бёдер', 'молозиво из сосков', 'судороги в ногах', 'изжога после жирной еды', 'потемнение ареол', 'пигментные пятна на лице'];
+    symptoms = getSeededRandomSymptoms(lateSecond, 5, weeks);
+    recommendations = '✓ Бандаж для поддержки живота, железосодержащие продукты (говядина/гречка), крем от растяжек, курсы для беременных.';
+} else if (weeks <= 27) {
+    const thirdStart = ['тяжесть в животе', 'отёки ног к вечеру', 'боли в пояснице', 'одышка при ходьбе', 'изжога усиливается', 'бессонница (трудно найти позу)', 'зуд кожи живота (растяжение)', 'активные толчки плода (видны через живот)', 'варикозное расширение вен', 'геморрой'];
+    symptoms = getSeededRandomSymptoms(thirdStart, 5, weeks);
+    recommendations = '✓ Сон на левом боку (подушка между ног), компрессионные чулки при варикозе, дробное питание от изжоги, КТГ плода.';
+} else if (weeks <= 36) {
+    const lateThird = ['сильная усталость', 'частые походы в туалет (каждые 30-60 мин)', 'тренировочные схватки Брэкстона-Хикса', 'тяжело дышать (матка давит на диафрагму)', 'отёки рук/лица по утрам', 'бессонница', 'боли в тазу (расхождение костей)', 'выделения усиливаются', 'пупок выворачивается наружу', 'походка утиная'];
+    symptoms = getSeededRandomSymptoms(lateThird, 6, weeks);
+    recommendations = '✓ Сбор сумки в роддом, упражнения Кегеля, массаж промежности (профилактика разрывов), КТГ еженедельно, выбрать роддом.';
+} else if (weeks <= 40) {
+    const preBirth = ['живот опустился (головка в таз)', 'отхождение слизистой пробки (кровянистые выделения)', 'схватки каждые 10-15 минут', 'подтекание околоплодных вод', 'диарея (организм чистится перед родами)', 'тянущие боли внизу живота', 'резкий прилив энергии (синдром гнездования)', 'потеря веса 1-2 кг за неделю', 'тошнота/рвота', 'давление на прямую кишку'];
+    symptoms = getSeededRandomSymptoms(preBirth, 5, weeks);
+    recommendations = '✓ НЕ ОТХОДИТЬ ДАЛЕКО ОТ ДОМА! Телефон роддома под рукой, документы готовы, партнёрские роды согласованы, считать интервалы между схватками.';
+} else {
+    symptoms = '⚠️ ПЕРЕНАШИВАНИЕ (>40 недель)! Плацента стареет, риск гипоксии плода, маловодие, кожа малыша сухая/шелушится.';
+    recommendations = '⚠️ СРОЧНО К ВРАЧУ! КТГ ежедневно, допплер сосудов, возможна стимуляция родов окситоцином или экстренное кесарево сечение.';
+}
 
-            let healthIcon = '✅';
-            let healthText = 'Норма';
-            let healthColor = '#00ff88';
 
-            if (s.healthStatus === 'warning') {
-                healthIcon = '⚠️';
-                healthText = 'Требует внимания';
-                healthColor = '#ffaa00';
-            } else if (s.healthStatus === 'critical') {
-                healthIcon = '🚨';
-                healthText = 'КРИТИЧЕСКОЕ';
-                healthColor = '#ff4444';
-            }
+        let healthIcon = '✅';
+        let healthText = 'Норма';
+        let healthColor = '#00ff88';
 
-            let riskFactors = [];
-            if (s.fetusCount >= 2) riskFactors.push('Многоплодная беременность');
-            if (weeks >= 41) riskFactors.push('Перенашивание');
-            if (s.complications.length > 2) riskFactors.push('Множественные осложнения');
+        if (s.healthStatus === 'warning') {
+            healthIcon = '⚠️';
+            healthText = 'Требует внимания';
+            healthColor = '#ffaa00';
+        } else if (s.healthStatus === 'critical') {
+            healthIcon = '🚨';
+            healthText = 'КРИТИЧЕСКОЕ';
+            healthColor = '#ff4444';
+        }
 
-            const riskHTML = riskFactors.length > 0 
-                ? `<div class="pregnancy-info-row">
-                       <span class="pregnancy-info-label">⚠️ Факторы риска:</span>
-                       <span class="pregnancy-info-value" style="color: #ffaa00; font-size: 11px;">
-                           ${riskFactors.join(', ')}
-                       </span>
-                   </div>`
-                : '';
+        let riskFactors = [];
+        if (s.fetusCount >= 2) riskFactors.push('Многоплодная беременность');
+        if (weeks >= 41) riskFactors.push('Перенашивание');
+        if (s.complications.length > 2) riskFactors.push('Множественные осложнения');
 
-            let complicationsHTML = '';
-            if (s.complications && s.complications.length > 0) {
-                const recentComplications = s.complications.slice(-3).reverse();
-                complicationsHTML = `
-                    <div class="pregnancy-complications">
-                        <div class="pregnancy-complications-title">📋 История осложнений:</div>
-                        ${recentComplications.map(comp => {
-                            const severityColor = comp.severity === 'critical' ? '#ff4444' : '#ffaa00';
-                            const severityIcon = comp.severity === 'critical' ? '🚨' : '⚠️';
-                            return `
-                                <div class="complication-item">
-                                    <div style="display: flex; align-items: center; gap: 5px;">
-                                        <span style="color: ${severityColor};">${severityIcon}</span>
-                                        <strong>${comp.type}</strong>
-                                        <span style="opacity: 0.5; font-size: 10px;">(${comp.week} нед.)</span>
-                                    </div>
-                                    <div style="font-size: 11px; opacity: 0.7; margin-top: 3px;">
-                                        ${comp.description}
-                                    </div>
+        const riskHTML = riskFactors.length > 0 
+            ? `<div class="pregnancy-info-row">
+                   <span class="pregnancy-info-label">⚠️ Факторы риска:</span>
+                   <span class="pregnancy-info-value" style="color: #ffaa00; font-size: 11px;">
+                       ${riskFactors.join(', ')}
+                   </span>
+               </div>`
+            : '';
+
+        let complicationsHTML = '';
+        if (s.complications && s.complications.length > 0) {
+            const recentComplications = s.complications.slice(-3).reverse();
+            complicationsHTML = `
+                <div class="pregnancy-complications">
+                    <div class="pregnancy-complications-title">📋 История осложнений:</div>
+                    ${recentComplications.map(comp => {
+                        const severityColor = comp.severity === 'critical' ? '#ff4444' : '#ffaa00';
+                        const severityIcon = comp.severity === 'critical' ? '🚨' : '⚠️';
+                        return `
+                            <div class="complication-item">
+                                <div style="display: flex; align-items: center; gap: 5px;">
+                                    <span style="color: ${severityColor};">${severityIcon}</span>
+                                    <strong>${comp.type}</strong>
+                                    <span style="opacity: 0.5; font-size: 10px;">(${comp.week} нед.)</span>
                                 </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
-            }
-
-            monitorContent.innerHTML = `
-                <div class="pregnancy-info-row">
-                    <span class="pregnancy-info-label">🩺 Здоровье:</span>
-                    <span class="pregnancy-info-value" style="color: ${healthColor};">
-                        ${healthIcon} ${healthText}
-                    </span>
+                                <div style="font-size: 11px; opacity: 0.7; margin-top: 3px;">
+                                    ${comp.description}
+                                </div>
+                            </div>
+                        `;
+                    }).join('')}
                 </div>
-
-                <div class="pregnancy-info-row">
-                    <span class="pregnancy-info-label">📅 Дата зачатия:</span>
-                    <span class="pregnancy-info-value">${new Date(s.conceptionDate).toLocaleDateString('ru-RU')}</span>
-                </div>
-
-                <div class="pregnancy-info-row">
-                    <span class="pregnancy-info-label">⏱️ Срок:</span>
-                    <span class="pregnancy-info-value">${weeks} нед. ${days} дн.</span>
-                </div>
-
-                <div class="pregnancy-info-row">
-                    <span class="pregnancy-info-label">👶 Плоды:</span>
-                    <span class="pregnancy-info-value">${fetusText} ${sexIcons}</span>
-                </div>
-
-                <div class="pregnancy-info-row">
-                    <span class="pregnancy-info-label">🗓️ ПДР:</span>
-                    <span class="pregnancy-info-value">${dueDateStr}</span>
-                </div>
-
-                ${riskHTML}
-
-                <div class="pregnancy-progress-bar">
-                    <div class="pregnancy-progress-fill" style="width: ${progressPercent}%"></div>
-                </div>
-                <div style="text-align: center; font-size: 11px; opacity: 0.7; margin-bottom: 10px;">
-                    ${progressPercent}% до родов
-                </div>
-
-                <div class="pregnancy-symptoms">
-                    <div class="pregnancy-symptoms-title">🩺 Текущие симптомы (${weeks} нед.):</div>
-                    <div class="pregnancy-symptoms-text">${symptoms}</div>
-                </div>
-
-                <div class="pregnancy-recommendations">
-                    <div class="pregnancy-recommendations-title">💡 Рекомендации:</div>
-                    <div class="pregnancy-recommendations-text">${recommendations}</div>
-                </div>
-
-                ${complicationsHTML}
             `;
+        }
+
+        monitorContent.innerHTML = `
+            <div class="pregnancy-info-row">
+                <span class="pregnancy-info-label">🩺 Здоровье:</span>
+                <span class="pregnancy-info-value" style="color: ${healthColor};">
+                    ${healthIcon} ${healthText}
+                </span>
+            </div>
+
+            <div class="pregnancy-info-row">
+                <span class="pregnancy-info-label">📅 Дата зачатия:</span>
+                <span class="pregnancy-info-value">${new Date(s.conceptionDate).toLocaleDateString('ru-RU')}</span>
+            </div>
+
+            <div class="pregnancy-info-row">
+                <span class="pregnancy-info-label">⏱️ Срок:</span>
+                <span class="pregnancy-info-value">${weeks} нед. ${days} дн.</span>
+            </div>
+
+            <div class="pregnancy-info-row">
+                <span class="pregnancy-info-label">👶 Плоды:</span>
+                <span class="pregnancy-info-value">${fetusText} ${sexIcons}</span>
+            </div>
+
+            <div class="pregnancy-info-row">
+                <span class="pregnancy-info-label">🗓️ ПДР:</span>
+                <span class="pregnancy-info-value">${dueDateStr}</span>
+            </div>
+
+            ${riskHTML}
+
+            <div class="pregnancy-progress-bar">
+                <div class="pregnancy-progress-fill" style="width: ${progressPercent}%"></div>
+            </div>
+            <div style="text-align: center; font-size: 11px; opacity: 0.7; margin-bottom: 10px;">
+                ${progressPercent}% до родов
+            </div>
+
+            <div class="pregnancy-symptoms">
+                <div class="pregnancy-symptoms-title">🩺 Текущие симптомы (${weeks} нед.):</div>
+                <div class="pregnancy-symptoms-text">${symptoms}</div>
+            </div>
+
+            <div class="pregnancy-recommendations">
+                <div class="pregnancy-recommendations-title">💡 Рекомендации:</div>
+                <div class="pregnancy-recommendations-text">${recommendations}</div>
+            </div>
+
+            ${complicationsHTML}
+        `;
         } else {
             monitorBlock.style.display = 'none';
         }
