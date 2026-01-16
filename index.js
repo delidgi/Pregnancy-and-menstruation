@@ -1316,15 +1316,19 @@ jQuery(async () => {
 
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
 
-        if (event_types.CHAT_CHANGED) {
-            eventSource.on(event_types.CHAT_CHANGED, () => {
-                console.log('[Reproductive] CHAT_CHANGED - refreshing prompt');
-                updatePromptInjection();
-                syncUI();
-            });
-        }
+       if (event_types.CHAT_CHANGED) { 
+    eventSource.on(event_types.CHAT_CHANGED, async () => {  // ← добавь async
+        console.log('[Reproductive] CHAT_CHANGED - refreshing prompt');
+        await setGlobalVariable('pregnant', 'false');
+        await setGlobalVariable('conception_date', '');
+        await setGlobalVariable('weeks_pregnant', '0');
+        await setGlobalVariable('embryo_count', '0');
+        await setGlobalVariable('embryo_sexes', '');
+        
+        console.log('[Interactive Panel] Pregnancy variables reset for new chat');
+    }); 
+} 
 
-        console.log('[Reproductive] System Ready! Auto-parsing enabled.');
 
     } catch (error) {
         console.error('[Reproductive] System FATAL ERROR:', error);
