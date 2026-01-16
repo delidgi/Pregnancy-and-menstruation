@@ -430,13 +430,13 @@ function checkConception() {
         }
 
         if (s.showNotifications) {
-            let msg = `✅ PREGNANT! День ${s.cycleDay}, roll ${conceptionRoll}/${chance}`;
+            let msg = `✅ Беременна! День ${s.cycleDay},  ${conceptionRoll}/${chance}`;
             if (s.fetusCount > 1) msg += ` (${s.fetusCount === 2 ? 'двойня' : 'тройня'}!)`;
             showNotification(msg, 'success');
         }
     } else {
         if (s.showNotifications) {
-            showNotification(`❌ NO. День ${s.cycleDay}, roll ${conceptionRoll}/${chance}`, 'info');
+            showNotification(`❌ Не Беременна. День ${s.cycleDay}, ${conceptionRoll}/${chance}`, 'info');
         }
     }
 
