@@ -20,6 +20,7 @@ const defaultSettings = {
     contraception: 'none',
     isPregnant: false,
     conceptionDate: null,
+    pregnancyWeeks: 0,  // Срок в неделях (для РП, не привязан к реальному времени)
     fetusCount: 1,
     fetusSex: [],
     cycleDay: 1,
@@ -142,17 +143,38 @@ function parseAIStatus(text) {
         }
     }
 
-    const pregnancyMatch = text.match(/[Бб]еременна[^\n]{0,50}(\d+)\s*недел|[Pp]regnant[^\n]{0,50}(\d+)\s*week/i);
-    if (pregnancyMatch) {
-        const weeks = parseInt(pregnancyMatch[1] || pregnancyMatch[2]);
+    // Улучшенный regex для парсинга срока беременности - ловит больше форматов
+    const pregnancyPatterns = [
+        /[Бб]еременност[ьи][^\n]{0,30}[\(:\s]+(\d+)\s*недел/i,  // БЕРЕМЕННОСТЬ (9 недель) или БЕРЕМЕННОСТИ: 9 недель
+        /[Сс][Рр][Оо][Кк][:\s]+(\d+)\s*недел/i,                  // СРОК: 9 недель
+        /[Бб]еременна[^\n]{0,50}(\d+)\s*недел/i,                 // беременна ... 9 недель
+        /(\d+)\s*недел[ьяи][^\n]{0,30}беременност/i,             // 9 недель беременности
+        /[Pp]regnant[^\n]{0,50}(\d+)\s*week/i,                   // pregnant ... 9 weeks
+        /[Pp]regnancy[^\n]{0,30}[\(:\s]+(\d+)\s*week/i           // pregnancy (9 weeks)
+    ];
+    
+    let weeks = null;
+    for (const pattern of pregnancyPatterns) {
+        const match = text.match(pattern);
+        if (match) {
+            weeks = parseInt(match[1]);
+            console.log(`[Reproductive] Matched pregnancy pattern: ${pattern}, weeks: ${weeks}`);
+            break;
+        }
+    }
+    
+    if (weeks !== null && weeks > 0) {
         console.log(`[Reproductive] Parsed pregnancy: ${weeks} weeks`);
 
-        if (weeks > 0 && !s.isPregnant) {
+        if (!s.isPregnant) {
             console.log('[Reproductive] AI says pregnant, but extension data is not. Setting pregnant...');
             s.isPregnant = true;
-
-            const conceptionTime = Date.now() - (weeks * 7 * 24 * 60 * 60 * 1000);
-            s.conceptionDate = new Date(conceptionTime).toISOString();
+            s.pregnancyWeeks = weeks;
+            
+            // Устанавливаем conceptionDate только для совместимости, но используем pregnancyWeeks для отображения
+            if (!s.conceptionDate) {
+                s.conceptionDate = new Date().toISOString();
+            }
 
             const multiples = text.match(/[Дд]войн|[Тт]ройн|[Tt]wins|[Tt]riplets/i);
             if (multiples) {
@@ -177,14 +199,13 @@ function parseAIStatus(text) {
             if (s.showNotifications) {
                 showNotification(`🔄 Синхронизировано: беременность ${weeks} недель`, 'info');
             }
-        } else if (weeks > 0 && s.isPregnant && s.conceptionDate) {
-            const ourWeeks = Math.floor((Date.now() - new Date(s.conceptionDate).getTime()) / (7 * 24 * 60 * 60 * 1000));
-            const diff = Math.abs(weeks - ourWeeks);
-
-            if (diff > 1) {
-                console.log(`[Reproductive] Pregnancy week mismatch: ours=${ourWeeks}, AI=${weeks}. Resyncing...`);
-                const conceptionTime = Date.now() - (weeks * 7 * 24 * 60 * 60 * 1000);
-                s.conceptionDate = new Date(conceptionTime).toISOString();
+        } else if (s.isPregnant) {
+            // Уже беременна - проверяем расхождение срока
+            const currentWeeks = s.pregnancyWeeks || 0;
+            
+            if (weeks !== currentWeeks) {
+                console.log(`[Reproductive] Pregnancy week mismatch: ours=${currentWeeks}, AI=${weeks}. Resyncing...`);
+                s.pregnancyWeeks = weeks;
                 updated = true;
 
                 if (s.showNotifications) {
@@ -199,6 +220,7 @@ function parseAIStatus(text) {
         console.log('[Reproductive] AI says not pregnant, but extension thinks she is. Clearing...');
         s.isPregnant = false;
         s.conceptionDate = null;
+        s.pregnancyWeeks = 0;
         s.fetusCount = 1;
         s.fetusSex = [];
         s.complications = [];
@@ -422,6 +444,7 @@ function checkConception() {
     if (success) {
         s.isPregnant = true;
         s.conceptionDate = new Date().toISOString();
+        s.pregnancyWeeks = 0;  // Начало беременности
         s.totalConceptions++;
 
         const multiplesRoll = roll(1000) / 10;
@@ -458,14 +481,21 @@ function checkConception() {
 
 function checkComplications() {
     const s = getSettings();
-    if (!s.isPregnant || !s.conceptionDate) return;
+    if (!s.isPregnant) return;
+
+    // Используем pregnancyWeeks напрямую
+    let weeks = s.pregnancyWeeks || 0;
+    
+    // Fallback на расчёт от даты
+    if (weeks === 0 && s.conceptionDate) {
+        const now = Date.now();
+        const conceptionTime = new Date(s.conceptionDate).getTime();
+        const diffMs = now - conceptionTime;
+        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+        weeks = Math.floor(diffDays / 7);
+    }
 
     const now = Date.now();
-    const conceptionTime = new Date(s.conceptionDate).getTime();
-    const diffMs = now - conceptionTime;
-    const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-    const weeks = Math.floor(diffDays / 7);
-
     if (s.lastComplicationCheck) {
         const lastCheckDiff = now - s.lastComplicationCheck;
         const daysSinceCheck = Math.floor(lastCheckDiff / (1000 * 60 * 60 * 24));
@@ -542,6 +572,7 @@ function resetPregnancy() {
     const s = getSettings();
     s.isPregnant = false;
     s.conceptionDate = null;
+    s.pregnancyWeeks = 0;
     s.fetusCount = 1;
     s.fetusSex = [];
     s.complications = [];
@@ -648,10 +679,16 @@ function getPregnancyPrompt() {
     const s = getSettings();
     if (!s.isPregnant) return '';
 
-    const conceptionDate = new Date(s.conceptionDate);
-    const today = new Date();
-    const diffTime = Math.abs(today - conceptionDate);
-    const weeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+    // Используем pregnancyWeeks напрямую
+    let weeks = s.pregnancyWeeks || 0;
+    
+    // Fallback на расчёт от даты только если pregnancyWeeks не установлен
+    if (weeks === 0 && s.conceptionDate) {
+        const conceptionDate = new Date(s.conceptionDate);
+        const today = new Date();
+        const diffTime = Math.abs(today - conceptionDate);
+        weeks = Math.floor(diffTime / (1000 * 60 * 60 * 24 * 7));
+    }
 
     const fetusText = s.fetusCount === 1 ? 'одним плодом' : s.fetusCount === 2 ? 'двойней!' : 'тройней!';
 
@@ -839,17 +876,26 @@ function syncUI() {
     const monitorContent = document.getElementById('repro-pregnancy-content');
 
     if (monitorBlock && monitorContent) {
-    if (s.isPregnant && s.conceptionDate) {
+    if (s.isPregnant && (s.pregnancyWeeks > 0 || s.conceptionDate)) {
         monitorBlock.style.display = 'block';
 
-        const conceptionTime = new Date(s.conceptionDate).getTime();
-        const now = Date.now();
-        const diffMs = now - conceptionTime;
-        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-        const weeks = Math.floor(diffDays / 7);
-        const days = diffDays % 7;
+        // Используем pregnancyWeeks напрямую вместо расчёта от даты
+        let weeks = s.pregnancyWeeks || 0;
+        let days = 0;
+        
+        // Fallback на расчёт от даты только если pregnancyWeeks не установлен
+        if (weeks === 0 && s.conceptionDate) {
+            const conceptionTime = new Date(s.conceptionDate).getTime();
+            const now = Date.now();
+            const diffMs = now - conceptionTime;
+            const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+            weeks = Math.floor(diffDays / 7);
+            days = diffDays % 7;
+        }
 
-        const dueDate = new Date(conceptionTime + (280 * 24 * 60 * 60 * 1000));
+        // Расчёт даты родов на основе недель (40 недель от текущего срока)
+        const weeksRemaining = Math.max(0, 40 - weeks);
+        const dueDate = new Date(Date.now() + (weeksRemaining * 7 * 24 * 60 * 60 * 1000));
         const dueDateStr = dueDate.toLocaleDateString('ru-RU', { 
             day: 'numeric', 
             month: 'long', 
@@ -1090,12 +1136,14 @@ function setupUI() {
 
             <div id="repro-manual-pregnancy" style="display: none; margin-top: 10px; padding: 10px; background: rgba(255,159,243,0.1); border-radius: 5px;">
                 <label style="font-size: 12px; opacity: 0.8;">Ручная установка:</label>
-                <div class="flex-container" style="gap: 5px; margin-top: 5px;">
+                <div class="flex-container" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
                     <select id="repro-manual-count" class="text_pole" style="width: 80px;">
                         <option value="1">1 плод</option>
                         <option value="2">Двойня</option>
                         <option value="3">Тройня</option>
                     </select>
+                    <input id="repro-manual-weeks" type="number" class="text_pole" value="1" min="0" max="42" style="width: 60px;" title="Срок в неделях">
+                    <span style="font-size: 11px; opacity: 0.7; align-self: center;">нед.</span>
                     <button id="repro-setpregnant" class="menu_button" style="padding: 5px 10px; background: #ff9ff3;">🤰 Установить</button>
                 </div>
             </div>
@@ -1302,9 +1350,11 @@ function setupUI() {
         $('#repro-setpregnant').on('click', function() {
             const s = getSettings();
             const count = parseInt($('#repro-manual-count').val());
+            const weeks = parseInt($('#repro-manual-weeks').val()) || 1;
 
             s.isPregnant = true;
             s.conceptionDate = new Date().toISOString();
+            s.pregnancyWeeks = Math.max(0, Math.min(42, weeks));  // Срок в неделях
             s.fetusCount = count;
             s.fetusSex = [];
 
@@ -1318,7 +1368,7 @@ function setupUI() {
             syncUI();
 
             const sexText = s.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
-            showNotification(`🤰 Беременность установлена! Плодов: ${count}, пол: ${sexText}`, 'success');
+            showNotification(`🤰 Беременность установлена! Срок: ${s.pregnancyWeeks} нед., плодов: ${count}, пол: ${sexText}`, 'success');
 
             $('#repro-manual-pregnancy').slideUp(200);
         });
