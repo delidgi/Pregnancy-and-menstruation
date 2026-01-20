@@ -7,6 +7,7 @@
     "css": "",
     "author": "Delidgi",
     "version": "1.5.1",
-    "homePage": "",
-    "auto_update": false
+    "homePage": "https://github.com/delidgi/Pregnancy-and-menstruation",
+    "source": "https://github.com/delidgi/Pregnancy-and-menstruation",
+    "auto_update": true
 }
