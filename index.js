@@ -39,7 +39,8 @@ const defaultPregnancyData = {
     complications: [],
     healthStatus: 'normal',
     lastComplicationCheck: null,
-    lastComplicationCheckRpDate: null
+    lastComplicationCheckRpDate: null,
+    lastDoctorVisitRpDate: null
 };
 
 const CHANCES = {
@@ -707,7 +708,7 @@ function checkComplications() {
     const p = getPregnancyData();
     
     if (!p.isPregnant) return;
-    if (!p.rpDate) return; // Нужна RP-дата для проверки
+    if (!p.rpDate) return;
 
     let weeks = p.pregnancyWeeks || 0;
     if (weeks === 0 && p.conceptionDate) {
@@ -715,21 +716,18 @@ function checkComplications() {
         weeks = Math.floor(diffMs / (1000 * 60 * 60 * 24 * 7));
     }
 
-    // Проверка по RP-времени
     const currentRpDate = new Date(p.rpDate);
     
     if (p.lastComplicationCheckRpDate) {
         const lastCheckRpDate = new Date(p.lastComplicationCheckRpDate);
         const daysSinceCheckRp = Math.floor((currentRpDate - lastCheckRpDate) / 86400000);
         
-        // Если в RP прошло меньше 7 дней - пропускаем
         if (daysSinceCheckRp < 7) {
             console.log(`[Reproductive] Complication check skipped: only ${daysSinceCheckRp} RP days since last check`);
             return;
         }
     }
 
-    // Запоминаем RP-дату проверки
     p.lastComplicationCheckRpDate = p.rpDate;
 
     if (s.showNotifications) {
@@ -739,10 +737,13 @@ function checkComplications() {
     let baseChance = weeks <= 12 ? 15 : weeks <= 27 ? 5 : 12;
     if (p.fetusCount >= 2) baseChance += 10;
     if (p.fetusCount >= 3) baseChance += 15;
+    
+    // Накопление warning увеличивает шанс
+    const warningCount = (p.complications || []).filter(c => c.severity === 'warning' && !c.resolved).length;
+    if (warningCount >= 2) baseChance += 10;
 
     const complicationRoll = roll(100);
-
-    console.log(`[Reproductive] Complication check: roll=${complicationRoll}, threshold=${baseChance}`);
+    console.log(`[Reproductive] Complication check: roll=${complicationRoll}, threshold=${baseChance}, warnings=${warningCount}`);
 
     if (complicationRoll <= baseChance) {
         const types = getComplicationTypes(weeks);
@@ -754,7 +755,8 @@ function checkComplications() {
             severity: complication.severity,
             description: complication.description,
             rpDate: p.rpDate,
-            date: new Date().toISOString()
+            date: new Date().toISOString(),
+            resolved: false
         });
 
         if (complication.severity === 'critical') {
@@ -771,11 +773,130 @@ function checkComplications() {
             showNotification(`${emoji} ОСЛОЖНЕНИЕ: ${complication.type}\n${complication.description}`, 
                            complication.severity === 'critical' ? 'warning' : 'info');
         }
+        
+        // Реальные последствия
+        handleComplicationConsequences(complication, weeks);
+        
     } else {
+        // Шанс на выздоровление
+        if (warningCount > 0 && roll(100) <= 30) {
+            const unresolvedWarning = p.complications.find(c => c.severity === 'warning' && !c.resolved);
+            if (unresolvedWarning) {
+                unresolvedWarning.resolved = true;
+                if (s.showNotifications) {
+                    showNotification(`💊 ${unresolvedWarning.type} — состояние улучшилось!`, 'success');
+                }
+                const hasUnresolvedCritical = p.complications.some(c => c.severity === 'critical' && !c.resolved);
+                const hasUnresolvedWarning = p.complications.some(c => c.severity === 'warning' && !c.resolved);
+                p.healthStatus = hasUnresolvedCritical ? 'critical' : hasUnresolvedWarning ? 'warning' : 'normal';
+            }
+        }
+        
         if (s.showNotifications) {
             showNotification(`✅ Проверка пройдена: всё в норме!`, 'success');
         }
         saveSettingsDebounced();
+        syncUI();
+    }
+}
+
+function handleComplicationConsequences(complication, weeks) {
+    const s = getSettings();
+    const p = getPregnancyData();
+    
+    // === УГРОЗА ВЫКИДЫША (1 триместр) — 25% шанс потери ===
+    if (complication.type === 'Угроза выкидыша') {
+        const miscarriageRoll = roll(100);
+        console.log(`[Reproductive] Miscarriage roll: ${miscarriageRoll} (need >25 to survive)`);
+        
+        if (miscarriageRoll <= 25) {
+            if (s.showNotifications) {
+                showNotification(`💔 ВЫКИДЫШ\nБеременность прервалась на ${weeks} неделе...`, 'warning');
+            }
+            setTimeout(() => {
+                Object.assign(p, structuredClone(defaultPregnancyData));
+                saveSettingsDebounced();
+                syncUI();
+                updatePromptInjection();
+            }, 1000);
+            return;
+        } else {
+            if (s.showNotifications) {
+                showNotification(`🏥 Угроза миновала! Требуется покой.`, 'info');
+            }
+        }
+    }
+    
+    // === ПРЕЖДЕВРЕМЕННЫЕ РОДЫ (3 триместр) — немедленные роды ===
+    if (complication.type === 'Преждевременные роды') {
+        const sexIcons = p.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
+        const fetusText = p.fetusCount === 1 ? 'Малыш' : p.fetusCount === 2 ? 'Двойня' : 'Тройня';
+        const statusText = weeks < 32 ? '⚠️ Недоношенный!' : weeks < 37 ? '⚠️ Ранний, но стабильный.' : '✅ Доношенный!';
+        
+        if (s.showNotifications) {
+            showNotification(`👶 ПРЕЖДЕВРЕМЕННЫЕ РОДЫ (${weeks} нед.)\n${fetusText}: ${sexIcons}\n${statusText}`, 'warning');
+        }
+        setTimeout(() => {
+            Object.assign(p, structuredClone(defaultPregnancyData));
+            saveSettingsDebounced();
+            syncUI();
+            updatePromptInjection();
+        }, 1000);
+        return;
+    }
+    
+    // === ГЕСТОЗ — 15% шанс экстренного кесарева ===
+    if (complication.type === 'Гестоз') {
+        const emergencyRoll = roll(100);
+        console.log(`[Reproductive] Gestosis emergency roll: ${emergencyRoll} (need >15 to avoid)`);
+        
+        if (emergencyRoll <= 15) {
+            const sexIcons = p.fetusSex.map(sex => sex === 'M' ? '♂️' : '♀️').join(' ');
+            if (s.showNotifications) {
+                showNotification(`🚨 ЭКСТРЕННОЕ КЕСАРЕВО!\nГестоз угрожает жизни.\nМалыш: ${sexIcons}`, 'warning');
+            }
+            setTimeout(() => {
+                Object.assign(p, structuredClone(defaultPregnancyData));
+                saveSettingsDebounced();
+                syncUI();
+                updatePromptInjection();
+            }, 1000);
+            return;
+        } else {
+            if (s.showNotifications) {
+                showNotification(`🏥 Гестоз под контролем. Постельный режим!`, 'info');
+            }
+        }
+    }
+    
+    // === НАКОПЛЕНИЕ 3+ WARNING — риск потери ===
+    const unresolvedWarnings = (p.complications || []).filter(c => c.severity === 'warning' && !c.resolved).length;
+    if (unresolvedWarnings >= 3) {
+        const criticalRoll = roll(100);
+        console.log(`[Reproductive] Warning accumulation: ${unresolvedWarnings} warnings, roll=${criticalRoll}`);
+        
+        if (criticalRoll <= 20) {
+            p.healthStatus = 'critical';
+            
+            if (weeks <= 12) {
+                if (s.showNotifications) {
+                    showNotification(`💔 Осложнения привели к потере беременности...`, 'warning');
+                }
+                setTimeout(() => {
+                    Object.assign(p, structuredClone(defaultPregnancyData));
+                    saveSettingsDebounced();
+                    syncUI();
+                    updatePromptInjection();
+                }, 1000);
+                return;
+            } else {
+                if (s.showNotifications) {
+                    showNotification(`🚨 КРИТИЧЕСКОЕ СОСТОЯНИЕ!\nСрочно нужна медпомощь!`, 'warning');
+                }
+            }
+            saveSettingsDebounced();
+            syncUI();
+        }
     }
 }
 
@@ -808,6 +929,79 @@ function resetPregnancy() {
     saveSettingsDebounced();
     syncUI();
     updatePromptInjection();
+}
+
+function visitDoctor() {
+    const s = getSettings();
+    const p = getPregnancyData();
+    
+    if (!p.isPregnant) return;
+    
+    // Проверяем кулдаун (3 RP-дня)
+    if (p.lastDoctorVisitRpDate && p.rpDate) {
+        const lastVisit = new Date(p.lastDoctorVisitRpDate);
+        const currentRpDate = new Date(p.rpDate);
+        const daysSinceVisit = Math.floor((currentRpDate - lastVisit) / 86400000);
+        
+        if (daysSinceVisit < 3) {
+            if (s.showNotifications) {
+                showNotification(`🏥 Следующий визит через ${3 - daysSinceVisit} RP-дн.`, 'info');
+            }
+            return;
+        }
+    }
+    
+    // Запоминаем дату визита
+    p.lastDoctorVisitRpDate = p.rpDate || new Date().toISOString();
+    
+    // Ищем нерешённые осложнения
+    const unresolvedComplications = p.complications.filter(c => !c.resolved);
+    
+    if (unresolvedComplications.length === 0) {
+        if (s.showNotifications) {
+            showNotification(`🏥 Врач: Всё в порядке, осложнений нет!`, 'success');
+        }
+        saveSettingsDebounced();
+        return;
+    }
+    
+    // Лечим осложнения
+    let healed = 0;
+    let failed = 0;
+    
+    for (const complication of unresolvedComplications) {
+        // Шанс лечения зависит от severity
+        const healChance = complication.severity === 'critical' ? 50 : 75;
+        const healRoll = roll(100);
+        
+        console.log(`[Reproductive] Doctor treating ${complication.type}: roll=${healRoll}, need<=${healChance}`);
+        
+        if (healRoll <= healChance) {
+            complication.resolved = true;
+            healed++;
+        } else {
+            failed++;
+        }
+    }
+    
+    // Пересчитываем healthStatus
+    const hasUnresolvedCritical = p.complications.some(c => c.severity === 'critical' && !c.resolved);
+    const hasUnresolvedWarning = p.complications.some(c => c.severity === 'warning' && !c.resolved);
+    p.healthStatus = hasUnresolvedCritical ? 'critical' : hasUnresolvedWarning ? 'warning' : 'normal';
+    
+    saveSettingsDebounced();
+    syncUI();
+    
+    // Уведомление
+    if (s.showNotifications) {
+        if (healed > 0 && failed === 0) {
+            showNotification(`🏥 Врач помог!\n✅ Вылечено: ${healed} осложнений`, 'success');
+        } else if (healed > 0 && failed > 0) {
+            showNotification(`🏥 Частичный успех\n✅ Вылечено: ${healed}\n⚠️ Требует наблюдения: ${failed}`, 'info');
+        } else {
+            showNotification(`🏥 Лечение не помогло\n⚠️ Требуется повторный визит`, 'warning');
+        }
+    }
 }
 
 function onMessageReceived() {
@@ -1233,13 +1427,23 @@ function syncUI() {
                 : '';
 
             let complicationsHTML = '';
+            const unresolvedCount = p.complications ? p.complications.filter(c => !c.resolved).length : 0;
+            
             if (p.complications && p.complications.length > 0) {
                 const recent = p.complications.slice(-3).reverse();
                 complicationsHTML = `<div class="pregnancy-complications"><div class="pregnancy-complications-title">📋 Осложнения:</div>${recent.map(c => {
-                    const col = c.severity === 'critical' ? '#ff4444' : '#ffaa00';
-                    const ico = c.severity === 'critical' ? '🚨' : '⚠️';
-                    return `<div class="complication-item"><span style="color: ${col};">${ico}</span> <strong>${c.type}</strong> <span style="opacity: 0.5; font-size: 10px;">(${c.week} нед.)</span><div style="font-size: 11px; opacity: 0.7;">${c.description}</div></div>`;
-                }).join('')}</div>`;
+                    const col = c.resolved ? '#888' : (c.severity === 'critical' ? '#ff4444' : '#ffaa00');
+                    const ico = c.resolved ? '✅' : (c.severity === 'critical' ? '🚨' : '⚠️');
+                    const resolvedStyle = c.resolved ? 'text-decoration: line-through; opacity: 0.5;' : '';
+                    return `<div class="complication-item" style="${resolvedStyle}"><span style="color: ${col};">${ico}</span> <strong>${c.type}</strong> <span style="opacity: 0.5; font-size: 10px;">(${c.week} нед.)${c.resolved ? ' — вылечено' : ''}</span><div style="font-size: 11px; opacity: 0.7;">${c.description}</div></div>`;
+                }).join('')}`;
+                
+                // Кнопка "К врачу" если есть нерешённые осложнения
+                if (unresolvedCount > 0) {
+                    complicationsHTML += `<button id="repro-doctor-btn" class="menu_button" style="margin-top: 10px; width: 100%; background: linear-gradient(135deg, #4dabf7 0%, #228be6 100%);">🏥 К врачу (${unresolvedCount} осложн.)</button>`;
+                }
+                
+                complicationsHTML += `</div>`;
             }
 
             monitorContent.innerHTML = `
@@ -1256,6 +1460,14 @@ function syncUI() {
                 <div class="pregnancy-recommendations"><div class="pregnancy-recommendations-title">💡 Рекомендации:</div><div class="pregnancy-recommendations-text">${recommendations}</div></div>
                 ${complicationsHTML}
             `;
+            
+            // Привязываем обработчик для кнопки "К врачу"
+            setTimeout(() => {
+                const doctorBtn = document.getElementById('repro-doctor-btn');
+                if (doctorBtn) {
+                    doctorBtn.onclick = visitDoctor;
+                }
+            }, 10);
         } else {
             monitorBlock.style.display = 'none';
         }
