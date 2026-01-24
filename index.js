@@ -343,7 +343,7 @@ function parseRpDate(text) {
         }
     }
    
-    // Паттерн 3: "Дата: 21.10.2023" или "Дата: 21/10/2023"
+    // Паттерн 3: "Дата: 21.10.2023" или "Дата: 21/10/2023" (4-значный год)
     const shortFormatMatch = text.match(/(?:[Дд]ата|[Dd]ate).*?(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{4})/i);
     if (shortFormatMatch) {
         const day = parseInt(shortFormatMatch[1]);
@@ -353,6 +353,22 @@ function parseRpDate(text) {
         if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
             parsedDate = new Date(year, month, day);
             console.log(`[Reproductive] Parsed RP date (short format): ${parsedDate.toISOString()}`);
+            return parsedDate;
+        }
+    }
+
+    // Паттерн 3.5: "Дата: 21.10.23" или "Дата: 21/10/23" (2-значный год)
+    const shortFormat2DigitMatch = text.match(/(?:[Дд]ата|[Dd]ate).*?(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{2})(?!\d)/i);
+    if (shortFormat2DigitMatch) {
+        const day = parseInt(shortFormat2DigitMatch[1]);
+        const month = parseInt(shortFormat2DigitMatch[2]) - 1;
+        let year = parseInt(shortFormat2DigitMatch[3]);
+        // Преобразуем 2-значный год: 00-50 → 2000-2050, 51-99 → 1951-1999
+        year = year <= 50 ? 2000 + year : 1900 + year;
+        
+        if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+            parsedDate = new Date(year, month, day);
+            console.log(`[Reproductive] Parsed RP date (short format 2-digit year): ${parsedDate.toISOString()}`);
             return parsedDate;
         }
     }
@@ -373,6 +389,24 @@ function parseRpDate(text) {
     
     // === ПАТТЕРНЫ БЕЗ СЛОВА "ДАТА" ===
     
+    // Паттерн 4.5: "📅 13/10/23" или "📅 13.10.2023" (с эмодзи календаря)
+    const emojiDateMatch = text.match(/📅\s*(?:[А-Яа-яA-Za-z]+,?\s*)?(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{2,4})/);
+    if (emojiDateMatch) {
+        const day = parseInt(emojiDateMatch[1]);
+        const month = parseInt(emojiDateMatch[2]) - 1;
+        let year = parseInt(emojiDateMatch[3]);
+        // Если 2-значный год
+        if (year < 100) {
+            year = year <= 50 ? 2000 + year : 1900 + year;
+        }
+        
+        if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+            parsedDate = new Date(year, month, day);
+            console.log(`[Reproductive] Parsed RP date (emoji format): ${parsedDate.toISOString()}`);
+            return parsedDate;
+        }
+    }
+    
     // Паттерн 5: "Пятница, 21.10.2023" или просто "21.10.2023" (в начале строки или после запятой)
     const standaloneShortMatch = text.match(/(?:^|[,\s])(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{4})(?:\s|,|$)/m);
     if (standaloneShortMatch) {
@@ -383,6 +417,22 @@ function parseRpDate(text) {
         if (month >= 0 && month <= 11 && day >= 1 && day <= 31 && year >= 1900 && year <= 2100) {
             parsedDate = new Date(year, month, day);
             console.log(`[Reproductive] Parsed RP date (standalone short): ${parsedDate.toISOString()}`);
+            return parsedDate;
+        }
+    }
+    
+    // Паттерн 5.5: "Пятница, 21.10.23" или "21/10/23" (2-значный год)
+    const standaloneShort2DigitMatch = text.match(/(?:^|[,\s])(\d{1,2})[\.\/](\d{1,2})[\.\/](\d{2})(?!\d)(?:\s|,|$)/m);
+    if (standaloneShort2DigitMatch) {
+        const day = parseInt(standaloneShort2DigitMatch[1]);
+        const month = parseInt(standaloneShort2DigitMatch[2]) - 1;
+        let year = parseInt(standaloneShort2DigitMatch[3]);
+        // Преобразуем 2-значный год: 00-50 → 2000-2050, 51-99 → 1951-1999
+        year = year <= 50 ? 2000 + year : 1900 + year;
+        
+        if (month >= 0 && month <= 11 && day >= 1 && day <= 31) {
+            parsedDate = new Date(year, month, day);
+            console.log(`[Reproductive] Parsed RP date (standalone short 2-digit year): ${parsedDate.toISOString()}`);
             return parsedDate;
         }
     }
