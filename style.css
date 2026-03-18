@@ -1,0 +1,105 @@
+/* Reproductive System v3 — merged styles */
+
+/* ── Settings panel ── */
+.repro-settings .inline-drawer-content { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
+.repro-settings hr { margin: 8px 0; border: none; border-top: 1px solid var(--SmartThemeBorderColor); opacity: 0.3; }
+.repro-field { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.repro-field span:first-child { min-width: 100px; opacity: 0.7; }
+.repro-field select, .repro-field input[type="number"], .repro-field input[type="date"] {
+    flex: 1; min-width: 0;
+    background: var(--SmartThemeBlurTintColor, rgba(50,50,60,0.8));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
+    color: var(--SmartThemeBodyColor, #eee);
+    border-radius: 5px;
+    padding: 4px 6px;
+}
+.repro-settings select, .repro-settings input[type="number"], .repro-settings input[type="date"] {
+    background: var(--SmartThemeBlurTintColor, rgba(50,50,60,0.8));
+    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
+    color: var(--SmartThemeBodyColor, #eee);
+    border-radius: 5px;
+    padding: 4px 6px;
+}
+.repro-dim { opacity: 0.6; font-size: 12px; }
+.repro-center { text-align: center; }
+.repro-pregnant { color: #ff9ff3; font-weight: 600; }
+
+/* Glass panel (settings) */
+.repro-glass-panel { margin-top: 10px; padding: 12px; background: rgba(255,159,243,0.06); backdrop-filter: blur(10px); border: 1px solid rgba(255,159,243,0.15); border-radius: 10px; }
+.repro-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,159,243,0.08); font-size: 12px; }
+.repro-row:last-of-type { border-bottom: none; }
+.repro-row span:first-child { opacity: 0.7; }
+.repro-progress { width: 100%; height: 6px; background: rgba(255,159,243,0.12); border-radius: 6px; overflow: hidden; margin: 8px 0 4px; }
+.repro-progress-fill { height: 100%; background: linear-gradient(90deg, #ff9ff3, #ffc2d1); border-radius: 6px; transition: width 0.3s; }
+.repro-section { margin-top: 8px; padding: 8px; background: rgba(255,159,243,0.04); border-radius: 6px; border-left: 2px solid #ff9ff3; font-size: 11px; }
+.repro-section.repro-recs { border-left-color: #00ff88; background: rgba(0,255,136,0.04); }
+.repro-section-title { font-weight: 600; color: #ff9ff3; margin-bottom: 4px; font-size: 11px; }
+.repro-recs .repro-section-title { color: #00ff88; }
+.repro-complications { margin-top: 8px; padding: 8px; background: rgba(255,68,68,0.04); border-radius: 6px; border-left: 2px solid #ff4444; }
+.repro-complications .repro-section-title { color: #ff4444; }
+.repro-comp-item { padding: 6px; margin-bottom: 4px; background: rgba(255,68,68,0.04); border-radius: 4px; font-size: 11px; }
+.repro-comp-item.repro-resolved { text-decoration: line-through; opacity: 0.4; }
+.repro-comp-item.repro-crit { border-left: 2px solid #ff4444; }
+.repro-comp-item.repro-warn { border-left: 2px solid #ffaa00; }
+.repro-warn-text { color: #ffaa00; font-size: 11px; }
+.repro-doctor-btn { margin-top: 8px; width: 100%; }
+
+/* ── Chat visual widget (from repro blocks) ── */
+.repro { margin: 12px 0; max-width: 420px; font: 12px Comfortaa, sans-serif; }
+.repro summary {
+    padding: 8px 14px; background: rgba(255,255,255,0.04); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
+    cursor: pointer; color: rgba(255,255,255,0.85); font-weight: 500;
+    list-style: none; transition: 0.2s; display: flex; align-items: center; gap: 8px;
+}
+.repro summary::-webkit-details-marker { display: none; }
+.repro summary:hover { background: rgba(255,255,255,0.06); }
+.repro[open] summary { border-radius: 6px 6px 0 0; }
+
+.repro-badge {
+    margin-left: auto; font-size: 9px; padding: 2px 7px; border-radius: 10px;
+    font-weight: 700; letter-spacing: 0.3px;
+}
+.repro-badge.cycle { background: rgba(180,120,255,0.15); color: rgba(180,120,255,0.9); }
+.repro-badge.pregnancy { background: rgba(255,150,180,0.15); color: rgba(255,150,180,0.9); }
+.repro-badge.baby { background: rgba(130,200,255,0.15); color: rgba(130,200,255,0.9); }
+
+.repro-c {
+    background: rgba(255,255,255,0.02); backdrop-filter: blur(10px);
+    border: 1px solid rgba(255,255,255,0.08); border-top: none;
+    border-radius: 0 0 6px 6px; padding: 10px 14px;
+}
+.repro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+.repro-stat {
+    padding: 5px 8px; background: rgba(255,255,255,0.03);
+    border: 1px solid rgba(255,255,255,0.06); border-radius: 5px;
+    font-size: 11px; display: flex; align-items: center; gap: 5px;
+}
+.repro-stat i { font-size: 10px; opacity: 0.5; width: 14px; text-align: center; flex-shrink: 0; }
+.repro-stat .rl { color: rgba(255,255,255,0.4); font-size: 9px; margin-right: 3px; }
+.repro-stat .rv { color: rgba(255,255,255,0.8); }
+.repro-wide { grid-column: 1 / -1; }
+
+.repro-bar { grid-column: 1 / -1; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin: 4px 0; }
+.repro-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.repro-bar-fill.cycle { background: linear-gradient(90deg, #b478ff, #ff78b4); }
+.repro-bar-fill.pregnancy { background: linear-gradient(90deg, #ff9eb4, #ffcb8e); }
+.repro-bar-fill.baby { background: linear-gradient(90deg, #82c8ff, #b4e0ff); }
+
+.repro-note {
+    grid-column: 1 / -1; margin-top: 4px; padding: 6px 8px;
+    background: rgba(255,150,180,0.04); border-left: 2px solid rgba(255,150,180,0.25);
+    border-radius: 0 4px 4px 0; font-size: 10px; color: rgba(255,255,255,0.65);
+    line-height: 1.4; font-style: italic;
+}
+.repro-note.baby-note { background: rgba(130,200,255,0.04); border-left-color: rgba(130,200,255,0.25); }
+.repro-note.cycle-note { background: rgba(180,120,255,0.04); border-left-color: rgba(180,120,255,0.25); }
+
+.repro-health {
+    display: inline-flex; align-items: center; gap: 3px;
+    padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600;
+}
+.repro-health.normal { background: rgba(0,200,100,0.1); color: rgba(0,200,100,0.9); }
+.repro-health.warning { background: rgba(255,170,0,0.1); color: rgba(255,170,0,0.9); }
+.repro-health.critical { background: rgba(255,60,60,0.1); color: rgba(255,60,60,0.9); }
