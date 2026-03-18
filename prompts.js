@@ -16,51 +16,30 @@ export function getBasePrompt() {
     if (!s.isEnabled) return '';
 
     const day = s.cycleDay;
-    let phase = '';
-    if (day <= 5) phase = 'Менструация';
-    else if (day <= 11) phase = 'Фолликулярная';
-    else if (day <= 16) phase = 'Овуляция';
-    else phase = 'Лютеиновая';
+    const phaseMap = { 1: 'Menstruation', 6: 'Follicular', 12: 'Ovulation', 17: 'Luteal' };
+    let phase = 'Luteal';
+    if (day <= 5) phase = 'Menstruation';
+    else if (day <= 11) phase = 'Follicular';
+    else if (day <= 16) phase = 'Ovulation';
 
-    const contraEmoji = 
-        s.contraception === 'condom' ? 'Презерватив' :
-        s.contraception === 'pill' ? 'Таблетки' :
-        s.contraception === 'iud' ? 'ВМС' : 'Нет защиты';
+    const contraMap = { condom: 'Condom', pill: 'Pill', iud: 'IUD', none: 'None' };
+    const contra = contraMap[s.contraception] || 'None';
 
-    let prompt = `OOC: СИСТЕМА АКТИВНА\n`;
-    prompt += `В статус-блок {{user}} ОБЯЗАТЕЛЬНО добавь:\n`;
-    prompt += `Цикл: День ${day} | ${phase} | ${contraEmoji}\n\n`;
-    prompt += `ЦИКЛ: 1-5 менструация, 6-11 фолликулярная, 12-16 овуляция (высокое либидо!), 17-28 лютеиновая.\n`;
+    let prompt = `[OOC: REPRODUCTIVE SYSTEM ACTIVE]\n`;
+    prompt += `Cycle: Day ${day}/28 | ${phase} | Contraception: ${contra}\n`;
 
     if (s.contraception === 'condom') {
-        prompt += `ПРЕЗЕРВАТИВ: {{char}} достаёт/надевает при сексе. Может порваться (~15%).\n`;
+        prompt += `Condom: {{char}} uses it during sex. May break (~15%).\n`;
     }
 
-    // Если уже беременна - НЕ добавляем инструкцию про тег!
     if (p.isPregnant) {
-        prompt += `🤰 {{user}} уже БЕРЕМЕННА — тег [CONCEPTION_CHECK] ЗАПРЕЩЁН!]`;
+        prompt += `{{user}} is PREGNANT. Tag [CONCEPTION_CHECK] is FORBIDDEN.`;
         return prompt;
     }
 
-    // Только если НЕ беременна - инструкции про зачатие
-    prompt += `\n\nКРИТИЧЕСКИ ВАЖНО — тег [CONCEPTION_CHECK]\n`;
-    prompt += `════════════════════════════════════════════════════\n`;
-    prompt += `✅ ДОБАВЛЯЙ тег ТОЛЬКО когда ВСЁ УЖЕ ПРОИЗОШЛО (прошедшее время!):\n`;
-    prompt += `   1) Вагинальный секс СОСТОЯЛСЯ\n`;
-    prompt += `   2) Эякуляция внутрь вагины УЖЕ СЛУЧИЛАСЬ (кончил, излил, выплеснул)\n`;
-    prompt += `   3) Сперма УЖЕ ВНУТРИ неё\n\n`;
-    prompt += `🚫 ЗАПРЕЩЕНО ДОБАВЛЯТЬ ТЕГ:\n`;
-    prompt += `   ❌ Секс ЕЩЁ ИДЁТ (процесс, не финал)\n`;
-    prompt += `   ❌ "Я кончу", "хочу кончить", "сейчас кончу" — это БУДУЩЕЕ время, НЕ ставь!\n`;
-    prompt += `   ❌ АНАЛЬНЫЙ секс — не беременеют!\n`;
-    prompt += `   ❌ ОРАЛЬНЫЙ секс — не беременеют!\n`;
-    prompt += `   ❌ Эякуляция снаружи/на тело\n`;
-    prompt += `   ❌ Прерванный акт\n`;
-    prompt += `   ❌ Презерватив не порвался\n\n`;
-    prompt += `ТЕГ ТОЛЬКО ПОСЛЕ ФИНАЛА! "Кончил внутрь" = прошедшее время = ОК\n`;
-    prompt += `"Сейчас кончу" / "хочу кончить" = будущее = НЕ СТАВЬ ТЕГ!\n`;
-    prompt += `════════════════════════════════════════════════════\n`;
-    prompt += `Формат (скрыто в конце): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->`;
+    prompt += `\nTag [CONCEPTION_CHECK]: add ONLY when vaginal ejaculation inside has ALREADY HAPPENED (past tense).\n`;
+    prompt += `DO NOT add for: ongoing sex, future tense ("will cum"), anal, oral, external ejaculation, pull-out, intact condom.\n`;
+    prompt += `Format (hidden at end): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->`;
 
     return prompt;
 }
@@ -72,18 +51,11 @@ export function getPregnancyPrompt() {
     if (!p.isPregnant) return '';
 
     const duration = s.pregnancyDuration || 40;
-    
     const { weeks } = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
-
     const progressPercent = (weeks / duration) * 100;
     
-    let symptoms = '';
-    let recommendations = '';
-    
-    symptoms = getSymptomsForProgress(progressPercent, weeks);
-    recommendations = getRecommendationsForProgress(progressPercent);
-    
-    let conceptionDateStr = p.conceptionDate ? new Date(p.conceptionDate).toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' }) : '—';
+    let symptoms = getSymptomsForProgress(progressPercent, weeks);
+    let recommendations = getRecommendationsForProgress(progressPercent);
     
     let dueDateStr = '—';
     if (p.conceptionDate) {
@@ -94,48 +66,29 @@ export function getPregnancyPrompt() {
     }
 
     const sexText = formatSexIcons(p.fetusSex, true);
-    const fetusText = formatFetusCount(p.fetusCount, 'instrumental');
     const fetusCountText = formatFetusCount(p.fetusCount, 'full');
-    
     const fetusSize = getFetusSizeForProgress(progressPercent, false);
     
-    // Здоровье
     const healthInfo = getHealthInfo(p.healthStatus);
-    let healthText = `${healthInfo.emoji} ${healthInfo.text}`;
     let healthDetails = '';
-    if (p.healthStatus !== 'normal') {
-        healthDetails = p.complications && p.complications.length > 0 
-            ? ` (${p.complications.filter(c => !c.resolved).map(c => c.type).join(', ')})`
-            : '';
+    if (p.healthStatus !== 'normal' && p.complications?.length) {
+        healthDetails = ` (${p.complications.filter(c => !c.resolved).map(c => c.type).join(', ')})`;
     }
 
-    let prompt = `
+    let prompt = `\n[OOC: PREGNANCY ACTIVE]\n`;
+    prompt += `Term: ${weeks}/${duration} weeks (${Math.round(progressPercent)}%)\n`;
+    prompt += `Due date: ${dueDateStr}\n`;
+    prompt += `Fetus: ${fetusCountText}`;
+    if (sexText) prompt += ` | Sex: ${sexText}`;
+    prompt += `\nSize: ${fetusSize}\n`;
+    prompt += `Health: ${healthInfo.text}${healthDetails}\n`;
+    prompt += `Symptoms: ${symptoms}\n`;
+    prompt += `Recommendations: ${recommendations}\n`;
 
-[OOC:БЕРЕМЕННОСТЬ — АКТИВНА]
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-📅 Срок: ${weeks}/${duration} недель (${Math.round(progressPercent)}%)
-🗓️ ПДР: ${dueDateStr}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-Плод: ${fetusCountText}
-${sexText ? `⚤ Пол: ${sexText}` : ''}
-Размер: ${fetusSize}
-Здоровье: ${healthText}${healthDetails}
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-СИМПТОМЫ: ${symptoms}
-
-РЕКОМЕНДАЦИИ: ${recommendations}
-`;
-
-    // Инструкция про роды когда >= 90% срока
     const birthThreshold = Math.floor(duration * 0.9);
     if (weeks >= birthThreshold) {
-        prompt += `
-РОДЫ: Срок ${weeks}/${duration} нед. — роды возможны в любой момент!
-Если в сообщении {{user}} РОЖАЕТ (начались схватки, отошли воды, ребёнок появился на свет), добавь в конце:
-<!-- [BIRTH] -->
-❌ НЕ добавляй если: просто разговор о родах, "ещё не родился", подготовка к родам.
-`;
+        prompt += `\nBIRTH possible now (${weeks}/${duration} wk). If {{user}} gives birth, add at end: <!-- [BIRTH] -->\n`;
+        prompt += `Do NOT add if: just talking about birth, preparing, not yet born.`;
     }
 
     return prompt;
@@ -168,27 +121,23 @@ export function injectConceptionResult(result) {
     const s = getSettings();
     const p = getPregnancyData();
 
-    const getPhase = (day) => {
-        const info = getPhaseInfo(day);
-        return `${info.emoji} ${info.name}`;
-    };
+    const phaseInfo = getPhaseInfo(result.cycleDay);
 
     let codeBlock = '```\n';
-    codeBlock += `🤰 ПРОВЕРКА ЗАЧАТИЯ\n━━━━━━━━━━━━━━━━━━━━\n`;
-    codeBlock += `📅 День: ${result.cycleDay} (${getPhase(result.cycleDay)})\n`;
-    codeBlock += `🎲 Бросок: ${result.roll} | Порог: ${result.chance}\n`;
-    if (result.contraceptionFailed) codeBlock += `⚠️ Контрацепция ПОДВЕЛА!\n`;
-    codeBlock += `━━━━━━━━━━━━━━━━━━━━\n`;
+    codeBlock += `CONCEPTION CHECK\n`;
+    codeBlock += `Cycle day: ${result.cycleDay} (${phaseInfo.name})\n`;
+    codeBlock += `Roll: ${result.roll} | Threshold: ${result.chance}\n`;
+    if (result.contraceptionFailed) codeBlock += `Contraception FAILED!\n`;
 
     if (result.success) {
         const sexes = formatSexIcons(p.fetusSex, true);
-        codeBlock += `✅ БЕРЕМЕННОСТЬ!\n👶 ${formatFetusCount(p.fetusCount)}\n⚤ Пол: ${sexes}\n`;
+        codeBlock += `RESULT: PREGNANT! ${formatFetusCount(p.fetusCount)} | Sex: ${sexes}\n`;
     } else {
-        codeBlock += `❌ ЗАЧАТИЯ НЕ ПРОИЗОШЛО\n`;
+        codeBlock += `RESULT: No conception\n`;
     }
     codeBlock += '```';
 
-    const oocPrompt = `[OOC: Выведи этот блок В НАЧАЛЕ ответа:\n${codeBlock}]`;
+    const oocPrompt = `[OOC: Display this block at the START of your response:\n${codeBlock}]`;
 
     setExtensionPrompt(extensionName + '-result', oocPrompt, extension_prompt_types.IN_CHAT, 0);
     updatePromptInjection();
@@ -197,4 +146,3 @@ export function injectConceptionResult(result) {
         setExtensionPrompt(extensionName + '-result', '', extension_prompt_types.IN_CHAT, 0);
     }, 2000);
 }
-
