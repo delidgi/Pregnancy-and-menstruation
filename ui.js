@@ -1,398 +1,853 @@
-// ═══════════════════════════════════════════
-// UI — панель настроек и мониторинг
-// ═══════════════════════════════════════════
-
 import { saveSettingsDebounced } from '../../../../script.js';
-import { getSettings, getPregnancyData, L } from './state.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, roll } from './helpers.js';
-import { calculateDueDate, calculateConceptionDate } from './date-parser.js';
-import { resetPregnancy, visitDoctor } from './pregnancy.js';
+import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo } from './helpers.js';
+import { calculateDueDate } from './date-parser.js';
+import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { showNotification } from './notifications.js';
 
+function ic(n) { return `<i class="fa-solid ${n}"></i>`; }
+
+// ── Default infoblock CSS (shown in editor for customization) ──
+const DEFAULT_INFOBLOCK_CSS = `/* === Инфоблок: основной контейнер === */
+details.repro {
+  margin: 0 auto 12px;
+  max-width: 420px;
+  font: 12px system-ui, sans-serif;
+  color: rgba(255,255,255,.85);
+}
+
+/* === Шапка === */
+details.repro .repro-header {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 16px;
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,.18);
+  border-radius: 14px;
+  transition: border-radius .2s;
+}
+details.repro[open] .repro-header {
+  border-radius: 14px 14px 0 0;
+  border-bottom-color: transparent;
+}
+
+/* === Иконка в круге === */
+details.repro .repro-icon {
+  width: 26px; height: 26px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+details.repro .repro-icon i { font-size: 11px; }
+details.repro .repro-icon.cycle      { border: 1.5px solid rgba(180,120,255,.4); }
+details.repro .repro-icon.cycle i    { color: rgba(180,120,255,.8); }
+details.repro .repro-icon.pregnancy  { border: 1.5px solid rgba(255,120,180,.4); }
+details.repro .repro-icon.pregnancy i{ color: rgba(255,120,180,.8); }
+details.repro .repro-icon.baby       { border: 1.5px solid rgba(130,200,255,.4); }
+details.repro .repro-icon.baby i     { color: rgba(130,200,255,.8); }
+
+/* === Заголовок и бейдж === */
+details.repro .repro-title { font-weight: 600; font-size: 13px; }
+details.repro .repro-badge {
+  margin-left: auto; font-size: 10px; padding: 2px 8px;
+  border-radius: 50px; font-weight: 600;
+}
+details.repro .repro-badge.cycle     { border: 1px solid rgba(180,120,255,.3); color: rgba(180,120,255,.9); }
+details.repro .repro-badge.pregnancy { border: 1px solid rgba(255,120,180,.3); color: rgba(255,120,180,.9); }
+details.repro .repro-badge.baby      { border: 1px solid rgba(130,200,255,.3); color: rgba(130,200,255,.9); }
+
+/* === Шеврон === */
+details.repro .repro-chev {
+  width: 16px; height: 16px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: center;
+  transition: transform .25s;
+}
+details.repro .repro-chev i { font-size: 10px; color: rgba(255,255,255,.3); }
+details.repro[open] .repro-chev { transform: rotate(180deg); }
+
+/* === Тело карточки === */
+details.repro .repro-c {
+  padding: 12px 16px;
+  background: transparent;
+  border: 1.5px solid rgba(255,255,255,.18);
+  border-top: none;
+  border-radius: 0 0 14px 14px;
+}
+
+/* === Прогресс-бар === */
+details.repro .repro-bar {
+  height: 3px; background: rgba(255,255,255,.08);
+  border-radius: 50px; overflow: hidden; margin-bottom: 10px;
+}
+details.repro .repro-bar-fill { height: 100%; border-radius: 50px; }
+details.repro .repro-bar-fill.cycle     { background: #b478ff; }
+details.repro .repro-bar-fill.pregnancy { background: #ff9eb4; }
+details.repro .repro-bar-fill.baby      { background: #82c8ff; }
+
+/* === Сетка статов === */
+details.repro .repro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* === Карточка стата === */
+details.repro .repro-stat {
+  display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px;
+}
+details.repro .repro-wide { grid-column: 1 / -1; }
+
+/* === Иконки статов === */
+details.repro .rp-si {
+  width: 20px; height: 20px; border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+}
+details.repro .rp-si i { font-size: 10px; }
+details.repro .rp-si.green  i { color: rgba(0,200,130,.7); }
+details.repro .rp-si.pink   i { color: rgba(255,100,150,.7); }
+details.repro .rp-si.purple i { color: rgba(180,120,255,.7); }
+details.repro .rp-si.blue   i { color: rgba(130,200,255,.7); }
+details.repro .rp-si.orange i { color: rgba(255,180,60,.7); }
+details.repro .rp-si.red    i { color: rgba(255,80,80,.7); }
+
+/* === Текст статов === */
+details.repro .rp-lbl { color: rgba(255,255,255,.35); font-size: 9px; }
+details.repro .rp-val { color: rgba(255,255,255,.85); font-size: 11px; font-weight: 600; }
+details.repro .rp-val-warn { color: rgba(255,170,0,.9) !important; }
+
+/* === Заметка === */
+details.repro .repro-note {
+  grid-column: 1 / -1; margin-top: 6px; padding: 8px 12px;
+  background: transparent;
+  border: 1px solid rgba(255,255,255,.1);
+  border-radius: 10px; font-size: 10px; color: rgba(255,255,255,.5);
+  line-height: 1.5; font-style: italic;
+}
+details.repro .repro-rec { font-style: normal; color: rgba(255,215,64,.6); }
+details.repro .repro-rec i { margin-right: 4px; opacity: .7; }
+
+/* === Бейдж здоровья === */
+details.repro .repro-health {
+  display: inline-flex; align-items: center; gap: 3px;
+  padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600;
+}
+details.repro .repro-health.normal   { border: 1px solid rgba(0,200,100,.3);  color: rgba(0,200,100,.9); }
+details.repro .repro-health.warning  { border: 1px solid rgba(255,170,0,.3);  color: rgba(255,170,0,.9); }
+details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  color: rgba(255,60,60,.9); }`;
+
+// ── Custom CSS for infoblock ──
+function applyCustomCss(css) {
+    let styleEl = document.getElementById('repro-custom-infoblock-css');
+    if (!styleEl) {
+        styleEl = document.createElement('style');
+        styleEl.id = 'repro-custom-infoblock-css';
+        document.head.appendChild(styleEl);
+    }
+    styleEl.textContent = css || '';
+}
+
+function stat(icon, color, label, value, wide) {
+    return `<div class="repro-stat${wide ? ' repro-wide' : ''}"><div class="rp-si ${color}">${ic(icon)}</div><div><div class="rp-lbl">${label}</div><div class="rp-val">${value}</div></div></div>`;
+}
+
+function hpBadge(status) {
+    const cls = status === 'critical' ? 'critical' : status === 'warning' ? 'warning' : 'normal';
+    const txt = status === 'critical' ? 'Критич.' : status === 'warning' ? 'Внимание' : 'Норма';
+    return `<span class="repro-health ${cls}">${txt}</span>`;
+}
+
+function getCycleDetails(day) {
+    if (day <= 5) return { fertility: 'Низкая', libido: 'Низкое', mood: 'Усталость', physical: 'Спазмы', note: 'Менструация — низкая фертильность. Спазмы, усталость, перепады настроения.' };
+    if (day <= 11) return { fertility: 'Средняя', libido: 'Среднее', mood: 'Энергичное', physical: 'Энергия растёт', note: 'Фолликулярная фаза — фертильность растёт. Энергия и настроение улучшаются.' };
+    if (day <= 16) return { fertility: 'Высокая', libido: 'Высокое', mood: 'Кокетливое', physical: 'Чувствительность', note: 'Овуляция — пик фертильности. Повышенная чувствительность, лёгкая влажность, кокетливое настроение.' };
+    return { fertility: 'Низкая', libido: 'Низкое', mood: 'ПМС', physical: 'Вздутие', note: 'Лютеиновая фаза — низкая фертильность. Возможны ПМС, вздутие, раздражительность.' };
+}
+
+function getBabies(p) {
+    if (p.babies && p.babies.length > 0) return p.babies;
+    if (!p.hasBaby || !p.babyCount) return [];
+    const babies = [];
+    for (let i = 0; i < (p.babyCount || 1); i++) {
+        babies.push({
+            name: i === 0 ? (p.babyName || '') : '',
+            sex: p.babySex?.[i] || '?',
+            health: p.babyHealth || 'normal',
+            mood: p.babyMood || '—',
+            sleep: p.babySleep || '—',
+            diaperClean: p.babyDiaperClean !== false,
+            teething: !!p.babyTeething,
+            colicky: !!p.babyColicky,
+            feedingType: p.babyFeedingType || '—',
+            milestones: i === 0 ? [...(p.babyMilestones || [])] : [],
+        });
+    }
+    return babies;
+}
+
+// ── Infoblock: glassmorphism card for chat messages ──
+export function buildInfoblockHtml() {
+    const s = getSettings();
+    const p = getPregnancyData();
+    if (!s.isEnabled) return '';
+
+    // ── BABY MODE ──
+    if (p.hasBaby) {
+        const babies = getBabies(p);
+        if (babies.length === 0) return ''; // fallthrough safety
+
+        // Хелпер: считаем возраст ребёнка от birthRpDate до текущей p.rpDate
+        const calcAge = (baby) => {
+            if (baby.age) return baby.age;
+            if (!baby.birthRpDate || !p.rpDate) return p.babyAge || 'новорожд.';
+            const birthMs = new Date(baby.birthRpDate).getTime();
+            const nowMs = new Date(p.rpDate).getTime();
+            if (isNaN(birthMs) || isNaN(nowMs)) return p.babyAge || 'новорожд.';
+            const days = Math.max(0, Math.floor((nowMs - birthMs) / 86400000));
+            if (days < 30) return days <= 7 ? 'новорожд.' : `${days} дн.`;
+            const months = Math.floor(days / 30);
+            if (months < 12) return `${months} мес.`;
+            const years = Math.floor(months / 12);
+            const remMonths = months % 12;
+            return remMonths > 0 ? `${years} г. ${remMonths} мес.` : `${years} ${years === 1 ? 'год' : years < 5 ? 'года' : 'лет'}`;
+        };
+
+        let html = '';
+        babies.forEach((baby, i) => {
+            const sexIcon = baby.sex === 'M' ? '♂' : baby.sex === 'F' ? '♀' : '?';
+            const sexColor = baby.sex === 'F' ? 'pink' : 'blue';
+            const label = baby.name || (babies.length > 1 ? `Малыш ${i + 1}` : 'Малыш');
+            const milestones = (baby.milestones || []).slice(-2).map(m => m.text).join(', ');
+            const ageStr = calcAge(baby);
+
+            html += `<details class="repro">
+                <summary><div class="repro-header">
+                    <div class="repro-icon baby">${ic('fa-baby')}</div>
+                    <span class="repro-title repro-baby-name" data-baby-idx="${i}" title="Клик для переименования" style="cursor:pointer">${label}</span>
+                    <span class="repro-badge baby" style="color:var(--rp-${sexColor})">${sexIcon} · ${ageStr}</span>
+                    <div class="repro-chev">${ic('fa-chevron-down')}</div>
+                </div></summary>
+                <div class="repro-c"><div class="repro-grid">
+                    ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(baby.health || 'normal'))}
+                    ${stat('fa-face-smile', 'purple', 'Настроение', baby.mood || '—')}
+                    ${stat('fa-bottle-water', 'blue', 'Кормление', baby.feedingType || '—')}
+                    ${stat('fa-moon', 'purple', 'Сон', baby.sleep || '—')}
+                    ${stat('fa-baby-carriage', baby.diaperClean ? 'green' : 'orange', 'Подгузник', baby.diaperClean ? 'Чистый' : '<span class="rp-val-warn">Смена!</span>')}
+                    ${baby.teething ? stat('fa-tooth', 'blue', 'Зубки', 'Режутся') : ''}
+                    ${baby.colicky ? stat('fa-face-sad-tear', 'pink', 'Колики', 'Да') : ''}
+                    ${baby.fatherName ? stat('fa-user', 'blue', 'Отец', baby.fatherName) : ''}
+                    ${baby.personality?.length ? `<div class="repro-note"><i class="fa-solid fa-brain" style="margin-right:4px;opacity:0.5"></i>${baby.personality.join(', ')}</div>` : ''}
+                    ${baby.appearance?.length ? `<div class="repro-note"><i class="fa-solid fa-eye" style="margin-right:4px;opacity:0.5"></i>${baby.appearance.join(', ')}</div>` : ''}
+                    ${baby.special ? `<div class="repro-note" style="border-color:rgba(255,215,64,.35);background:rgba(255,215,64,.06)"><i class="fa-solid fa-star" style="margin-right:4px;color:#ffd740"></i><b>${baby.special.name || baby.special}</b>${baby.special.desc ? ` — ${baby.special.desc}` : ''}</div>` : ''}
+                    ${milestones ? `<div class="repro-note">${milestones}</div>` : ''}
+                </div></div>
+            </details>`;
+        });
+
+        return html;
+    }
+
+    // ── PREGNANCY MODE ──
+    if (p.isPregnant) {
+        const dur = s.pregnancyDuration || 40;
+        const { weeks } = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
+        const pct = Math.min(100, Math.round((weeks / dur) * 100));
+        const trimester = weeks <= 12 ? 1 : weeks <= 27 ? 2 : 3;
+        const sexRevealed = !!p.fetusSexRevealed;
+        const sexStr = sexRevealed && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? '♂ мальчик' : '♀ девочка').join(', ') : 'неизвестно';
+        const fetusSize = getFetusSizeForProgress(pct, false);
+        const symptoms = getSymptomsForProgress(pct, weeks);
+        const recs = getRecommendationsForProgress(pct);
+        let dueStr = '—';
+        if (p.conceptionDate) {
+            const dd = calculateDueDate(p.conceptionDate);
+            if (dd) dueStr = dd.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+        let conceptionStr = '—';
+        if (p.conceptionDate) {
+            conceptionStr = new Date(p.conceptionDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+        }
+        const pd = p._dynamic || {};
+        let noteLines = [];
+        if (pd.symptoms || symptoms) noteLines.push(pd.symptoms || symptoms);
+        if (pd.note || recs) noteLines.push(pd.note || recs);
+
+        return `<details class="repro">
+            <summary><div class="repro-header">
+                <div class="repro-icon pregnancy">${ic('fa-heart')}</div>
+                <span class="repro-title">Беременность</span>
+                <span class="repro-badge pregnancy">${weeks}/${dur} нед. · ${trimester} трим.</span>
+                <div class="repro-chev">${ic('fa-chevron-down')}</div>
+            </div></summary>
+            <div class="repro-c">
+                <div class="repro-bar"><div class="repro-bar-fill pregnancy" style="width:${pct}%"></div></div>
+                <div class="repro-grid">
+                    ${stat('fa-calendar-day', 'pink', 'Зачатие', conceptionStr)}
+                    ${stat('fa-calendar', 'purple', 'ПДР', dueStr)}
+                    ${stat('fa-baby', 'pink', 'Плод', `${formatFetusCount(p.fetusCount)} (${sexStr})`)}
+                    ${p.fatherName ? stat('fa-user', 'blue', 'Отец', p.fatherName) : ''}
+                    ${stat('fa-ruler', 'blue', 'Размер', fetusSize)}
+                    ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(p.healthStatus))}
+                    ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', p.mood) : ''}
+                    ${p.weightGain ? stat('fa-weight-scale', 'orange', 'Вес', p.weightGain) : ''}
+                    ${p.babyActivity ? stat('fa-person-running', 'blue', 'Активность', p.babyActivity) : ''}
+                    ${p.libido ? stat('fa-fire', 'pink', 'Либидо', p.libido) : ''}
+                    ${pd.movements ? stat('fa-hand', 'purple', 'Шевеления', pd.movements) : ''}
+                    ${pd.swelling ? stat('fa-droplet', 'orange', 'Отёки', pd.swelling) : ''}
+                    ${pd.braxton_hicks ? stat('fa-bolt', 'pink', 'Схватки', pd.braxton_hicks) : ''}
+                    ${pd.fetal_position ? stat('fa-baby', 'blue', 'Положение', pd.fetal_position) : ''}
+                    ${pd.recommendations ? `<div class="repro-note repro-rec">${ic('fa-lightbulb')} ${pd.recommendations}</div>` : ''}
+                    ${noteLines.length ? `<div class="repro-note">${noteLines.join(' · ')}</div>` : ''}
+                </div>
+            </div>
+        </details>`;
+    }
+
+    // ── CYCLE MODE ──
+    const day = getCycleDay();
+    const phase = getPhaseInfo(day);
+    const cyclePct = Math.round(day / 28 * 100);
+    const cd = getCycleDetails(day);
+    const d = p._dynamic || {};
+
+    return `<details class="repro">
+        <summary><div class="repro-header">
+            <div class="repro-icon cycle">${ic('fa-clock')}</div>
+            <span class="repro-title">Цикл</span>
+            <span class="repro-badge cycle">День ${day}/28 · ${phase.name}</span>
+            <div class="repro-chev">${ic('fa-chevron-down')}</div>
+        </div></summary>
+        <div class="repro-c">
+            <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>
+            <div class="repro-grid">
+                ${stat('fa-droplet', 'green', 'Фертильность', d.fertility || cd.fertility)}
+                ${stat('fa-fire', 'pink', 'Либидо', d.libido || cd.libido)}
+                ${stat('fa-face-smile', 'purple', 'Настроение', d.mood || cd.mood)}
+                ${stat('fa-heart', 'blue', 'Физически', d.physical || cd.physical)}
+                <div class="repro-note">${d.note || cd.note}</div>
+            </div>
+        </div>
+    </details>`;
+}
+
+// ── syncUI ──
 export function syncUI() {
     const s = getSettings();
     const p = getPregnancyData();
 
-    const enabled = document.getElementById('repro-enabled');
-    const notify = document.getElementById('repro-notify');
+    const el = (id) => document.getElementById(id);
+
+    const enabled = el('repro-enabled');
+    const notify = el('repro-notify');
     if (enabled) enabled.checked = s.isEnabled;
     if (notify) notify.checked = s.showNotifications;
 
-    const contraSelect = document.getElementById('repro-contraception');
-    if (contraSelect) contraSelect.value = s.contraception;
+    const contra = el('repro-contraception');
+    if (contra) contra.value = s.contraception;
 
-    // Синхронизация срока беременности
-    const durationSelect = document.getElementById('repro-duration');
-    const durationCustom = document.getElementById('repro-duration-custom');
-    const manualDuration = document.getElementById('repro-manual-duration');
-    if (durationSelect) {
+    const babyMaxAge = el('repro-baby-max-age');
+    if (babyMaxAge) {
+        const v = s.babyMaxAgeDays || 730;
+        const validOptions = ['180', '365', '730', '1095', '1825', '0'];
+        babyMaxAge.value = validOptions.includes(String(v)) ? String(v) : '730';
+    }
+
+    const durSel = el('repro-duration');
+    const durCust = el('repro-duration-custom');
+    if (durSel) {
         const dur = s.pregnancyDuration || 40;
-        const standardValues = ['12', '16', '20', '24', '28', '32', '36', '40'];
-        if (standardValues.includes(String(dur))) {
-            durationSelect.value = String(dur);
-            if (durationCustom) durationCustom.style.display = 'none';
+        const std = ['12','16','20','24','28','32','36','40'];
+        if (std.includes(String(dur))) {
+            durSel.value = String(dur);
+            if (durCust) durCust.style.display = 'none';
         } else {
-            durationSelect.value = 'custom';
-            if (durationCustom) {
-                durationCustom.style.display = 'inline-block';
-                durationCustom.value = dur;
-            }
+            durSel.value = 'custom';
+            if (durCust) { durCust.style.display = 'inline-block'; durCust.value = dur; }
         }
     }
-    if (manualDuration) manualDuration.value = s.pregnancyDuration || 40;
 
-    const cycleInput = document.getElementById('repro-cycleday');
-    const currentCycle = document.getElementById('repro-currentcycle');
-
-    if (cycleInput) cycleInput.value = s.cycleDay;
-
-    if (currentCycle) {
-        const day = s.cycleDay;
-        const phaseInfo = getPhaseInfo(day);
-        currentCycle.innerHTML = `<i class="fa-solid ${phaseInfo.icon}" style="color: ${phaseInfo.color};"></i> <strong>${day}</strong>/28 — ${phaseInfo.name}`;
+    const cycleIn = el('repro-cycleday');
+    const cycleInfo = el('repro-currentcycle');
+    const _cd = getCycleDay();
+    if (cycleIn) cycleIn.value = _cd;
+    if (cycleInfo) {
+        const ph = getPhaseInfo(_cd);
+        cycleInfo.innerHTML = `<span style="color:${ph.color}">${ph.name}</span> — день <b>${_cd}</b>/28`;
     }
 
-    const status = document.getElementById('repro-status');
+    const status = el('repro-status');
     if (status) {
-        if (p.isPregnant) {
-            status.innerHTML = `<span style="color: #ff9ff3;"><i class="fa-solid fa-person-pregnant"></i> ${L('pregnant')}</span>`;
-        } else {
-            status.innerHTML = `<span style="opacity: 0.7;">${L('notPregnant')}</span>`;
-        }
+        if (p.isPregnant) status.innerHTML = `<span style="color:var(--rp-pink)">Беременна</span>`;
+        else if (p.hasBaby) status.innerHTML = `<span style="color:var(--rp-blue)">Малыш</span>`;
+        else status.innerHTML = `<span style="opacity:0.5">Нет</span>`;
     }
 
-    const monitorBlock = document.getElementById('repro-pregnancy-monitor');
-    const monitorContent = document.getElementById('repro-pregnancy-content');
+    const ibSel = el('repro-infoblock');
+    if (ibSel) ibSel.value = s.infoblockPosition || 'off';
 
-    if (monitorBlock && monitorContent) {
+    // ── Pregnancy monitor ──
+    const pregMon = el('repro-preg-mon');
+    if (pregMon) {
         if (p.isPregnant && (p.pregnancyWeeks > 0 || p.conceptionDate)) {
-            monitorBlock.style.display = 'block';
-
+            pregMon.style.display = 'block';
+            const dur = s.pregnancyDuration || 40;
             const { weeks, days } = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
-
-            let dueDateStr = '—';
-            if (p.conceptionDate) {
-                const dueDate = calculateDueDate(p.conceptionDate);
-                if (dueDate) {
-                    dueDateStr = dueDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
-                }
-            }
-
-            const duration = s.pregnancyDuration || 40;
-            const progressPercent = Math.min(100, Math.round((weeks / duration) * 100));
-            const sexIcons = formatSexIcons(p.fetusSex);
-            const fetusText = formatFetusCount(p.fetusCount);
-
-            const fetusSize = getFetusSizeForProgress(progressPercent, true);
-
-            let symptoms = '';
-            let recommendations = '';
-
-            symptoms = getSymptomsForProgress(progressPercent, weeks);
-            recommendations = getRecommendationsForProgress(progressPercent);
-
+            const pct = Math.min(100, Math.round((weeks / dur) * 100));
+            const sexVis = weeks >= 20;
+            const sexStr = sexVis && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? 'М' : 'Д').join(', ') : '—';
             const health = getHealthInfo(p.healthStatus);
-            const healthIcon = health.emoji;
-            const healthText = health.text;
-            const healthColor = health.color;
+            const hCls = p.healthStatus === 'critical' ? 'crit' : p.healthStatus === 'warning' ? 'warn' : 'ok';
 
-            let riskFactors = [];
-            if (p.fetusCount >= 2) riskFactors.push('Многоплодная');
-            if (weeks > duration) riskFactors.push('Перенашивание');
-            if (p.complications.length > 2) riskFactors.push('Множественные осложнения');
-
-            const riskHTML = riskFactors.length > 0 
-                ? `<div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-solid fa-triangle-exclamation"></i> Риски:</span><span class="pregnancy-info-value" style="color: #ffaa00; font-size: 11px;">${riskFactors.join(', ')}</span></div>`
-                : '';
-
-            let complicationsHTML = '';
-            const unresolvedCount = p.complications ? p.complications.filter(c => !c.resolved).length : 0;
-            
-            if (p.complications && p.complications.length > 0) {
-                const recent = p.complications.slice(-3).reverse();
-                complicationsHTML = `<div class="pregnancy-complications"><div class="pregnancy-complications-title"><i class="fa-solid fa-clipboard-list"></i> Осложнения:</div>${recent.map(c => {
-                    const col = c.resolved ? '#888' : (c.severity === 'critical' ? '#ff4444' : '#ffaa00');
-                    const ico = c.resolved ? '✅' : (c.severity === 'critical' ? '🚨' : '⚠️');
-                    const resolvedStyle = c.resolved ? 'text-decoration: line-through; opacity: 0.5;' : '';
-                    return `<div class="complication-item" style="${resolvedStyle}"><span style="color: ${col};">${ico}</span> <strong>${c.type}</strong> <span style="opacity: 0.5; font-size: 10px;">(${c.week} нед.)${c.resolved ? ' — вылечено' : ''}</span><div style="font-size: 11px; opacity: 0.7;">${c.description}</div></div>`;
-                }).join('')}`;
-                
-                // Кнопка "К врачу" если есть нерешённые осложнения
-                if (unresolvedCount > 0) {
-                    complicationsHTML += `<button id="repro-doctor-btn" class="menu_button" style="margin-top: 10px; width: 100%; background: linear-gradient(135deg, #4dabf7 0%, #228be6 100%);"><i class='fa-solid fa-hospital'></i> К врачу (${unresolvedCount} осложн.)</button>`;
-                }
-                
-                complicationsHTML += `</div>`;
+            let dueStr = '—';
+            if (p.conceptionDate) {
+                const dd = calculateDueDate(p.conceptionDate);
+                if (dd) dueStr = dd.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+            }
+            let conceptionStr = '—';
+            if (p.conceptionDate) {
+                conceptionStr = new Date(p.conceptionDate).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
             }
 
-            monitorContent.innerHTML = `
-                <div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-solid fa-hourglass-half"></i> Срок:</span><span class="pregnancy-info-value">${weeks}/${duration} нед. (${days} дн.)</span></div>
-                <div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-regular fa-calendar-check"></i> ПДР:</span><span class="pregnancy-info-value">${dueDateStr}</span></div>
-                <div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-solid fa-baby"></i> Плод:</span><span class="pregnancy-info-value">${fetusText} ${sexIcons}</span></div>
-                <div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-solid fa-ruler"></i> Размер:</span><span class="pregnancy-info-value" style="font-size: 11px;">${fetusSize}</span></div>
-                <div class="pregnancy-info-row"><span class="pregnancy-info-label"><i class="fa-solid fa-heart-pulse"></i> Здоровье:</span><span class="pregnancy-info-value" style="color: ${healthColor};">${healthIcon} ${healthText}</span></div>
-                ${riskHTML}
-                <div class="pregnancy-progress-bar"><div class="pregnancy-progress-fill" style="width: ${progressPercent}%"></div></div>
-                <div style="text-align: center; font-size: 11px; opacity: 0.7; margin-bottom: 10px;">${progressPercent}% до родов</div>
-                <div class="pregnancy-symptoms"><div class="pregnancy-symptoms-title"><i class="fa-solid fa-stethoscope"></i> Симптомы:</div><div class="pregnancy-symptoms-text">${symptoms}</div></div>
-                <div class="pregnancy-recommendations"><div class="pregnancy-recommendations-title"><i class="fa-solid fa-lightbulb"></i> Рекомендации:</div><div class="pregnancy-recommendations-text">${recommendations}</div></div>
-                ${complicationsHTML}
-            `;
-            
-            // Привязываем обработчик для кнопки "К врачу"
-            setTimeout(() => {
-                const doctorBtn = document.getElementById('repro-doctor-btn');
-                if (doctorBtn) {
-                    doctorBtn.onclick = visitDoctor;
+            const symptoms = getSymptomsForProgress(pct, weeks);
+            const recs = getRecommendationsForProgress(pct);
+            const fetusSize = getFetusSizeForProgress(pct, false);
+
+            let compsHtml = '';
+            if (p.complications?.length > 0) {
+                const unres = p.complications.filter(c => !c.resolved);
+                compsHtml = `<div class="rp-m-warn">${unres.length > 0 ? unres.map(c => c.type).join(', ') : 'Все решены'}</div>`;
+                if (unres.length > 0) {
+                    compsHtml += `<button id="repro-doctor-btn" class="rp-m-btn">К врачу (${unres.length})</button>`;
                 }
+            }
+
+            pregMon.innerHTML = `
+                <div class="rp-m-head pink">Беременность — ${weeks}/${dur} нед.</div>
+                <div class="rp-m-progress"><div class="rp-m-progress-fill pink" style="width:${pct}%"></div></div>
+                <div class="rp-m-grid">
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Зачатие</span><span class="rp-m-val">${conceptionStr}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">ПДР</span><span class="rp-m-val">${dueStr}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(p.fetusCount)} (${sexStr})</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Размер</span><span class="rp-m-val">${fetusSize}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Здоровье</span><span class="rp-m-val rp-m-hp-${hCls}">${health.text}</span></div>
+                    ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${p.fatherName}</span></div>` : ''}
+                </div>
+                <div class="rp-m-text"><b>Симптомы:</b> ${symptoms}</div>
+                <div class="rp-m-text"><b>Рек-ции:</b> ${recs}</div>
+                ${compsHtml}
+                <div style="display:flex;gap:4px;align-items:center;margin-top:6px">
+                    <span style="font-size:9px;opacity:0.5">Срок:</span>
+                    <input type="number" id="repro-set-weeks" min="1" max="42" value="${weeks}" class="text_pole" style="width:50px">
+                    <span style="font-size:9px;opacity:0.5">нед.</span>
+                    <button id="repro-apply-weeks" class="rp-m-btn" style="flex:1">Установить</button>
+                </div>
+                <button id="repro-reanchor-btn" class="rp-m-btn" style="margin-top:6px;background:rgba(255,255,255,0.05)">Пересчитать недели от RP-даты</button>`;
+
+            setTimeout(() => {
+                const db = el('repro-doctor-btn'); if (db) db.onclick = visitDoctor;
+                const rb = el('repro-reanchor-btn');
+                if (rb) rb.onclick = () => {
+                    if (!p.rpDate) { showNotification('Нет RP-даты в чате', 'warning'); return; }
+                    if (!p.conceptionDate) {
+                        showNotification('Нет даты зачатия — поставь её через "Ручная беременность"', 'warning');
+                        return;
+                    }
+                    // Пересчитываем НЕДЕЛИ от текущей RP-даты, conceptionDate НЕ трогаем —
+                    // это «твоя реальная дата зачатия», она не должна меняться.
+                    const conceptionMs = new Date(p.conceptionDate).getTime();
+                    const rpMs = new Date(p.rpDate).getTime();
+                    if (rpMs < conceptionMs) {
+                        showNotification('RP-дата раньше даты зачатия — пересчёт невозможен', 'warning');
+                        return;
+                    }
+                    const newWeeks = Math.floor((rpMs - conceptionMs) / (7 * 86400000));
+                    p.pregnancyWeeks = newWeeks;
+                    p._conceptionAnchored = true;
+                    p._userSetWeeksAt = Date.now();
+                    import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+                    saveSettingsDebounced();
+                    const cDateStr = new Date(p.conceptionDate).toLocaleDateString('ru-RU');
+                    const rDateStr = new Date(p.rpDate).toLocaleDateString('ru-RU');
+                    showNotification(`Недели пересчитаны: ${cDateStr} → ${rDateStr} = ${newWeeks} нед.`, 'success');
+                    syncUI();
+                    updatePromptInjection();
+                };
+                // Установка срока вручную: пересчитываем conceptionDate так чтобы (rpDate - conception) = N недель
+                const ab = el('repro-apply-weeks');
+                if (ab) ab.onclick = () => {
+                    const input = el('repro-set-weeks');
+                    const newWeeks = Math.max(0, Math.min(42, parseInt(input?.value) || 0));
+                    // Якорь: предпочитаем rpDate (RP-время чата), иначе сейчас (real-world)
+                    const anchor = p.rpDate ? new Date(p.rpDate) : new Date();
+                    p.conceptionDate = new Date(anchor.getTime() - newWeeks * 7 * 86400000).toISOString();
+                    p.pregnancyWeeks = newWeeks;
+                    p._conceptionAnchored = true;
+                    // Метка ручной установки — защита от перезаписи парсером текста (30 минут)
+                    p._userSetWeeksAt = Date.now();
+                    import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+                    saveSettingsDebounced();
+                    showNotification(`Срок установлен: ${newWeeks} нед.`, 'success');
+                    syncUI();
+                    updatePromptInjection();
+                    setTimeout(() => {
+                        import('./message-handler.js').then(m => m.renderInfoblock());
+                    }, 100);
+                };
             }, 10);
         } else {
-            monitorBlock.style.display = 'none';
+            pregMon.style.display = 'none';
         }
     }
 
-    const resetBtn = document.getElementById('repro-reset');
-    if (resetBtn) {
-        resetBtn.style.display = p.isPregnant ? 'block' : 'none';
+    const resetBtn = el('repro-reset');
+    if (resetBtn) resetBtn.style.display = p.isPregnant ? 'block' : 'none';
+
+    const forceBirthBtn = el('repro-force-birth-btn');
+    if (forceBirthBtn) forceBirthBtn.style.display = p.isPregnant ? 'block' : 'none';
+
+    // ── Baby monitor ──
+    const babyMon = el('repro-baby-mon');
+    const resetBabyBtn = el('repro-reset-baby');
+    if (babyMon) {
+        if (p.hasBaby) {
+            babyMon.style.display = 'block';
+            if (resetBabyBtn) resetBabyBtn.style.display = 'block';
+            const babies = p.babies && p.babies.length > 0 ? p.babies : [{ name: p.babyName, health: p.babyHealth || 'normal', mood: p.babyMood, sleep: p.babySleep, feedingType: p.babyFeedingType, diaperClean: p.babyDiaperClean, sex: p.babySex?.[0] }];
+            let monHtml = '';
+            babies.forEach((baby, i) => {
+                const bh = getHealthInfo(baby.health || 'normal');
+                const bhCls = (baby.health === 'critical') ? 'crit' : (baby.health === 'warning') ? 'warn' : 'ok';
+                const sexIcon = baby.sex === 'M' ? '♂' : baby.sex === 'F' ? '♀' : '';
+                const headColor = baby.sex === 'F' ? 'pink' : 'blue';
+                const label = baby.name || (babies.length > 1 ? `Малыш ${i + 1}` : 'без имени');
+                monHtml += `
+                <div class="rp-m-head ${headColor}">${sexIcon} ${label} — ${p.babyAge || 'новорожд.'}</div>
+                <div class="rp-m-grid">
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Здоровье</span><span class="rp-m-val rp-m-hp-${bhCls}">${bh.text}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Настроение</span><span class="rp-m-val">${baby.mood || '—'}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Сон</span><span class="rp-m-val">${baby.sleep || '—'}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Кормление</span><span class="rp-m-val">${baby.feedingType || '—'}</span></div>
+                    <div class="rp-m-cell"><span class="rp-m-lbl">Подгузник</span><span class="rp-m-val" style="color:${baby.diaperClean !== false ? 'var(--rp-green)' : 'var(--rp-yellow)'}">${baby.diaperClean !== false ? 'Чистый' : 'Смена!'}</span></div>
+                    ${baby.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${baby.fatherName}</span></div>` : ''}
+                </div>`;
+            });
+            babyMon.innerHTML = monHtml;
+        } else {
+            babyMon.style.display = 'none';
+            if (resetBabyBtn) resetBabyBtn.style.display = 'none';
+        }
     }
 
-    const stats = document.getElementById('repro-stats');
-    if (stats) {
-        stats.textContent = `${L('stats').replace('{checks}', s.totalChecks).replace('{conceptions}', s.totalConceptions)}`;
-    }
+    const stats = el('repro-stats');
+    if (stats) stats.textContent = `${s.totalChecks} проверок / ${s.totalConceptions} зачатий`;
 }
 
+// ── setupUI ──
 export function setupUI() {
     try {
         const s = getSettings();
-
-        const settingsHtml = `
-<div class="reproductive-system-settings">
-    <div class="inline-drawer">
-        <div class="inline-drawer-toggle inline-drawer-header">
-            <b>${L('title')}</b>
-            <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
-        </div>
-        <div class="inline-drawer-content">
-            <div class="flex-container">
-                <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
-                <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
-            </div>
+        const html = `
+<div class="inline-drawer">
+    <div class="inline-drawer-toggle inline-drawer-header">
+        <b>${L('title')}</b>
+        <div class="inline-drawer-icon fa-solid fa-circle-chevron-down down"></div>
+    </div>
+    <div class="inline-drawer-content">
+        <div class="reproductive-system-settings">
+            <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
+            <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <hr>
-            <div class="flex-container flexFlowColumn">
-                <label><strong>${L('contraceptionTitle')}</strong></label>
-                <select id="repro-contraception" class="text_pole">
-                    <option value="none">${L('contraceptionTypes.none')}</option>
-                    <option value="condom">${L('contraceptionTypes.condom')}</option>
-                    <option value="pill">${L('contraceptionTypes.pill')}</option>
-                    <option value="iud">${L('contraceptionTypes.iud')}</option>
+            <div style="display:flex;gap:4px;align-items:center">
+                <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
+                <select id="repro-contraception" class="text_pole" style="flex:1">
+                    <option value="none">Нет</option>
+                    <option value="condom">Презерватив</option>
+                    <option value="pill">Таблетки</option>
+                    <option value="iud">ВМС</option>
+                </select>
+            </div>
+            <div style="display:flex;gap:4px;align-items:center">
+                <span style="font-size:9px;opacity:0.5">Длит. берем.:</span>
+                <select id="repro-duration" class="text_pole" style="flex:1">
+                    <option value="12">12 нед.</option><option value="16">16</option>
+                    <option value="20">20</option><option value="24">24</option>
+                    <option value="28">28</option><option value="32">32</option>
+                    <option value="36">36</option><option value="40" selected>40 (стд)</option>
+                    <option value="custom">Своё</option>
+                </select>
+                <input type="number" id="repro-duration-custom" class="text_pole" style="width:45px;display:none" min="4" max="100">
+            </div>
+            <div style="display:flex;gap:4px;align-items:center" title="После этого возраста ребёнок «выпускается» из инфоблока — остаётся в семье, но без отслеживания подгузников/кормления.">
+                <span style="font-size:9px;opacity:0.5">Малыш до:</span>
+                <select id="repro-baby-max-age" class="text_pole" style="flex:1">
+                    <option value="180">6 мес.</option>
+                    <option value="365">1 год</option>
+                    <option value="730">2 года</option>
+                    <option value="1095">3 года</option>
+                    <option value="1825">5 лет</option>
+                    <option value="0">Никогда (вручную)</option>
                 </select>
             </div>
             <hr>
-            <div class="flex-container flexFlowColumn">
-                <label><strong>Срок беременности</strong></label>
-                <div class="flex-container" style="gap: 5px; align-items: center; margin-top: 5px;">
-                    <select id="repro-duration" class="text_pole" style="width: 140px;">
-                        <option value="12">12 нед. (~3 мес.)</option>
-                        <option value="16">16 нед. (~4 мес.)</option>
-                        <option value="20">20 нед. (~5 мес.)</option>
-                        <option value="24">24 нед. (~6 мес.)</option>
-                        <option value="28">28 нед. (~7 мес.)</option>
-                        <option value="32">32 нед. (~8 мес.)</option>
-                        <option value="36">36 нед. (~9 мес.)</option>
-                        <option value="40">40 нед. (стандарт)</option>
-                        <option value="custom">Своё...</option>
+            <div id="repro-currentcycle" class="rp-cycle-info"></div>
+            <div style="display:flex;gap:4px;align-items:center">
+                <span style="font-size:9px;opacity:0.5">День цикла:</span>
+                <input type="number" id="repro-cycleday" min="1" max="28" value="${getCycleDay()}" class="text_pole" style="width:45px">
+                <button id="repro-setcycle" class="menu_button">${ic('fa-check')}</button>
+            </div>
+            <hr>
+            <div style="font-size:10px;opacity:0.7">Статус: <span id="repro-status"></span></div>
+            <div id="repro-preg-mon" class="rp-m" style="display:none"></div>
+            <div id="repro-baby-mon" class="rp-m" style="display:none"></div>
+            <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none">🍼 Принять роды сейчас</button>
+            <hr>
+            <div id="repro-manual-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">Ручная беременность / малыш ▼</div>
+            <div id="repro-manual-panel" style="display:none;gap:4px;flex-direction:column">
+                <small style="opacity:0.5;font-size:9px;font-weight:600">Беременность</small>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <span style="font-size:9px;opacity:0.5;min-width:62px">Зачатие:</span>
+                    <input type="date" id="repro-manual-conception-date" class="text_pole" style="flex:1" title="RP-дата (не реальная). Недели посчитаются от этой даты до текущего RP_DATE в чате.">
+                </div>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <span style="font-size:9px;opacity:0.5;min-width:62px">Плодов:</span>
+                    <input type="number" id="repro-manual-fetus" min="1" max="4" value="1" class="text_pole" style="width:42px">
+                    <select id="repro-manual-sex" class="text_pole" style="flex:1">
+                        <option value="random">Пол: случайно</option>
+                        <option value="M">Все мальчики</option>
+                        <option value="F">Все девочки</option>
                     </select>
-                    <input type="number" id="repro-duration-custom" class="text_pole" style="width: 60px; display: none;" min="4" max="100" placeholder="нед.">
                 </div>
-            </div>
-            <hr>
-            <div class="flex-container flexFlowColumn">
-                <label><strong>${L('cycleDay')}</strong></label>
-                <div id="repro-currentcycle" style="padding: 5px; background: var(--SmartThemeBlurTintColor); border-radius: 5px;"><span>${s.cycleDay}</span></div>
-            </div>
-            <div class="flex-container flexFlowColumn" style="margin-top: 10px;">
-                <div class="flex-container" style="gap: 5px; align-items: center;">
-                    <input type="number" id="repro-cycleday" min="1" max="28" value="${s.cycleDay}" class="text_pole" style="width: 60px;">
-                    <button id="repro-setcycle" class="menu_button" style="padding: 5px 10px;">✓</button>
-                </div>
-            </div>
-            <hr>
-            <div class="flex-container flexFlowColumn">
-                <label><strong>${L('status')}</strong></label>
-                <div id="repro-status"><span style="opacity: 0.7;">${L('notPregnant')}</span></div>
-            </div>
-            <details id="repro-pregnancy-monitor" style="display: none; margin-top: 15px;">
-                <summary style="cursor: pointer; font-weight: 600; color: #ff9ff3; padding: 8px; background: rgba(255,159,243,0.1); border-radius: 8px;"><i class="fa-solid fa-person-pregnant"></i> Мониторинг беременности</summary>
-                <div id="repro-pregnancy-content" class="pregnancy-glass-panel"></div>
-            </details>
-            <div id="repro-manual-pregnancy" style="display: none; margin-top: 10px; padding: 10px; background: rgba(255,159,243,0.1); border-radius: 5px;">
-                <label style="font-size: 12px; opacity: 0.8;">Ручная установка:</label>
-                <div class="flex-container" style="gap: 5px; margin-top: 5px; flex-wrap: wrap;">
-                    <select id="repro-manual-count" class="text_pole" style="width: 80px;">
-                        <option value="1">1 плод</option>
-                        <option value="2">Двойня</option>
-                        <option value="3">Тройня</option>
+                <button id="repro-manual-start" class="menu_button" style="width:100%">Начать беременность</button>
+                <small style="opacity:0.5;font-size:9px;font-weight:600;margin-top:4px">Малыш <span style="font-weight:400;opacity:0.7">(добавляется к существующим)</span></small>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <input type="text" id="repro-mb-name" class="text_pole" style="flex:1" maxlength="60" placeholder="Имя">
+                    <select id="repro-mb-sex" class="text_pole" style="width:80px">
+                        <option value="M">Мальчик</option>
+                        <option value="F">Девочка</option>
                     </select>
-                    <input id="repro-manual-weeks" type="number" class="text_pole" value="1" min="0" max="100" style="width: 60px;">
-                    <span style="font-size: 11px; opacity: 0.7; align-self: center;">нед. из</span>
-                    <input id="repro-manual-duration" type="number" class="text_pole" value="40" min="4" max="100" style="width: 50px;">
                 </div>
-                <div class="flex-container" style="gap: 5px; margin-top: 8px; flex-wrap: wrap; align-items: center;">
-                    <label style="font-size: 11px; opacity: 0.7;">РП-дата:</label>
-                    <input id="repro-manual-rpdate" type="date" class="text_pole" style="width: 140px;">
-                    <button id="repro-setpregnant" class="menu_button" style="padding: 5px 10px; background: #ff9ff3;"><i class="fa-solid fa-person-pregnant"></i> Установить</button>
+                <div style="display:flex;gap:4px;align-items:center">
+                    <input type="number" id="repro-mb-age-days" class="text_pole" style="width:60px" min="0" max="730" value="0" title="Возраст в днях">
+                    <span style="font-size:9px;opacity:0.4">дн.</span>
+                    <input type="text" id="repro-mb-father" class="text_pole" style="flex:1" maxlength="60" placeholder="Отец (необязательно)">
                 </div>
+                <button id="repro-manual-baby-add" class="menu_button" style="width:100%">Добавить малыша</button>
+                <button id="repro-reset" class="menu_button redWarningBG" style="width:100%;display:none">Сброс берем.</button>
+                <button id="repro-reset-baby" class="menu_button redWarningBG" style="width:100%;display:none">Сброс малыша</button>
             </div>
-            <button id="repro-toggle-manual" class="menu_button" style="margin-top: 10px; opacity: 0.6; font-size: 11px;">Ручная беременность</button>
-            <button id="repro-reset" class="menu_button redWarningBG" style="display: none; margin-top: 10px;">${L('reset')}</button>
             <hr>
-            <small id="repro-stats" style="opacity: 0.5;">0 / 0</small>
+            <div style="display:flex;gap:4px;align-items:center">
+                <span style="font-size:9px;opacity:0.5">Инфоблок:</span>
+                <select id="repro-infoblock" class="text_pole" style="flex:1">
+                    <option value="off">Выкл.</option>
+                    <option value="top">Вверху</option>
+                    <option value="bottom">Внизу</option>
+                </select>
+            </div>
+            <div id="repro-css-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">CSS инфоблока ▼</div>
+            <div id="repro-css-panel" style="display:none;flex-direction:column;gap:4px">
+                <textarea id="repro-custom-css" class="text_pole" rows="10" style="font-family:monospace;font-size:10px;resize:vertical;min-height:80px;white-space:pre;tab-size:2" placeholder="/* Свой CSS для инфоблока */\ndetails.repro { ... }"></textarea>
+                <div style="display:flex;gap:4px">
+                    <button id="repro-css-apply" class="menu_button" style="flex:1">Применить</button>
+                    <button id="repro-css-reset" class="menu_button" style="flex:0 0 auto">Сброс</button>
+                </div>
+                <small style="opacity:0.35;font-size:8px">Селекторы: details.repro, .repro-header, .repro-c, .repro-stat, .rp-val, .repro-bar-fill и др.</small>
+            </div>
+            <hr>
+            <small id="repro-stats" style="opacity:0.3;font-size:8px">0 / 0</small>
         </div>
     </div>
-</div>
-<style>
-.reproductive-system-settings .inline-drawer-content { padding: 10px; }
-.reproductive-system-settings hr { margin: 10px 0; border-color: var(--SmartThemeBorderColor); opacity: 0.3; }
-.reproductive-system-settings select, .reproductive-system-settings input[type="number"] { margin-top: 5px; }
-.pregnancy-glass-panel { margin-top: 10px; padding: 15px; background: rgba(255,159,243,0.08); backdrop-filter: blur(15px); border: 1px solid rgba(255,159,243,0.2); border-radius: 12px; box-shadow: 0 8px 32px rgba(255,159,243,0.15); }
-.pregnancy-info-row { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid rgba(255,159,243,0.1); }
-.pregnancy-info-row:last-child { border-bottom: none; }
-.pregnancy-info-label { font-size: 12px; opacity: 0.7; }
-.pregnancy-info-value { font-weight: 600; color: #ff9ff3; }
-.pregnancy-progress-bar { width: 100%; height: 8px; background: rgba(255,159,243,0.15); border-radius: 10px; overflow: hidden; margin: 10px 0 5px 0; }
-.pregnancy-progress-fill { height: 100%; background: linear-gradient(90deg, #ff9ff3 0%, #ffc2d1 100%); transition: width 0.3s; border-radius: 10px; }
-.pregnancy-symptoms { margin-top: 10px; padding: 10px; background: rgba(255,159,243,0.05); border-radius: 8px; border-left: 3px solid #ff9ff3; }
-.pregnancy-symptoms-title { font-size: 11px; font-weight: 600; color: #ff9ff3; margin-bottom: 5px; }
-.pregnancy-symptoms-text { font-size: 11px; line-height: 1.5; opacity: 0.8; }
-.pregnancy-recommendations { margin-top: 10px; padding: 10px; background: rgba(0,255,136,0.05); border-radius: 8px; border-left: 3px solid #00ff88; }
-.pregnancy-recommendations-title { font-size: 11px; font-weight: 600; color: #00ff88; margin-bottom: 5px; }
-.pregnancy-recommendations-text { font-size: 11px; line-height: 1.5; opacity: 0.8; }
-.pregnancy-complications { margin-top: 10px; padding: 10px; background: rgba(255,68,68,0.05); border-radius: 8px; border-left: 3px solid #ff4444; }
-.pregnancy-complications-title { font-size: 11px; font-weight: 600; color: #ff4444; margin-bottom: 8px; }
-.complication-item { padding: 8px; background: rgba(255,68,68,0.05); border-radius: 6px; margin-bottom: 6px; }
-.complication-item:last-child { margin-bottom: 0; }
-.pregnancy-glass-panel i.fa-solid, .pregnancy-glass-panel i.fa-regular { margin-right: 4px; opacity: 0.8; }
-.pregnancy-info-label i { width: 16px; text-align: center; }
-</style>`;
+</div>`;
 
-        $('#extensions_settings2').append(settingsHtml);
+        $('#extensions_settings2').append(html);
 
-        $('#repro-enabled').on('change', function() {
-            getSettings().isEnabled = this.checked;
+        // Events
+        $('#repro-enabled').on('change', function() { getSettings().isEnabled = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
+        $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
+        $('#repro-baby-max-age').on('change', function() {
+            const v = parseInt(this.value) || 730;
+            getSettings().babyMaxAgeDays = v;
             saveSettingsDebounced();
             updatePromptInjection();
         });
 
-        $('#repro-notify').on('change', function() {
-            getSettings().showNotifications = this.checked;
-            saveSettingsDebounced();
-        });
-
-        $('#repro-contraception').on('change', function() {
-            getSettings().contraception = this.value;
-            saveSettingsDebounced();
-            updatePromptInjection();
-            syncUI();
-        });
-
-        $('#repro-setcycle').on('click', function() {
-            const input = document.getElementById('repro-cycleday');
-            const value = Math.max(1, Math.min(28, parseInt(input.value) || 14));
-            input.value = value;
-            const s = getSettings();
-            s.cycleDay = value;
-            s.lastCycleUpdate = Date.now();
-            saveSettingsDebounced();
-            setTimeout(() => {
-                updatePromptInjection();
-                syncUI();
-                showNotification(`День цикла: ${value}`, 'info');
-            }, 100);
-        });
-
-        $('#repro-toggle-manual').on('click', function() {
-            const manualDiv = $('#repro-manual-pregnancy');
-            manualDiv.is(':visible') ? manualDiv.slideUp(200) : manualDiv.slideDown(200);
-        });
-
-        // Обработчик выбора срока беременности
-        $('#repro-duration').on('change', function() {
-            const s = getSettings();
-            const val = $(this).val();
-            if (val === 'custom') {
-                $('#repro-duration-custom').show().focus();
-            } else {
-                $('#repro-duration-custom').hide();
-                s.pregnancyDuration = parseInt(val);
-                saveSettingsDebounced();
-                updatePromptInjection();
-                syncUI();
-                showNotification(`Срок беременности: ${val} недель`, 'info');
-            }
-        });
-
-        $('#repro-duration-custom').on('change', function() {
-            const s = getSettings();
-            const val = Math.max(4, Math.min(100, parseInt($(this).val()) || 40));
-            $(this).val(val);
-            s.pregnancyDuration = val;
-            saveSettingsDebounced();
-            updatePromptInjection();
-            syncUI();
-            showNotification(`Срок беременности: ${val} недель`, 'info');
-        });
-
-        $('#repro-setpregnant').on('click', function() {
-            const s = getSettings();
+        // Принудительно вызвать роды СЕЙЧАС — если модель описала роды но не поставила тег
+        $('#repro-force-birth-btn').on('click', function() {
             const p = getPregnancyData();
-            const count = parseInt($('#repro-manual-count').val());
-            const duration = Math.max(4, Math.min(100, parseInt($('#repro-manual-duration').val()) || 40));
-            const weeks = Math.max(0, Math.min(duration, parseInt($('#repro-manual-weeks').val()) || 1));
-            const rpDateInput = $('#repro-manual-rpdate').val();
-
-            // Устанавливаем срок беременности
-            s.pregnancyDuration = duration;
-
-            p.isPregnant = true;
-            p.pregnancyWeeks = weeks;
-            p.fetusCount = count;
-            p.fetusSex = [];
-
-            if (rpDateInput) {
-                p.rpDate = new Date(rpDateInput).toISOString();
-                const conceptionDate = calculateConceptionDate(new Date(p.rpDate), weeks);
-                p.conceptionDate = conceptionDate ? conceptionDate.toISOString() : new Date().toISOString();
-            } else {
-                p.rpDate = new Date().toISOString();
-                p.conceptionDate = new Date().toISOString();
+            if (!p.isPregnant) {
+                showNotification('Беременности нет', 'warning');
+                return;
             }
+            if (!confirm('Принять роды прямо сейчас? Это запустит диалог именования малыша(ей) и переведёт состояние из беременности в режим «малыш».')) return;
+            applyScanResult({
+                vaginal_ejaculation_occurred: false,
+                birth_occurred: true,
+                sex_revealed: false,
+                revealed_sexes: null,
+                baby_traits: null,
+                cycle_day: null,
+                _source: 'manual',
+            });
+        });
 
-            for (let i = 0; i < count; i++) {
-                p.fetusSex.push(roll(2) === 1 ? 'M' : 'F');
+        $('#repro-contraception').on('change', function() { getSettings().contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
+
+        $('#repro-duration').on('change', function() {
+            const v = $(this).val();
+            if (v === 'custom') { $('#repro-duration-custom').show().focus(); }
+            else { $('#repro-duration-custom').hide(); getSettings().pregnancyDuration = parseInt(v); saveSettingsDebounced(); updatePromptInjection(); syncUI(); }
+        });
+        $('#repro-duration-custom').on('change', function() {
+            const v = Math.max(4, Math.min(100, parseInt($(this).val()) || 40));
+            $(this).val(v); getSettings().pregnancyDuration = v; saveSettingsDebounced(); updatePromptInjection(); syncUI();
+        });
+
+        // Гвард: если чат ещё не определён, ручные изменения уйдут во временный fallback
+        // и потеряются. Предупреждаем юзера вместо тихой потери.
+        const warnIfNoChat = () => {
+            if (!getCurrentChatId()) {
+                showNotification('Чат не определён — открой чат и повтори, иначе изменения не сохранятся', 'warning');
+                return true;
             }
+            return false;
+        };
 
+        const applyManualCycle = (v) => {
+            if (warnIfNoChat()) return;
+            v = Math.max(1, Math.min(28, parseInt(v) || 14));
+            $('#repro-cycleday').val(v);
+            setCycleDay(v, true, true);
+            // ВАЖНО: обновляем regen-snapshot, иначе swipe/regen откатит ручное значение.
+            import('./message-handler.js').then(m => m.refreshRegenSnapshot());
             saveSettingsDebounced();
-            updatePromptInjection();
-            syncUI();
-
-            showNotification(`🤰 Беременность установлена!\n${weeks}/${duration} нед. | ${formatFetusCount(count)} | Пол: ${formatSexIcons(p.fetusSex)}`, 'success');
-
-            $('#repro-manual-pregnancy').slideUp(200);
+            setTimeout(() => { updatePromptInjection(); syncUI(); }, 50);
+        };
+        $('#repro-setcycle').on('click', function() {
+            applyManualCycle($('#repro-cycleday').val());
         });
-
-        $('#repro-reset').on('click', function() {
-            if (confirm('Сбросить беременность?')) {
-                resetPregnancy();
-                showNotification('Беременность сброшена', 'info');
+        // Сохранение на Enter или blur (фокус ушёл из поля) — чтобы не зависеть от галочки.
+        // Многие забывают тыкнуть кнопку, набирают число и шлют сообщение → значение терялось.
+        $('#repro-cycleday').on('keydown', function(e) {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                applyManualCycle($(this).val());
             }
         });
+        $('#repro-cycleday').on('change blur', function() {
+            applyManualCycle($(this).val());
+        });
+
+        $('#repro-reset').on('click', function() { if (confirm('Сбросить беременность?')) { resetPregnancy(); showNotification('Сброшено', 'info'); } });
+        $('#repro-reset-baby').on('click', function() { if (confirm('Сбросить малыша?')) { resetBaby(); showNotification('Сброшено', 'info'); } });
+
+        // Manual pregnancy/baby toggle (объединённая панель)
+        $('#repro-manual-toggle').on('click', function() {
+            const panel = $('#repro-manual-panel');
+            const visible = panel.is(':visible');
+            panel.css('display', visible ? 'none' : 'flex');
+            $(this).text(visible ? 'Ручная беременность / малыш ▼' : 'Ручная беременность / малыш ▲');
+        });
+
+        $('#repro-manual-baby-add').on('click', function() {
+            if (warnIfNoChat()) return;
+            const name = $('#repro-mb-name').val().trim();
+            const sex = $('#repro-mb-sex').val();
+            const ageDays = Math.max(0, Math.min(730, parseInt($('#repro-mb-age-days').val()) || 0));
+            const father = $('#repro-mb-father').val().trim();
+            startManualBaby([{
+                name: name,
+                sex: sex,
+                ageDays: ageDays,
+                fatherName: father,
+            }]);
+            // Очищаем поля
+            $('#repro-mb-name').val('');
+            $('#repro-mb-father').val('');
+            $('#repro-mb-age-days').val('0');
+            syncUI();
+            updatePromptInjection();
+            setTimeout(() => {
+                import('./message-handler.js').then(m => m.renderInfoblock());
+            }, 200);
+        });
+
+        // Manual pregnancy: prefill дату последним RP_DATE из чата (если есть) минус 4 недели
+        const manualDateInput = $('#repro-manual-conception-date');
+        if (manualDateInput.length && !manualDateInput.val()) {
+            const p = getPregnancyData();
+            let prefill = null;
+            if (p.rpDate) {
+                // RP-дата минус 4 недели как разумный дефолт
+                prefill = new Date(new Date(p.rpDate).getTime() - 4 * 7 * 86400000);
+            } else {
+                // Real-world сегодня минус 4 недели — пользователь подправит
+                prefill = new Date(Date.now() - 4 * 7 * 86400000);
+            }
+            // YYYY-MM-DD формат для input[type=date]
+            const iso = prefill.toISOString().slice(0, 10);
+            manualDateInput.val(iso);
+        }
+
+        // Manual pregnancy start
+        $('#repro-manual-start').on('click', function() {
+            if (warnIfNoChat()) return;
+            const dateStr = $('#repro-manual-conception-date').val();
+            if (!dateStr) {
+                showNotification('Укажи дату зачатия', 'warning');
+                return;
+            }
+            const conceptionDate = new Date(dateStr + 'T00:00:00');
+            if (isNaN(conceptionDate.getTime())) {
+                showNotification('Неверная дата', 'warning');
+                return;
+            }
+            const fetus = Math.max(1, Math.min(4, parseInt($('#repro-manual-fetus').val()) || 1));
+            const sexMode = $('#repro-manual-sex').val();
+            let sexArr = null;
+            if (sexMode === 'M' || sexMode === 'F') {
+                sexArr = new Array(fetus).fill(sexMode);
+            }
+            startManualPregnancy(conceptionDate.toISOString(), fetus, sexArr);
+            syncUI();
+            updatePromptInjection();
+        });
+
+        // Infoblock
+        $('#repro-infoblock').on('change', function() { getSettings().infoblockPosition = this.value; saveSettingsDebounced(); });
+
+        // CSS editor
+        $('#repro-css-toggle').on('click', function() {
+            const panel = $('#repro-css-panel');
+            const visible = panel.is(':visible');
+            panel.css('display', visible ? 'none' : 'flex');
+            $(this).text(visible ? 'CSS инфоблока ▼' : 'CSS инфоблока ▲');
+            if (!visible) {
+                const ta = $('#repro-custom-css');
+                if (!ta.val()) {
+                    ta.val(getSettings().customInfoblockCss || DEFAULT_INFOBLOCK_CSS);
+                }
+            }
+        });
+        $('#repro-css-apply').on('click', function() {
+            const css = $('#repro-custom-css').val() || '';
+            getSettings().customInfoblockCss = css;
+            saveSettingsDebounced();
+            applyCustomCss(css);
+            showNotification('CSS применён', 'success');
+        });
+        $('#repro-css-reset').on('click', function() {
+            if (!confirm('Сбросить кастомный CSS?')) return;
+            getSettings().customInfoblockCss = '';
+            $('#repro-custom-css').val(DEFAULT_INFOBLOCK_CSS);
+            saveSettingsDebounced();
+            applyCustomCss('');
+            showNotification('CSS сброшен (стандартный стиль)', 'info');
+        });
+
+        // Apply saved custom CSS on load
+        if (s.customInfoblockCss) {
+            applyCustomCss(s.customInfoblockCss);
+        }
 
         syncUI();
-
     } catch (error) {
         console.error('[Reproductive] setupUI error:', error);
     }
 }
-
