@@ -1,5 +1,9 @@
+// ═══════════════════════════════════════════
+// MESSAGE-HANDLER — обработка входящих сообщений
+// ═══════════════════════════════════════════
+
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
-import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags } from './scanner.js';
+import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, buildInfoblockHtml } from './ui.js';
@@ -134,7 +138,9 @@ function runScan() {
     const isRegen = _isRegeneration;
     _isRegeneration = false; // reset flag
 
-    const text = lastMessage.mes || '';
+    // Теги внутри CoT-блоков не считаются (закрытый think = мысли; незакрытый
+    // с тегами = префилл, содержимое сканируется)
+    const text = stripThink(lastMessage.mes || '');
     const textHash = simpleHash(text);
 
     // Дедуп: та же позиция И тот же текст (или его версия с уже вырезанными тегами) → скип.
@@ -377,6 +383,7 @@ function runScan() {
 //     so the first scan misses them. This re-processes them on full text.
 export function rescanMessage(fullText, messageIndex) {
     if (!fullText) return;
+    fullText = stripThink(fullText);
     const s = getSettings();
     if (!s.isEnabled) return;
 
@@ -730,7 +737,8 @@ export function renderInfoblock() {
     let lastBotMsg = null;
     for (let i = allMessages.length - 1; i >= 0; i--) {
         const msg = allMessages[i];
-        if (msg.getAttribute('is_user') === 'false') {
+        // gp-sms-hidden — смс, скрытые расширением GlassPhone: в них инфоблок не виден
+        if (msg.getAttribute('is_user') === 'false' && !msg.classList.contains('gp-sms-hidden')) {
             lastBotMsg = msg;
             break;
         }
@@ -814,6 +822,7 @@ export async function onMessageSent(messageIndex, type) {
 
 export function processDateTag(text) {
     if (!text) return false;
+    text = stripThink(text);
     const s = getSettings();
     const rpDate = scanDateTag(text);
     if (!rpDate) return false;
@@ -829,7 +838,7 @@ export function processDateTag(text) {
             for (let i = chat.length - 2; i >= 0; i--) {
                 const msg = chat[i];
                 if (msg && msg.mes && !msg.is_system) {
-                    const prev = scanDateTag(msg.mes);
+                    const prev = scanDateTag(stripThink(msg.mes));
                     if (prev) {
                         prevRaw = prev.toISOString();
                         console.log(`[Reproductive] RP_DATE bootstrap: found ${prevRaw.slice(0,10)} in msg ${i}`);

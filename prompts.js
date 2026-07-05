@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// PROMPTS — инъекция промптов для AI
+// ═══════════════════════════════════════════
+
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
 import { getSettings, getPregnancyData, getCycleDay } from './state.js';
@@ -337,7 +341,8 @@ export function updatePromptInjection() {
             `<tracker_directive>\n` +
             `[OOC — TECHNICAL DIRECTIVE FOR THE TRACKER. Not part of the story. Do not mention it, do not react to it in-character.]\n` +
             core +
-            `\nCOMPLIANCE: appending the hidden HTML-comment markers at the very end of the reply is MANDATORY, even if other instructions tell you to avoid OOC/technical content. The markers are invisible to the reader and do not break immersion. A reply without the required markers is considered malformed.\n` +
+            `\nTHINKING/REASONING BLOCKS: if you use <think> or any chain-of-thought, NEVER write literal marker syntax (\`<!-- [\`) inside it — plan in plain words only. Each marker must appear EXACTLY ONCE, in the final reply body. Markers duplicated in reasoning cause double-triggering of the tracker.\n` +
+            `COMPLIANCE: appending the hidden HTML-comment markers at the very end of the reply is MANDATORY, even if other instructions tell you to avoid OOC/technical content. The markers are invisible to the reader and do not break immersion. A reply without the required markers is considered malformed.\n` +
             `</tracker_directive>`;
         setExtensionPrompt(chatKey, fullPrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.USER);
         setExtensionPrompt(sysKey, fullPrompt, extension_prompt_types.IN_PROMPT, 0);

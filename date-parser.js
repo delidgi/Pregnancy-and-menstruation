@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// DATE-PARSER — утилиты для работы с датами
+// ═══════════════════════════════════════════
+
 import { getSettings } from './state.js';
 
 export function calculateConceptionDate(rpDate, weeksPregnant) {

@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// CONFIG — константы и настройки по умолчанию
+// ═══════════════════════════════════════════
+
 export const extensionName = 'reproductive-system';
 
 export const defaultSettings = {

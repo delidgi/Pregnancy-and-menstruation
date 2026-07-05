@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// PREGNANCY — зачатие, осложнения, роды
+// ═══════════════════════════════════════════
+
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES, defaultPregnancyData } from './config.js';
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, L } from './state.js';

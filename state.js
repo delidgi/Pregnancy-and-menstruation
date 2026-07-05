@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// STATE — доступ к настройкам и данным
+// ═══════════════════════════════════════════
+
 import { extension_settings } from '../../../extensions.js';
 import { extensionName, defaultPregnancyData, LANG } from './config.js';
 

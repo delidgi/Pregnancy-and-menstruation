@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// HELPERS — чистые функции без зависимостей
+// ═══════════════════════════════════════════
+
 export function esc(str) {
     if (!str) return '';
     const div = document.createElement('div');

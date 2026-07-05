@@ -1,3 +1,14 @@
+// ═══════════════════════════════════════════
+// SCANNER — парсинг тегов (RP_DATE, RP_STATUS, CONCEPTION, BIRTH, SEX_REVEAL, BABY_TRAITS)
+// ═══════════════════════════════════════════
+
+// ─── Tag parsing — СТРОГО: теги распознаются ТОЛЬКО внутри HTML-комментариев <!-- ... -->
+// Это предотвращает ложные срабатывания на случаи, когда модель цитирует/повторяет
+// название тега в своём prose-ответе. Расширка инжектит инструкции вида
+// «add tag <!-- [CONCEPTION_CHECK] --> if ejaculation occurred» — если модель просто
+// перепишет «CONCEPTION_CHECK» в тексте без обёртки в комментарий, это НЕ должно срабатывать.
+
+// Тег срабатывает ТОЛЬКО если находится внутри HTML-комментария <!-- ... -->
 const CONCEPTION_RE_STRICT = /<!--[\s\S]*?\[CONCEPTION_CHECK\][\s\S]*?-->/i;
 const BIRTH_RE_STRICT = /<!--[\s\S]*?\[BIRTH\][\s\S]*?-->/i;
 
@@ -335,6 +346,29 @@ function _parseDate(day, month, year) {
     return d;
 }
 
+// ── Вырезать CoT-блоки перед сканированием ──
+// Reasoning-модели «репетируют» теги ([RP_DATE], [CONCEPTION_CHECK]...) в думалке →
+// сканер видел их и срабатывал дважды/ложно. Семантика (как в GlassPhone):
+//  • ЗАКРЫТЫЙ <think>...</think> — точно мысли, вырезается целиком;
+//  • НЕЗАКРЫТЫЙ <think> С тегами внутри — это префилл пресета: маркер убираем,
+//    содержимое СКАНИРУЕТСЯ;
+//  • незакрытый без тегов — оборванная мысль, режется до конца.
+export function stripThink(text) {
+    if (!text) return '';
+    let res = String(text);
+    res = res.replace(/<(think|thinking|reasoning|analysis|reflection)[^>]*>[\s\S]*?<\/\1>/gi, '');
+    const unclosed = res.match(/<(think|thinking|reasoning)[^>]*>([\s\S]*)$/i);
+    if (unclosed) {
+        // Теги Pregnancy имеют вид <!-- [...] -->
+        if (/<!--\s*\[/.test(unclosed[2])) {
+            res = res.replace(/<(think|thinking|reasoning)[^>]*>/gi, '');
+        } else {
+            res = res.replace(/<(think|thinking|reasoning)[^>]*>[\s\S]*$/gi, '');
+        }
+    }
+    return res;
+}
+
 export function stripHiddenTags(text) {
     if (!text) return text;
     text = text.replace(/<!--\s*\[(?!RP_DATE)[\s\S]*?\]\s*-->/g, '');
@@ -428,7 +462,7 @@ export async function scanFullHistory() {
         for (let i = 0; i < chat.length; i++) {
             const msg = chat[i];
             if (!msg || !msg.mes || msg.is_system) continue;
-            const text = msg.mes;
+            const text = stripThink(msg.mes);
             stats.processed++;
 
             // 1) RP_DATE — обновляем дату и продвигаем время/цикл/недели

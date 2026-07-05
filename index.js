@@ -1,3 +1,7 @@
+// ═══════════════════════════════════════════
+// INDEX — точка входа расширения
+// ═══════════════════════════════════════════
+
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { extensionName, defaultSettings } from './config.js';
@@ -264,7 +268,10 @@ jQuery(async () => {
             });
         }
         if (event_types.GENERATION_STARTED) {
-            eventSource.on(event_types.GENERATION_STARTED, () => {
+            eventSource.on(event_types.GENERATION_STARTED, (genType) => {
+                // Тихие генерации (quiet — /gen, ленты GlassPhone, саммарайзеры) и impersonate
+                // НЕ добавляют сообщение в чат — это не реген, снапшот трогать нельзя.
+                if (genType === 'quiet' || genType === 'impersonate') return;
                 // Check if this is a regen (chat length unchanged or shorter)
                 try {
                     const ctx = SillyTavern.getContext();
@@ -430,7 +437,7 @@ jQuery(async () => {
                             const all = document.querySelectorAll('.mes:not([is_system="true"])');
                             let lastBot = null;
                             for (let i = all.length - 1; i >= 0; i--) {
-                                if (all[i].getAttribute('is_user') === 'false') { lastBot = all[i]; break; }
+                                if (all[i].getAttribute('is_user') === 'false' && !all[i].classList.contains('gp-sms-hidden')) { lastBot = all[i]; break; }
                             }
                             if (!lastBot) return;
                             if (!lastBot.querySelector('.rp-infoblock-inserted')) {
