@@ -111,6 +111,95 @@ export function getCareNorms(ageDays, baby) {
     return c;
 }
 
+// ─── Потребности малыша по времени суток (fallback когда модель не прислала RP_STATUS) ───
+// Возвращает { feeding, diaper, sleep, careNote } — текстовые статусы на основании
+// возраста (ageDays) и текущего RP-времени (rpTime = "HH:MM" или null).
+// Используются как defaults в UI и промпте когда модель ещё не отправила свои значения.
+export function getCareNeeds(ageDays, rpTime, baby) {
+    const needs = { feeding: null, diaper: null, sleep: null, careNote: null };
+    if (ageDays === null || ageDays === undefined) return needs;
+
+    // Парсим время; если нет — считаем полдень (нейтрально)
+    let hour = 12;
+    if (rpTime && typeof rpTime === 'string') {
+        const parts = rpTime.split(':');
+        if (parts.length >= 2) {
+            const h = parseInt(parts[0]);
+            if (h >= 0 && h <= 23) hour = h;
+        }
+    }
+
+    // Персональный сдвиг расписания (±1ч) чтобы близнецы отличались
+    const offset = baby ? jitter(baby, 'schedule', 1) : 0;
+    const adjHour = (hour + 24 - offset) % 24;
+
+    // ── Интервал кормления по возрасту (часы) ──
+    let feedInterval;
+    if (ageDays < 60)       feedInterval = 2.5;
+    else if (ageDays < 120) feedInterval = 3;
+    else if (ageDays < 180) feedInterval = 3.5;
+    else if (ageDays < 365) feedInterval = 4;
+    else                    feedInterval = 5;
+
+    // Определяем: пора кормить? (упрощённо: каждые N часов от полуночи)
+    const hoursSinceLastFeed = adjHour % feedInterval;
+    if (hoursSinceLastFeed >= feedInterval - 0.5) {
+        needs.feeding = 'Хочет есть';
+    } else if (hoursSinceLastFeed < 0.5) {
+        needs.feeding = 'Накормлен';
+    } else {
+        needs.feeding = 'Сыт';
+    }
+
+    // ── Подгузник: смена примерно каждые 2-3ч для новорождённых, 3-4ч для старших ──
+    const diaperInterval = ageDays < 180 ? 2.5 : 3.5;
+    const hoursSinceDiaper = adjHour % diaperInterval;
+    if (hoursSinceDiaper >= diaperInterval - 0.5) {
+        needs.diaper = 'Требует смены';
+    } else {
+        needs.diaper = 'Чистый';
+    }
+
+    // ── Сон по времени суток и возрасту ──
+    const isNight = hour >= 20 || hour < 6;
+    const isEarlyMorning = hour >= 6 && hour < 8;
+    const isNapTime1 = hour >= 10 && hour < 12;  // утренний сон
+    const isNapTime2 = hour >= 14 && hour < 16;  // послеобеденный сон
+
+    if (isNight) {
+        needs.sleep = 'Спит';
+        if (ageDays < 90 && (hour >= 1 && hour < 5)) {
+            // Новорождённые просыпаются ночью
+            needs.sleep = 'Проснулся';
+            needs.feeding = 'Хочет есть';
+            needs.careNote = 'Ночное кормление';
+        }
+    } else if (isEarlyMorning) {
+        needs.sleep = 'Просыпается';
+    } else if (ageDays < 365 && isNapTime1) {
+        needs.sleep = 'Дневной сон';
+    } else if (ageDays < 540 && isNapTime2) {
+        needs.sleep = 'Дневной сон';
+    } else {
+        needs.sleep = 'Бодрствует';
+    }
+
+    // ── Рекомендация по уходу ──
+    if (!needs.careNote) {
+        if (hour >= 19 && hour < 20) {
+            needs.careNote = 'Пора купать и готовить ко сну';
+        } else if (hour >= 9 && hour < 11 && ageDays > 30) {
+            needs.careNote = 'Хорошее время для прогулки';
+        } else if (hour >= 16 && hour < 18 && ageDays > 30) {
+            needs.careNote = 'Вечерняя прогулка';
+        } else if (ageDays < 90 && needs.feeding === 'Хочет есть') {
+            needs.careNote = 'Кормление по требованию каждые 2-3ч';
+        }
+    }
+
+    return needs;
+}
+
 // ─── Обновление вех и флагов по текущему RP-возрасту ───
 // Вызывается при сдвиге RP-даты и после сканов. Записывает достигнутые вехи
 // в baby.milestones, обновляет teething/colicky флаги. Идемпотентно.

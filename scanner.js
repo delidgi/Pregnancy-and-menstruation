@@ -17,9 +17,10 @@ const BIRTH_RE_STRICT = /<!--[\s\S]*?\[BIRTH\][\s\S]*?-->/i;
 const CYCLE_DAY_RE = /<!--[\s\S]*?\[CYCLE_DAY[:\s]+(\d+)\][\s\S]*?-->/i;
 
 // RP_DATE — тоже только в комментарии (это важно — модель часто пишет даты в prose)
-const RP_DATE_RE_DOT = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\.(\d{1,2})\.(\d{1,4})\s*\][\s\S]*?-->/i;
-const RP_DATE_RE_SLASH = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\/(\d{1,2})\/(\d{1,4})\s*\][\s\S]*?-->/i;
-const RP_DATE_RE_ISO = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{4})-(\d{1,2})-(\d{1,2})\s*\][\s\S]*?-->/i;
+// Поддержка опционального времени HH:MM после даты (разделитель: пробел, T, запятая)
+const RP_DATE_RE_DOT = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\.(\d{1,2})\.(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
+const RP_DATE_RE_SLASH = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\/(\d{1,2})\/(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
+const RP_DATE_RE_ISO = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{4})-(\d{1,2})-(\d{1,2})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
 
 // Sex reveal — только в HTML-комментарии
 const SEX_REVEAL_RE_STRICT = /<!--[\s\S]*?\[SEX_REVEAL\][\s\S]*?-->/i;
@@ -328,22 +329,32 @@ export function scanStatusTag(text) {
 }
 
 // Parse RP_DATE tag → Date or null
+// Если тег содержит время (HH:MM), оно сохраняется в .rpTime результата.
 export function scanDateTag(text) {
     if (!text) return null;
     let m = text.match(RP_DATE_RE_DOT);
-    if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), m[4], m[5]);
     m = text.match(RP_DATE_RE_SLASH);
-    if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]));
+    if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), m[4], m[5]);
     m = text.match(RP_DATE_RE_ISO);
-    if (m) return _parseDate(parseInt(m[3]), parseInt(m[2]), parseInt(m[1]));
+    if (m) return _parseDate(parseInt(m[3]), parseInt(m[2]), parseInt(m[1]), m[4], m[5]);
     return null;
 }
 
-function _parseDate(day, month, year) {
+function _parseDate(day, month, year, hourStr, minStr) {
     if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1) return null;
     if (year < 100) year += 2000;
     const d = new Date(year, month - 1, day);
     if (isNaN(d.getTime())) return null;
+    // Прикрепляем время к объекту Date (не-стандартное свойство)
+    if (hourStr !== undefined && minStr !== undefined) {
+        const h = parseInt(hourStr);
+        const mn = parseInt(minStr);
+        if (h >= 0 && h <= 23 && mn >= 0 && mn <= 59) {
+            d.setHours(h, mn, 0, 0);
+            d.rpTime = `${String(h).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;
+        }
+    }
     return d;
 }
 

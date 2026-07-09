@@ -2,7 +2,7 @@
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
-import { babyAgeDays, getCareNorms } from './baby-care.js';
+import { babyAgeDays, getCareNorms, getCareNeeds } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
 import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
@@ -227,13 +227,26 @@ export function buildInfoblockHtml() {
             // Возрастные нормы ухода (симуляция): кормление/сон/подгузники + зубки
             let careNote = '';
             const ageDays = babyAgeDays(baby, p);
+            // Потребности по времени суток (fallback если модель не прислала RP_STATUS)
+            let needs = { feeding: null, diaper: null, sleep: null, careNote: null };
             if (ageDays !== null) {
+                needs = getCareNeeds(ageDays, p.rpTime, baby);
                 const care = getCareNorms(ageDays, baby);
                 const parts = [care.feeding, care.sleep, care.diaper];
                 if (care.teething) parts.push(`🦷 ${care.teething}`);
                 if (care.upcoming) parts.push(`скоро: ${care.upcoming}`);
                 careNote = `<div class="repro-note"><i class="fa-solid fa-clipboard-list" style="margin-right:4px;opacity:0.5"></i>${parts.join(' · ')}</div>`;
             }
+
+            // Кормление: приоритет — данные от модели, потом fallback из getCareNeeds
+            const feedingVal = tr(baby.feeding) || tr(baby.feedingType) || (needs.feeding) || '—';
+            // Подгузник: текст от модели (diaperStatus) или fallback по времени
+            const diaperText = baby.diaperStatus ? tr(baby.diaperStatus) : (needs.diaper || (baby.diaperClean ? 'Чистый' : 'Требует смены'));
+            const diaperIsClean = baby.diaperStatus
+                ? /^(?:чист|clean|dry|сух)/i.test(baby.diaperStatus)
+                : (baby.diaperClean !== false && needs.diaper !== 'Требует смены');
+            // Рекомендация: от модели (care_note из RP_STATUS) или fallback по времени
+            const careRec = baby.careNote || needs.careNote;
 
             html += `<details class="repro">
                 <summary><div class="repro-header">
@@ -245,9 +258,9 @@ export function buildInfoblockHtml() {
                 <div class="repro-c"><div class="repro-grid">
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(baby.health || 'normal'))}
                     ${stat('fa-face-smile', 'purple', 'Настроение', tr(baby.mood) || '—')}
-                    ${stat('fa-bottle-water', 'blue', 'Кормление', tr(baby.feedingType) || '—')}
-                    ${stat('fa-moon', 'purple', 'Сон', tr(baby.sleep) || '—')}
-                    ${stat('fa-baby-carriage', baby.diaperClean ? 'green' : 'orange', 'Подгузник', baby.diaperClean ? 'Чистый' : '<span class="rp-val-warn">Смена!</span>')}
+                    ${stat('fa-bottle-water', 'blue', 'Кормление', feedingVal)}
+                    ${stat('fa-moon', 'purple', 'Сон', tr(baby.sleep) || (needs.sleep) || '—')}
+                    ${stat('fa-baby-carriage', diaperIsClean ? 'green' : 'orange', 'Подгузник', diaperIsClean ? diaperText : `<span class="rp-val-warn">${diaperText}</span>`)}
                     ${baby.teething ? stat('fa-tooth', 'blue', 'Зубки', 'Режутся') : ''}
                     ${baby.colicky ? stat('fa-face-sad-tear', 'pink', 'Колики', 'Да') : ''}
                     ${baby.fatherName ? stat('fa-user', 'blue', 'Отец', baby.fatherName) : ''}
@@ -255,6 +268,7 @@ export function buildInfoblockHtml() {
                     ${baby.appearance?.length ? `<div class="repro-note"><i class="fa-solid fa-eye" style="margin-right:4px;opacity:0.5"></i>${baby.appearance.join(', ')}</div>` : ''}
                     ${baby.special ? `<div class="repro-note" style="border-color:rgba(255,215,64,.35);background:rgba(255,215,64,.06)"><i class="fa-solid fa-star" style="margin-right:4px;color:#ffd740"></i><b>${baby.special.name || baby.special}</b>${baby.special.desc ? ` — ${baby.special.desc}` : ''}</div>` : ''}
                     ${milestones ? `<div class="repro-note"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.5"></i>${milestones}</div>` : ''}
+                    ${careRec ? `<div class="repro-note repro-rec"><i class="fa-solid fa-lightbulb" style="margin-right:4px;opacity:0.7"></i>${careRec}</div>` : ''}
                     ${careNote}
                 </div></div>
             </details>`;

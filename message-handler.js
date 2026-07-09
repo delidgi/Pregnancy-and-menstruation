@@ -506,7 +506,21 @@ function applyStatusData(s, p, data) {
                     }
                     if (apiB.mood) baby.mood = apiB.mood;
                     if (apiB.sleep) baby.sleep = apiB.sleep;
-                    if (apiB.feeding) baby.feeding = apiB.feeding;
+                    // FIX: пишем в ОБА поля — UI читает feedingType, промпт feeding
+                    if (apiB.feeding) {
+                        baby.feeding = apiB.feeding;
+                        baby.feedingType = apiB.feeding;
+                    }
+                    // Подгузник: парсим текст в diaperClean boolean + сохраняем текст
+                    if (apiB.diaper) {
+                        baby.diaperStatus = apiB.diaper;
+                        const cleanPatterns = /^(?:чист|clean|dry|сух)/i;
+                        baby.diaperClean = cleanPatterns.test(apiB.diaper);
+                    }
+                    // Рекомендация по уходу от модели
+                    if (apiB.care_note) {
+                        baby.careNote = apiB.care_note;
+                    }
                     if (apiB.father_name && apiB.father_name !== baby.fatherName) {
                         baby.fatherName = String(apiB.father_name).slice(0, 80);
                     }
@@ -839,6 +853,10 @@ export function processDateTag(text) {
     if (!rpDate) return false;
 
     const p = getPregnancyData();
+    // Сохраняем RP-время (HH:MM) если модель его прислала
+    if (rpDate.rpTime) {
+        p.rpTime = rpDate.rpTime;
+    }
     let prevRaw = p._lastRpDateTag;
 
     // Bootstrap: if no previous date stored, scan chat history

@@ -7,7 +7,7 @@ import { extensionName } from './config.js';
 import { getSettings, getPregnancyData, getCycleDay, dlog } from './state.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
-import { babyAgeDays, getCareNorms } from './baby-care.js';
+import { babyAgeDays, getCareNorms, getCareNeeds } from './baby-care.js';
 
 // Требование языка для значений в тегах: детектим язык чата, чтобы модель
 // не писала "High"/"Anxious" в русской истории.
@@ -271,13 +271,20 @@ function getBabyPrompt(p) {
                 if (care.colic) prompt += ` | период колик (вечерний плач 1–3 ч, поджимает ножки)`;
                 if (care.upcoming) prompt += ` | скоро: ${care.upcoming}`;
                 prompt += `\n`;
+                // Текущие потребности по времени суток
+                const needs = getCareNeeds(ageDays, p.rpTime, baby);
+                if (needs.feeding || needs.sleep || needs.diaper) {
+                    prompt += `  RIGHT NOW (${p.rpTime || '??:??'}): кормление=«${needs.feeding || '?'}» сон=«${needs.sleep || '?'}» подгузник=«${needs.diaper || '?'}»`;
+                    if (needs.careNote) prompt += ` (рек.: ${needs.careNote})`;
+                    prompt += `\n`;
+                }
                 const recentMs = (baby.milestones || []).slice(-3).map(m => m.text).join(', ');
                 if (recentMs) prompt += `  Recent development: ${recentMs}\n`;
             }
         });
 
         prompt += `\n[INFANT NEEDS — play them proactively]\n`;
-        prompt += `The baby has REAL needs on a realistic schedule (see care norms above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update "mood"/"sleep"/"feeding" in RP_STATUS accordingly.\n`;
+        prompt += `The baby has REAL needs on a realistic schedule (see care norms and RIGHT NOW status above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update ALL fields in RP_STATUS (mood/sleep/feeding/diaper/care_note) accordingly.\n`;
     } else {
         const sexText = p.babySex?.length > 0 ? sexToText(p.babySex) : 'unknown';
         prompt += `Name: ${p.babyName || 'not named yet'}\n`;
@@ -321,26 +328,30 @@ function getBabyPrompt(p) {
             babyKeys = p.babies.map((baby, i) => {
                 // Идентифицируем малыша по имени/индексу для модели, но НЕ просим её возвращать имя
                 const label = baby.name || `Baby${i+1}`;
-                return `{"label":"${label}","mood":"...","sleep":"...","feeding":"..."}`;
+                return `{"label":"${label}","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
             }).join(',');
         } else {
-            babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"..."}`;
+            babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
         }
         const langReqB = langRequirement();
         prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
         prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqB.langName} 2-4 words/field; "label" identifies the baby — keep as-is, do NOT rename):\n`;
         prompt += `<!-- [RP_STATUS:{"babies":[${babyKeys}],"note":"..."}] -->\n`;
+        prompt += `"feeding" = what the baby is doing NOW with food (e.g. "Хочет есть", "Накормлен", "Сосёт грудь", "Сыт").\n`;
+        prompt += `"diaper" = current diaper state ("Чистый", "Мокрый", "Требует смены", "Сменили").\n`;
+        prompt += `"care_note" = 1 short care recommendation for THIS moment (e.g. "Пора купать", "Прогулка на свежем воздухе").\n`;
         prompt += `Must be an HTML comment, not a visible status block.\n`;
         prompt += `${langReqB.line}\n`;
     }
 
     prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
-    prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply:\n`;
-    prompt += `<!-- [RP_DATE:DD.MM.YYYY] -->\n\n`;
+    prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply (replace DD.MM.YYYY HH:MM with the in-story date AND time at the end of this scene):\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY HH:MM] -->\n`;
+    prompt += `Time is crucial for baby care simulation (feeding schedule, sleep, diaper). Use 24h format. Example: <!-- [RP_DATE:15.06.2025 03:30] --> for a 3:30 AM night feeding.\n\n`;
 
     prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
     prompt += `<!-- [RP_STATUS:{...}] -->\n`;
-    prompt += `<!-- [RP_DATE:DD.MM.YYYY] --> (very last)\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY HH:MM] --> (very last)\n`;
     prompt += `\n`;
     prompt += `Reminder: these are HTML comments — INVISIBLE to the reader. They are NOT a SIMS-style block. If your character card uses its own visible status format, keep using it normally — these HTML-comment markers are a separate technical channel.\n`;
 
