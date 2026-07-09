@@ -2,6 +2,7 @@
 // SCANNER — парсинг тегов (RP_DATE, RP_STATUS, CONCEPTION, BIRTH, SEX_REVEAL, BABY_TRAITS)
 // ═══════════════════════════════════════════
 
+import { dlog, dwarn } from './state.js';
 // ─── Tag parsing — СТРОГО: теги распознаются ТОЛЬКО внутри HTML-комментариев <!-- ... -->
 // Это предотвращает ложные срабатывания на случаи, когда модель цитирует/повторяет
 // название тега в своём prose-ответе. Расширка инжектит инструкции вида
@@ -61,8 +62,8 @@ export function scanMessage(text) {
         // Минимальные индикаторы сексуального окончания/спермы/проникновения
         const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри\s+(?:неё|нее|тебя|меня)|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex)/i;
         if (!sexIndicators.test(textWithoutTags)) {
-            console.warn('[Reproductive] CONCEPTION_CHECK tag present but text has NO sex/ejaculation context — IGNORED as model hallucination.');
-            console.warn('[Reproductive] Text snippet (no tags):', textWithoutTags.slice(0, 200));
+            dwarn('[Reproductive] CONCEPTION_CHECK tag present but text has NO sex/ejaculation context — IGNORED as model hallucination.');
+            dwarn('[Reproductive] Text snippet (no tags):', textWithoutTags.slice(0, 200));
             hasConception = false;
         }
     }
@@ -86,9 +87,9 @@ export function scanMessage(text) {
         _source: hasConception ? 'tag' : hasBirth ? 'tag' : hasSexReveal ? 'tag' : 'cycle_only',
     };
 
-    if (hasConception) console.log('[Reproductive] Conception detected via tag (sex context validated)');
-    if (hasBirth) console.log('[Reproductive] Birth detected via tag');
-    if (hasSexReveal) console.log('[Reproductive] Sex reveal detected via tag');
+    if (hasConception) dlog('[Reproductive] Conception detected via tag (sex context validated)');
+    if (hasBirth) dlog('[Reproductive] Birth detected via tag');
+    if (hasSexReveal) dlog('[Reproductive] Sex reveal detected via tag');
 
     return result;
 }
@@ -123,10 +124,10 @@ export function scanBabyTraitsTag(text) {
     if (!m) return null;
     const json = _safeParseJson(m[1]);
     if (!json) {
-        console.warn('[Reproductive] Failed to parse BABY_TRAITS JSON:', m[1]);
+        dwarn('[Reproductive] Failed to parse BABY_TRAITS JSON:', m[1]);
         return null;
     }
-    console.log('[Reproductive] BABY_TRAITS tag parsed:', json);
+    dlog('[Reproductive] BABY_TRAITS tag parsed:', json);
     if (Array.isArray(json.babies)) return json;
     if (Array.isArray(json)) return { babies: json };
     return { babies: [json] };
@@ -141,7 +142,7 @@ export function scanPregnancyStateTag(text) {
     if (!m) return null;
     const json = _safeParseJson(m[1]);
     if (!json || typeof json !== 'object') {
-        console.warn('[Reproductive] Failed to parse PREGNANCY_STATE JSON:', m[1]);
+        dwarn('[Reproductive] Failed to parse PREGNANCY_STATE JSON:', m[1]);
         return null;
     }
 
@@ -167,7 +168,7 @@ export function scanPregnancyStateTag(text) {
     }
 
     if (!conceptionIso) {
-        console.warn('[Reproductive] PREGNANCY_STATE tag missing or invalid conception_date:', cdRaw);
+        dwarn('[Reproductive] PREGNANCY_STATE tag missing or invalid conception_date:', cdRaw);
         return null;
     }
 
@@ -194,7 +195,7 @@ export function scanPregnancyStateTag(text) {
         fetusSex: fetusSex,
         fatherName: father,
     };
-    console.log('[Reproductive] PREGNANCY_STATE tag parsed:', result);
+    dlog('[Reproductive] PREGNANCY_STATE tag parsed:', result);
     return result;
 }
 
@@ -272,19 +273,19 @@ export function scanWeeksFromText(text) {
 
         // Проверка на «обсуждение/гипотезу/будущее»
         if (futureContextRe.test(context)) {
-            console.log(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — future/hypothetical context: "${context.slice(0, 80)}..."`);
+            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — future/hypothetical context: "${context.slice(0, 80)}..."`);
             continue;
         }
 
         // Проверка на «вывод другого трекера / X/Y форматы»
         if (progressContextRe.test(context)) {
-            console.log(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — progress/tracker output (X/Y format detected): "${context.slice(0, 80)}..."`);
+            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — progress/tracker output (X/Y format detected): "${context.slice(0, 80)}..."`);
             continue;
         }
 
         // Проверка на OOC/мета
         if (oocContextRe.test(context)) {
-            console.log(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — OOC/meta comment: "${context.slice(0, 80)}..."`);
+            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — OOC/meta comment: "${context.slice(0, 80)}..."`);
             continue;
         }
 
@@ -292,7 +293,7 @@ export function scanWeeksFromText(text) {
         // знаменатель/числитель прогресс-бара
         const localChars = text.slice(Math.max(0, c.index - 5), Math.min(text.length, c.index + 10));
         if (/\d\s*\/\s*\d/.test(localChars)) {
-            console.log(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — looks like a fraction (X/Y): "${localChars}"`);
+            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — looks like a fraction (X/Y): "${localChars}"`);
             continue;
         }
 
@@ -306,7 +307,7 @@ export function scanWeeksFromText(text) {
         // Sanity check: беременность от 1 до 42 недель
         if (weeks < 1 || weeks > 42) continue;
 
-        console.log(`[Reproductive] Pregnancy duration parsed from text: ${c.value} ${c.unit}(s) → ${weeks} weeks (${c.lang}, idx=${c.index})`);
+        dlog(`[Reproductive] Pregnancy duration parsed from text: ${c.value} ${c.unit}(s) → ${weeks} weeks (${c.lang}, idx=${c.index})`);
         return { weeks, source: c.unit, sourceLang: c.lang };
     }
 
@@ -319,10 +320,10 @@ export function scanStatusTag(text) {
     if (!m) return null;
     const json = _safeParseJson(m[1]);
     if (!json) {
-        console.warn('[Reproductive] Failed to parse RP_STATUS JSON:', m[1]);
+        dwarn('[Reproductive] Failed to parse RP_STATUS JSON:', m[1]);
         return null;
     }
-    console.log('[Reproductive] RP_STATUS tag parsed:', json);
+    dlog('[Reproductive] RP_STATUS tag parsed:', json);
     return json;
 }
 
@@ -348,22 +349,29 @@ function _parseDate(day, month, year) {
 
 // ── Вырезать CoT-блоки перед сканированием ──
 // Reasoning-модели «репетируют» теги ([RP_DATE], [CONCEPTION_CHECK]...) в думалке →
-// сканер видел их и срабатывал дважды/ложно. Семантика (как в GlassPhone):
+// сканер видел их и срабатывал дважды/ложно. Семантика:
 //  • ЗАКРЫТЫЙ <think>...</think> — точно мысли, вырезается целиком;
-//  • НЕЗАКРЫТЫЙ <think> С тегами внутри — это префилл пресета: маркер убираем,
-//    содержимое СКАНИРУЕТСЯ;
-//  • незакрытый без тегов — оборванная мысль, режется до конца.
+//  • НЕЗАКРЫТЫЙ <think> в САМОМ НАЧАЛЕ сообщения С тегами внутри — префилл-обёртка
+//    пресета вокруг всего ответа: маркер убираем, содержимое СКАНИРУЕТСЯ;
+//  • незакрытый <think> В СЕРЕДИНЕ (или без тегов) — настоящий оборванный CoT
+//    (остановленная генерация): режем до конца, даже если внутри отрепетированы теги.
+//    Раньше такой CoT сканировался как «префилл» → ложные срабатывания.
 export function stripThink(text) {
     if (!text) return '';
     let res = String(text);
+    // Закрытые блоки — всегда мысли
     res = res.replace(/<(think|thinking|reasoning|analysis|reflection)[^>]*>[\s\S]*?<\/\1>/gi, '');
-    const unclosed = res.match(/<(think|thinking|reasoning)[^>]*>([\s\S]*)$/i);
+    // Незакрытый блок — решаем по позиции маркера
+    const unclosed = res.match(/<(think|thinking|reasoning)[^>]*>/i);
     if (unclosed) {
+        // Префилл-обёртка = до маркера нет никакого контента (только пробелы/переводы строк)
+        const isPrefillWrapper = res.slice(0, unclosed.index).trim() === '';
+        const inner = res.slice(unclosed.index + unclosed[0].length);
         // Теги Pregnancy имеют вид <!-- [...] -->
-        if (/<!--\s*\[/.test(unclosed[2])) {
-            res = res.replace(/<(think|thinking|reasoning)[^>]*>/gi, '');
+        if (isPrefillWrapper && /<!--\s*\[/.test(inner)) {
+            res = res.slice(0, unclosed.index) + inner;
         } else {
-            res = res.replace(/<(think|thinking|reasoning)[^>]*>[\s\S]*$/gi, '');
+            res = res.slice(0, unclosed.index);
         }
     }
     return res;
@@ -581,7 +589,7 @@ export async function scanFullHistory() {
         pNow._plannedComplications = [];
         // Накатываем сохранённое baby-состояние
         Object.assign(pNow, savedBabyState);
-        console.log('[Reproductive] Baby state restored after history scan (no [BIRTH] tags found in history).');
+        dlog('[Reproductive] Baby state restored after history scan (no [BIRTH] tags found in history).');
     }
 
     return stats;

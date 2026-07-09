@@ -4,7 +4,7 @@
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES, defaultPregnancyData } from './config.js';
-import { getSettings, getPregnancyData, getCycleDay, setCycleDay, L } from './state.js';
+import { getSettings, getPregnancyData, getCycleDay, setCycleDay, L, dlog, dwarn } from './state.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
 import { calculateConceptionDate } from './date-parser.js';
 import { showNotification, showBirthDialog } from './notifications.js';
@@ -38,7 +38,7 @@ export function applyScanResult(result) {
             const oldDate = p.rpDate;
             p.rpDate = newDate.toISOString();
             if (oldDate !== p.rpDate) {
-                console.log(`[Reproductive] RP date → ${p.rpDate}`);
+                dlog(`[Reproductive] RP date → ${p.rpDate}`);
                 updated = true;
 
                 // Auto-advance cycle day based on RP date difference
@@ -50,7 +50,7 @@ export function applyScanResult(result) {
                         const oldCycleDay = getCycleDay();
                         const newCycleDay = ((oldCycleDay - 1 + daysPassed) % 28) + 1;
                         setCycleDay(newCycleDay);
-                        console.log(`[Reproductive] Cycle day auto-advanced: ${oldCycleDay} → ${newCycleDay} (+${daysPassed} RP days)`);
+                        dlog(`[Reproductive] Cycle day auto-advanced: ${oldCycleDay} → ${newCycleDay} (+${daysPassed} RP days)`);
                     }
                 }
 
@@ -63,7 +63,7 @@ export function applyScanResult(result) {
                             if (cd) p.conceptionDate = cd.toISOString();
                         } else {
                             p.conceptionDate = newDate.toISOString();
-                            console.log(`[Reproductive] Backfilled conceptionDate from rpDate: ${p.conceptionDate}`);
+                            dlog(`[Reproductive] Backfilled conceptionDate from rpDate: ${p.conceptionDate}`);
                         }
                     }
                     // Clamp: if rpDate < conceptionDate (RP went backwards) — shift conception back
@@ -72,16 +72,16 @@ export function applyScanResult(result) {
                         const userSetMs = p._userSetWeeksAt || 0;
                         const recentlyUserSet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
                         if (recentlyUserSet) {
-                            console.log('[Reproductive] applyScanResult clamp SKIPPED — manual pregnancy recently set');
+                            dlog('[Reproductive] applyScanResult clamp SKIPPED — manual pregnancy recently set');
                         } else {
-                            console.warn(`[Reproductive] rpDate < conceptionDate — clamping conceptionDate to rpDate`);
+                            dwarn(`[Reproductive] rpDate < conceptionDate — clamping conceptionDate to rpDate`);
                             p.conceptionDate = newDate.toISOString();
                         }
                     }
                     // Sync pregnancyWeeks state from authoritative date math
                     const calc = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
                     if (calc.weeks !== p.pregnancyWeeks) {
-                        console.log(`[Reproductive] pregnancyWeeks ${p.pregnancyWeeks} → ${calc.weeks} (from dates)`);
+                        dlog(`[Reproductive] pregnancyWeeks ${p.pregnancyWeeks} → ${calc.weeks} (from dates)`);
                         p.pregnancyWeeks = calc.weeks;
                     }
                 }
@@ -94,7 +94,7 @@ export function applyScanResult(result) {
         const day = parseInt(result.cycle_day);
         const current = getCycleDay();
         if (day >= 1 && day <= 28 && day !== current) {
-            console.log(`[Reproductive] Cycle day ${current} → ${day}`);
+            dlog(`[Reproductive] Cycle day ${current} → ${day}`);
             setCycleDay(day);
             updated = true;
         }
@@ -105,17 +105,17 @@ export function applyScanResult(result) {
         // ── Защиты от ложных срабатываний ──
         // 1) Игнорируем если беременности нет
         if (!p.isPregnant) {
-            console.warn('[Reproductive] Birth tag ignored — not pregnant');
+            dwarn('[Reproductive] Birth tag ignored — not pregnant');
             return updated;
         }
         // 2) Игнорируем если roды на критически раннем сроке (<20 недель — плод не выживает)
         const currentWeeks = p.pregnancyWeeks || 0;
         if (currentWeeks > 0 && currentWeeks < 20) {
-            console.warn(`[Reproductive] Birth tag ignored — too early (${currentWeeks} weeks, minimum 20)`);
+            dwarn(`[Reproductive] Birth tag ignored — too early (${currentWeeks} weeks, minimum 20)`);
             return updated;
         }
         if (currentWeeks === 0) {
-            console.warn('[Reproductive] Birth tag ignored — 0 weeks pregnancy (just conceived)');
+            dwarn('[Reproductive] Birth tag ignored — 0 weeks pregnancy (just conceived)');
             return updated;
         }
         // 3) Игнорируем если только что был reset (anti-resurrection — модель цепляется за старый контекст)
@@ -123,12 +123,12 @@ export function applyScanResult(result) {
             const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
             const chatLen = ctx?.chat?.length || 0;
             if (s._birthBlockedUntil && chatLen < s._birthBlockedUntil) {
-                console.warn(`[Reproductive] Birth tag ignored — blocked until position ${s._birthBlockedUntil} (current ${chatLen})`);
+                dwarn(`[Reproductive] Birth tag ignored — blocked until position ${s._birthBlockedUntil} (current ${chatLen})`);
                 return updated;
             }
         } catch (e) {}
 
-        console.log('[Reproductive] Birth detected by scanner!');
+        dlog('[Reproductive] Birth detected by scanner!');
         // Save pregnancy data before resetting
         const babySex = p.fetusSex.length > 0 ? [...p.fetusSex] : ['M'];
         const newBabyCount = p.fetusCount || 1;
@@ -240,7 +240,7 @@ export function applyScanResult(result) {
 
     // Зачатие
     if (result.vaginal_ejaculation_occurred && !p.isPregnant) {
-        console.log('[Reproductive] Vaginal ejaculation detected by scanner — rolling conception...');
+        dlog('[Reproductive] Vaginal ejaculation detected by scanner — rolling conception...');
         const conceptionResult = checkConception();
         if (conceptionResult) {
             updated = true;
@@ -255,7 +255,7 @@ export function applyScanResult(result) {
             const cd = calculateConceptionDate(new Date(p.rpDate), weeks);
             if (cd) {
                 p.conceptionDate = cd.toISOString();
-                console.log(`[Reproductive] Backfilled conceptionDate from API weeks: ${p.conceptionDate}`);
+                dlog(`[Reproductive] Backfilled conceptionDate from API weeks: ${p.conceptionDate}`);
                 updated = true;
             }
         }
@@ -426,7 +426,7 @@ export function checkConception() {
     const conceptionRoll = roll(100);
     const success = conceptionRoll <= chance;
 
-    console.log(`[Reproductive] Conception check: roll=${conceptionRoll}, need<=${chance}, result=${success ? 'PREGNANT' : 'no'}`);
+    dlog(`[Reproductive] Conception check: roll=${conceptionRoll}, need<=${chance}, result=${success ? 'PREGNANT' : 'no'}`);
 
     const result = {
         roll: conceptionRoll,
@@ -445,7 +445,7 @@ export function checkConception() {
         // Если rpDate неизвестна — оставляем null, backfill на следующем RP_DATE тег.
         const freshConception = p.rpDate || null;
         if (p.conceptionDate && freshConception && p.conceptionDate !== freshConception) {
-            console.warn(`[Reproductive] Overwriting stale conceptionDate ${p.conceptionDate} → ${freshConception}`);
+            dwarn(`[Reproductive] Overwriting stale conceptionDate ${p.conceptionDate} → ${freshConception}`);
         }
         p.conceptionDate = freshConception;
         p._conceptionAnchored = !!p.rpDate;
@@ -500,7 +500,7 @@ export function resetPregnancy() {
         s._conceptionBlockedUntil = chatLen + 10;
         s._birthBlockedUntil = chatLen + 10;
         s._lastScannedPosition = chatLen; // prevent re-scan of current message
-        console.log(`[Reproductive] Pregnancy reset: blocking conception and birth until position ${chatLen + 10}`);
+        dlog(`[Reproductive] Pregnancy reset: blocking conception and birth until position ${chatLen + 10}`);
     } catch (e) {}
     refreshSnap();
     saveSettingsDebounced();
@@ -519,7 +519,7 @@ export function resetBaby() {
         s._conceptionBlockedUntil = chatLen + 10;
         s._birthBlockedUntil = chatLen + 10;
         s._lastScannedPosition = chatLen;
-        console.log(`[Reproductive] Baby reset: blocking conception and birth until position ${chatLen + 10}`);
+        dlog(`[Reproductive] Baby reset: blocking conception and birth until position ${chatLen + 10}`);
     } catch (e) {}
     p.hasBaby = false;
     p.babyName = '';
@@ -632,7 +632,7 @@ export function createPregnancyFromWeeks(weeks, { notify = true } = {}) {
         }
     }
     p.healthStatus = p.healthStatus || 'normal';
-    console.log(`[Reproductive] Pregnancy created from text: ${w} weeks (conception ${p.conceptionDate.slice(0, 10)})`);
+    dlog(`[Reproductive] Pregnancy created from text: ${w} weeks (conception ${p.conceptionDate.slice(0, 10)})`);
 
     saveSettingsDebounced();
     if (notify && s.showNotifications) {
@@ -672,7 +672,7 @@ export function createPregnancyFromStateTag(pregState, { notify = true } = {}) {
         p.pregnancyWeeks = 0;
     }
 
-    console.log(`[Reproductive] Pregnancy created from PREGNANCY_STATE tag: conception ${p.conceptionDate.slice(0, 10)}, ${p.pregnancyWeeks}w`);
+    dlog(`[Reproductive] Pregnancy created from PREGNANCY_STATE tag: conception ${p.conceptionDate.slice(0, 10)}, ${p.pregnancyWeeks}w`);
     saveSettingsDebounced();
     if (notify && s.showNotifications) {
         showNotification(`<i class="fa-solid fa-baby"></i> Беременность восстановлена из контекста: ${p.pregnancyWeeks} нед.`, 'success');
@@ -786,6 +786,17 @@ export function startManualBaby(babiesData) {
     p.babySex = p.babies.map(b => b.sex);
     if (p.babies[0]?.name) p.babyName = p.babies[0].name;
     p.babyBirthRpDate = p.babies[p.babies.length - 1].birthRpDate;
+
+    // Малыш с ненулевым возрастом сразу получает уже достигнутые вехи развития
+    // и флаги ухода (зубки/колики). Динамический импорт — чтобы не плодить циклы.
+    try {
+        import('./baby-care.js').then(m => {
+            m.updateBabyCare();
+            refreshSnap();
+            _syncUI();
+            _updatePromptInjection();
+        }).catch(() => {});
+    } catch (e) { /* ignore */ }
 
     refreshSnap();
     saveSettingsDebounced();

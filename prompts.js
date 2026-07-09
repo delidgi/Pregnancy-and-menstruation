@@ -4,9 +4,20 @@
 
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData, getCycleDay } from './state.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo } from './helpers.js';
+import { getSettings, getPregnancyData, getCycleDay, dlog } from './state.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
+import { babyAgeDays, getCareNorms } from './baby-care.js';
+
+// Требование языка для значений в тегах: детектим язык чата, чтобы модель
+// не писала "High"/"Anxious" в русской истории.
+function langRequirement() {
+    const lang = detectChatLanguage();
+    const langName = lang === 'ru' ? 'Russian' : 'English';
+    let line = `ALL values inside the tag JSON must be written in ${langName} — the language of the story.`;
+    if (lang === 'ru') line += ` Do NOT write English values like "High"/"Normal"/"Anxious" — write «Высокая»/«Норма»/«Тревожное» etc.`;
+    return { lang, langName, line };
+}
 
 function sexToText(arr) {
     if (!arr || arr.length === 0) return '';
@@ -73,10 +84,12 @@ export function getBasePrompt() {
     prompt += `Do NOT add it if: no sex scene this reply / withdrawal before finish / release outside the vagina (mouth, hand, body, anal only) / only foreplay.\n\n`;
 
     // ── TAG 3 — RP_STATUS (always, dynamic) ──
+    const langReq = langRequirement();
     prompt += `[STATUS TAG — REQUIRED every reply]\n`;
-    prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, fields in Russian 2-4 words, describes {{user}}):\n`;
+    prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, fields in ${langReq.langName} 2-4 words, describes {{user}}):\n`;
     prompt += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
-    prompt += `"note" = 1 short sentence about {{user}}'s sensations from THIS scene. Must be an HTML comment; do NOT replace with a visible status block.\n\n`;
+    prompt += `"note" = 1 short sentence about {{user}}'s sensations from THIS scene. Must be an HTML comment; do NOT replace with a visible status block.\n`;
+    prompt += `${langReq.line}\n\n`;
 
     prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
     prompt += `Line N-2 (only if creampie this reply): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
@@ -166,7 +179,7 @@ export function getPregnancyPrompt() {
         prompt += `\n[BIRTH TAG — conditional${nearTerm ? ' — near due date!' : ''}]\n`;
         prompt += `If the baby is ACTUALLY BORN in this reply (delivered, out, first cry, cord cut — NOT just labor/contractions/pushing), COPY THIS LINE VERBATIM at the END of your reply (HTML comment, hidden from reader):\n`;
         prompt += `<!-- [BIRTH] -->\n`;
-        prompt += `Plus this BABY_TRAITS line (Russian; "name" empty if not yet named):\n`;
+        prompt += `Plus this BABY_TRAITS line (values in ${langRequirement().langName}; "name" empty if not yet named):\n`;
         prompt += `<!-- [BABY_TRAITS:{"babies":[{"name":"...","fatherName":"...","personality":["...","..."],"appearance":["...","...","..."]}]}] -->\n`;
         prompt += `Must be HTML comments. Do NOT write "{BIRTH: triggered}" or similar visible text.\n`;
     }
@@ -193,10 +206,12 @@ export function getPregnancyPrompt() {
         if (weeks >= 28) optFields.push('"braxton_hicks" (or null)');
         if (weeks >= 32) optFields.push('"fetal_position"');
         optFields.push('"note"');
+        const langReqP = langRequirement();
         prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
-        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, RU 2-5 words/field, null if irrelevant, describes {{user}}):\n`;
+        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqP.langName} 2-5 words/field, null if irrelevant, describes {{user}}):\n`;
         prompt += `<!-- [RP_STATUS:{${optFields.join(',')}}] -->\n`;
         prompt += `"note" = 1 short sentence about {{user}}'s state from THIS scene. Must be HTML comment, not a visible status block.\n`;
+        prompt += `${langReqP.line}\n`;
     }
 
     prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
@@ -246,7 +261,23 @@ function getBabyPrompt(p) {
             if (baby.appearance?.length > 0) prompt += ` | Appearance: ${baby.appearance.join(', ')}`;
             if (baby.fatherName) prompt += ` | Father: ${baby.fatherName}`;
             prompt += `\n`;
+
+            // ── Возрастные нормы ухода (симуляция) ──
+            const ageDays = babyAgeDays(baby, p);
+            if (ageDays !== null) {
+                const care = getCareNorms(ageDays, baby);
+                prompt += `  Care norms (age ${ageDays}d): кормление — ${care.feeding} | сон — ${care.sleep} | ${care.diaper}`;
+                if (care.teething) prompt += ` | зубки: ${care.teething}`;
+                if (care.colic) prompt += ` | период колик (вечерний плач 1–3 ч, поджимает ножки)`;
+                if (care.upcoming) prompt += ` | скоро: ${care.upcoming}`;
+                prompt += `\n`;
+                const recentMs = (baby.milestones || []).slice(-3).map(m => m.text).join(', ');
+                if (recentMs) prompt += `  Recent development: ${recentMs}\n`;
+            }
         });
+
+        prompt += `\n[INFANT NEEDS — play them proactively]\n`;
+        prompt += `The baby has REAL needs on a realistic schedule (see care norms above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update "mood"/"sleep"/"feeding" in RP_STATUS accordingly.\n`;
     } else {
         const sexText = p.babySex?.length > 0 ? sexToText(p.babySex) : 'unknown';
         prompt += `Name: ${p.babyName || 'not named yet'}\n`;
@@ -295,10 +326,12 @@ function getBabyPrompt(p) {
         } else {
             babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"..."}`;
         }
+        const langReqB = langRequirement();
         prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
-        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, RU 2-4 words/field; "label" identifies the baby — keep as-is, do NOT rename):\n`;
+        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqB.langName} 2-4 words/field; "label" identifies the baby — keep as-is, do NOT rename):\n`;
         prompt += `<!-- [RP_STATUS:{"babies":[${babyKeys}],"note":"..."}] -->\n`;
         prompt += `Must be an HTML comment, not a visible status block.\n`;
+        prompt += `${langReqB.line}\n`;
     }
 
     prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
@@ -346,7 +379,7 @@ export function updatePromptInjection() {
             `</tracker_directive>`;
         setExtensionPrompt(chatKey, fullPrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.USER);
         setExtensionPrompt(sysKey, fullPrompt, extension_prompt_types.IN_PROMPT, 0);
-        console.log(`[Reproductive v2026.07.02-user-role] Prompt injected (${fullPrompt.length} chars) to IN_CHAT depth 0 (role=user) AND IN_PROMPT:\n`, fullPrompt);
+        dlog(`[Reproductive v2026.07.02-user-role] Prompt injected (${fullPrompt.length} chars) to IN_CHAT depth 0 (role=user) AND IN_PROMPT:\n`, fullPrompt);
 
     } catch (error) {
         console.error('[Reproductive] updatePromptInjection error:', error);

@@ -2,9 +2,10 @@
 // MESSAGE-HANDLER — обработка входящих сообщений
 // ═══════════════════════════════════════════
 
-import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
+import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, dlog, dwarn } from './state.js';
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag } from './pregnancy.js';
+import { updateBabyCare } from './baby-care.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, buildInfoblockHtml } from './ui.js';
 import { showNotification } from './notifications.js';
@@ -83,7 +84,7 @@ export function pushStateHistory(pos) {
             p._history.splice(0, p._history.length - HISTORY_CAP);
         }
     } catch (e) {
-        console.warn('[Reproductive] pushStateHistory failed:', e);
+        dwarn('[Reproductive] pushStateHistory failed:', e);
     }
 }
 
@@ -112,11 +113,11 @@ export function rollbackToPosition(newLen) {
         _preRegenSnapshot = snapshotOf(p);
         _snapshotChatId = getCurrentChatId();
 
-        console.log(`[Reproductive] State rolled back to position ${target.pos} (chat len now ${newLen}): pregnant=${p.isPregnant}, weeks=${p.pregnancyWeeks}, cycle=${p.cycleDay}`);
+        dlog(`[Reproductive] State rolled back to position ${target.pos} (chat len now ${newLen}): pregnant=${p.isPregnant}, weeks=${p.pregnancyWeeks}, cycle=${p.cycleDay}`);
         saveSettingsDebounced();
         return true;
     } catch (e) {
-        console.warn('[Reproductive] rollbackToPosition failed:', e);
+        dwarn('[Reproductive] rollbackToPosition failed:', e);
         return false;
     }
 }
@@ -135,7 +136,11 @@ function runScan() {
 
     // Use chat length as position ID — regeneration replaces at same index
     const positionId = chat.length;
-    const isRegen = _isRegeneration;
+    // Реген/свайп ВСЕГДА заканчивается ботским сообщением. Если последнее сообщение — юзера,
+    // значит флаг протух (юзер полистал свайпы туда-сюда БЕЗ генерации и написал пост):
+    // раньше такой скан «восстанавливал» старый снапшот → _dynamic пустел → инфоблок
+    // сбрасывался к статичным заглушкам при отправке нового сообщения.
+    const isRegen = _isRegeneration && !lastMessage.is_user;
     _isRegeneration = false; // reset flag
 
     // Теги внутри CoT-блоков не считаются (закрытый think = мысли; незакрытый
@@ -147,11 +152,11 @@ function runScan() {
     // Если текст на той же позиции ИЗМЕНИЛСЯ (стриминг дописал хвостовые теги) — сканируем заново.
     if (!isRegen && s._lastScannedPosition === positionId &&
         (textHash === s._lastScannedHash || textHash === s._lastScannedHashStripped)) {
-        console.log('[Reproductive] Position+text already scanned — skipping');
+        dlog('[Reproductive] Position+text already scanned — skipping');
         return;
     }
 
-    console.log(`[Reproductive] Scan msg (len=${text.length}, regen=${isRegen}), tail="${text.slice(-100)}"`);
+    dlog(`[Reproductive] Scan msg (len=${text.length}, regen=${isRegen}), tail="${text.slice(-100)}"`);
 
     // On regeneration: restore state snapshot from before the original message was processed.
     // ТОЛЬКО если снапшот принадлежит текущему чату — иначе утечка состояния между чатами.
@@ -159,11 +164,11 @@ function runScan() {
     const chatIdNow = getCurrentChatId();
     if (isRegen && _preRegenSnapshot) {
         if (_snapshotChatId === chatIdNow) {
-            console.log('[Reproductive] Regen: restoring pre-scan state snapshot');
+            dlog('[Reproductive] Regen: restoring pre-scan state snapshot');
             Object.assign(p, _preRegenSnapshot);
             saveSettingsDebounced();
         } else {
-            console.warn(`[Reproductive] Regen snapshot belongs to another chat (${_snapshotChatId} ≠ ${chatIdNow}) — NOT restoring`);
+            dwarn(`[Reproductive] Regen snapshot belongs to another chat (${_snapshotChatId} ≠ ${chatIdNow}) — NOT restoring`);
         }
         _preRegenSnapshot = null;
         // Свайп = новое сообщение на той же позиции: проверка зачатия должна кидаться заново
@@ -191,24 +196,24 @@ function runScan() {
         // Анти-дабл-ролл: если на ЭТОЙ позиции проверка зачатия уже кидалась
         // (частичный текст → полный текст), второй раз кубик не бросаем.
         if (tagResult.vaginal_ejaculation_occurred && s._lastConceptionRollAt === positionId) {
-            console.log('[Reproductive] Conception already rolled at this position — skipping re-roll');
+            dlog('[Reproductive] Conception already rolled at this position — skipping re-roll');
             tagResult.vaginal_ejaculation_occurred = false;
         }
         // Block keyword/API-based conception after manual reset (only explicit tags bypass)
         if (tagResult.vaginal_ejaculation_occurred && tagResult._source !== 'tag' && s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil) {
-            console.log(`[Reproductive] Conception blocked (reset protection until pos ${s._conceptionBlockedUntil}, current ${positionId})`);
+            dlog(`[Reproductive] Conception blocked (reset protection until pos ${s._conceptionBlockedUntil}, current ${positionId})`);
             tagResult.vaginal_ejaculation_occurred = false;
         }
         // Block keyword-based birth on USER messages (only AI narration or explicit tag may trigger birth)
         if (tagResult.birth_occurred && tagResult._source === 'keyword' && lastMessage.is_user) {
-            console.log('[Reproductive] Keyword-birth in USER message — IGNORED');
+            dlog('[Reproductive] Keyword-birth in USER message — IGNORED');
             tagResult.birth_occurred = false;
         }
         // Block keyword-based birth when pregnancy is too early (require >= 85% of duration)
         if (tagResult.birth_occurred && tagResult._source === 'keyword' && p.isPregnant) {
             const minWeek = Math.ceil((p.pregnancyDuration || 40) * 0.85);
             if ((p.pregnancyWeek || 0) < minWeek) {
-                console.log(`[Reproductive] Keyword-birth blocked: week ${p.pregnancyWeek} < ${minWeek} (need explicit [BIRTH] tag for early labor)`);
+                dlog(`[Reproductive] Keyword-birth blocked: week ${p.pregnancyWeek} < ${minWeek} (need explicit [BIRTH] tag for early labor)`);
                 tagResult.birth_occurred = false;
             }
         }
@@ -224,12 +229,12 @@ function runScan() {
                     newSex.push(tagResult.revealed_sexes[i] || tagResult.revealed_sexes[tagResult.revealed_sexes.length - 1]);
                 }
                 if (JSON.stringify(newSex) !== JSON.stringify(p.fetusSex)) {
-                    console.log(`[Reproductive] Fetus sex OVERRIDDEN from narrative: ${p.fetusSex.join(',')} → ${newSex.join(',')}`);
+                    dlog(`[Reproductive] Fetus sex OVERRIDDEN from narrative: ${p.fetusSex.join(',')} → ${newSex.join(',')}`);
                     p.fetusSex = newSex;
                 }
             }
             p.fetusSexRevealed = true;
-            console.log(`[Reproductive] Fetus sex REVEALED (tag/keyword): ${p.fetusSex.join(', ')}`);
+            dlog(`[Reproductive] Fetus sex REVEALED (tag/keyword): ${p.fetusSex.join(', ')}`);
             saveSettingsDebounced();
             if (s.showNotifications) {
                 const icons = p.fetusSex.map(sx => sx === 'M' ? '♂ мальчик' : '♀ девочка').join(', ');
@@ -243,7 +248,7 @@ function runScan() {
 
         // Only proceed if there's actually something to process
         if (tagResult.vaginal_ejaculation_occurred || tagResult.birth_occurred) {
-            console.log('[Reproductive] Tag detected!', tagResult);
+            dlog('[Reproductive] Tag detected!', tagResult);
             if (tagResult.vaginal_ejaculation_occurred) s._lastConceptionRollAt = positionId;
             applyScanResult(tagResult);
             // Update snapshot to reflect post-birth state (prevents regen from restoring pregnancy)
@@ -262,7 +267,7 @@ function runScan() {
             saveSettingsDebounced();
             return;
         } else {
-            console.log('[Reproductive] Tag found but irrelevant (pregnant, no birth) — skipping tag');
+            dlog('[Reproductive] Tag found but irrelevant (pregnant, no birth) — skipping tag');
         }
     }
 
@@ -287,7 +292,7 @@ function runScan() {
         const recentlyUserSet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
         const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
         if (recentlyUserSet || blocked) {
-            console.log(`[Reproductive] PREGNANCY_STATE received while not pregnant — NOT creating (recent manual action or reset protection)`);
+            dlog(`[Reproductive] PREGNANCY_STATE received while not pregnant — NOT creating (recent manual action or reset protection)`);
         } else {
             createPregnancyFromStateTag(pregState);
         }
@@ -300,9 +305,9 @@ function runScan() {
             const userSetMs = p._userSetWeeksAt || 0;
             const recentlyUserSet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
             if (recentlyUserSet) {
-                console.log(`[Reproductive] PREGNANCY_STATE conceptionDate IGNORED — manual set recent (kept ${p.conceptionDate})`);
+                dlog(`[Reproductive] PREGNANCY_STATE conceptionDate IGNORED — manual set recent (kept ${p.conceptionDate})`);
             } else {
-                console.log(`[Reproductive] PREGNANCY_STATE conceptionDate updated: ${p.conceptionDate} → ${pregState.conceptionDate}`);
+                dlog(`[Reproductive] PREGNANCY_STATE conceptionDate updated: ${p.conceptionDate} → ${pregState.conceptionDate}`);
                 p.conceptionDate = pregState.conceptionDate;
                 p._conceptionAnchored = true;
                 stateChanged = true;
@@ -319,7 +324,7 @@ function runScan() {
             const allKnown = pregState.fetusSex.every(x => x === 'M' || x === 'F');
             if (allKnown && !p.fetusSexRevealed) {
                 p.fetusSexRevealed = true;
-                console.log('[Reproductive] PREGNANCY_STATE revealed all sexes:', pregState.fetusSex);
+                dlog('[Reproductive] PREGNANCY_STATE revealed all sexes:', pregState.fetusSex);
             }
             stateChanged = true;
         }
@@ -361,13 +366,18 @@ function runScan() {
             const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
 
             if (recentlyManual) {
-                console.log(`[Reproductive] Skipping text-weeks parser — user manually set weeks ${minutesSinceManual.toFixed(1)}min ago`);
+                dlog(`[Reproductive] Skipping text-weeks parser — user manually set weeks ${minutesSinceManual.toFixed(1)}min ago`);
             } else if (blocked) {
-                console.log(`[Reproductive] Skipping text-weeks parser — reset protection until pos ${s._conceptionBlockedUntil}`);
+                dlog(`[Reproductive] Skipping text-weeks parser — reset protection until pos ${s._conceptionBlockedUntil}`);
             } else {
                 createPregnancyFromWeeks(weeksData.weeks);
             }
         }
+    }
+
+    // 1.8) Симуляция малыша: вехи/уход по RP-возрасту (идемпотентно, дёшево)
+    if (p.hasBaby) {
+        try { updateBabyCare(); } catch (e) { /* ignore */ }
     }
 
     // 2) UI update — динамика приходит из RP_STATUS тега от основной модели (без Extra API)
@@ -401,7 +411,7 @@ export function rescanMessage(fullText, messageIndex) {
         if (tagResult.birth_occurred && tagResult._source === 'keyword' && p.isPregnant) {
             const minWeek = Math.ceil((p.pregnancyDuration || 40) * 0.85);
             if ((p.pregnancyWeek || 0) < minWeek) {
-                console.log(`[Reproductive] (rescan) Keyword-birth blocked: week ${p.pregnancyWeek} < ${minWeek}`);
+                dlog(`[Reproductive] (rescan) Keyword-birth blocked: week ${p.pregnancyWeek} < ${minWeek}`);
                 tagResult.birth_occurred = false;
             }
         }
@@ -415,12 +425,12 @@ export function rescanMessage(fullText, messageIndex) {
                     newSex.push(tagResult.revealed_sexes[i] || tagResult.revealed_sexes[tagResult.revealed_sexes.length - 1]);
                 }
                 if (JSON.stringify(newSex) !== JSON.stringify(p.fetusSex)) {
-                    console.log(`[Reproductive] (rescan) Fetus sex OVERRIDDEN from narrative: ${p.fetusSex.join(',')} → ${newSex.join(',')}`);
+                    dlog(`[Reproductive] (rescan) Fetus sex OVERRIDDEN from narrative: ${p.fetusSex.join(',')} → ${newSex.join(',')}`);
                     p.fetusSex = newSex;
                 }
             }
             p.fetusSexRevealed = true;
-            console.log(`[Reproductive] (rescan) Fetus sex REVEALED: ${p.fetusSex.join(', ')}`);
+            dlog(`[Reproductive] (rescan) Fetus sex REVEALED: ${p.fetusSex.join(', ')}`);
             saveSettingsDebounced();
             if (s.showNotifications) {
                 const icons = p.fetusSex.map(sx => sx === 'M' ? '♂ мальчик' : '♀ девочка').join(', ');
@@ -432,7 +442,7 @@ export function rescanMessage(fullText, messageIndex) {
         }
 
         if (tagResult.vaginal_ejaculation_occurred || tagResult.birth_occurred) {
-            console.log('[Reproductive] (rescan) Tag detected on full rendered text!', tagResult);
+            dlog('[Reproductive] (rescan) Tag detected on full rendered text!', tagResult);
             applyScanResult(tagResult);
             _preRegenSnapshot = snapshotOf(getPregnancyData());
             _snapshotChatId = getCurrentChatId();
@@ -463,7 +473,7 @@ export function rescanMessage(fullText, messageIndex) {
 
 // ─── Apply RP_STATUS JSON data to pregnancy state ───
 function applyStatusData(s, p, data) {
-    console.log('[Reproductive] Applying RP_STATUS data:', data);
+    dlog('[Reproductive] Applying RP_STATUS data:', data);
 
     if (p.hasBaby) {
         // Baby mode
@@ -491,7 +501,7 @@ function applyStatusData(s, p, data) {
                             baby.name = cleanName;
                         } else if (!isJunk && baby.name && baby.name !== cleanName) {
                             // Имя есть и не совпадает — не трогаем (юзер уже назвал)
-                            console.log(`[Reproductive] Skipped name overwrite: "${baby.name}" → "${cleanName}" (existing name protected)`);
+                            dlog(`[Reproductive] Skipped name overwrite: "${baby.name}" → "${cleanName}" (existing name protected)`);
                         }
                     }
                     if (apiB.mood) baby.mood = apiB.mood;
@@ -513,13 +523,13 @@ function applyStatusData(s, p, data) {
         if (data.baby_activity) p.babyActivity = data.baby_activity;
         if (data.father_name && data.father_name !== p.fatherName) {
             p.fatherName = String(data.father_name).slice(0, 80);
-            console.log(`[Reproductive] Father name set from RP_STATUS: ${p.fatherName}`);
+            dlog(`[Reproductive] Father name set from RP_STATUS: ${p.fatherName}`);
         }
 
         // Sex reveal from RP_STATUS (in case model puts it here instead of tag)
         if (data.sex_revealed === true && !p.fetusSexRevealed) {
             p.fetusSexRevealed = true;
-            console.log(`[Reproductive] Fetus sex REVEALED (RP_STATUS): ${p.fetusSex.join(', ')}`);
+            dlog(`[Reproductive] Fetus sex REVEALED (RP_STATUS): ${p.fetusSex.join(', ')}`);
             if (s.showNotifications) {
                 const icons = p.fetusSex.map(sx => sx === 'M' ? '♂ мальчик' : '♀ девочка').join(', ');
                 showNotification(`<i class="fa-solid fa-baby"></i> Пол определён: ${icons}`, 'success');
@@ -562,12 +572,12 @@ function advanceTime(s, p, daysPassed) {
         const userSetMs = p._userSetCycleAt || 0;
         const minutesSinceUserSet = (Date.now() - userSetMs) / 60000;
         if (userSetMs > 0 && minutesSinceUserSet < 30) {
-            console.log(`[Reproductive] Cycle auto-advance SKIPPED — user set cycle ${minutesSinceUserSet.toFixed(1)}min ago`);
+            dlog(`[Reproductive] Cycle auto-advance SKIPPED — user set cycle ${minutesSinceUserSet.toFixed(1)}min ago`);
         } else {
         const oldDay = getCycleDay();
         const newDay = ((oldDay - 1 + daysPassed) % 28) + 1;
         setCycleDay(newDay, true, false);
-        console.log(`[Reproductive] Cycle day: ${oldDay} → ${newDay} (+${daysPassed}d)`);
+        dlog(`[Reproductive] Cycle day: ${oldDay} → ${newDay} (+${daysPassed}d)`);
         changed = true;
 
         // Cycle milestone notifications
@@ -593,7 +603,7 @@ function advanceTime(s, p, daysPassed) {
             const newW = Math.floor(diffMs / (7 * 86400000));
             if (newW !== oldWeeks) {
                 p.pregnancyWeeks = newW;
-                console.log(`[Reproductive] Pregnancy weeks (strict): ${oldWeeks} → ${newW}`);
+                dlog(`[Reproductive] Pregnancy weeks (strict): ${oldWeeks} → ${newW}`);
                 changed = true;
 
                 const duration = s.pregnancyDuration || 40;
@@ -628,7 +638,7 @@ function advanceTime(s, p, daysPassed) {
 
                 // ── AUTO-BIRTH: if weeks exceed duration+2, trigger birth automatically ──
                 if (newW >= duration + 2) {
-                    console.log(`[Reproductive] Auto-birth triggered at ${newW} weeks (duration: ${duration})`);
+                    dlog(`[Reproductive] Auto-birth triggered at ${newW} weeks (duration: ${duration})`);
                     const birthResult = {
                         birth_occurred: true,
                         vaginal_ejaculation_occurred: false,
@@ -647,8 +657,9 @@ function advanceTime(s, p, daysPassed) {
         }
     }
 
-    // ── Проверка возраста детей: пора ли «выпускать» во взрослые ──
+    // ── Дети: вехи развития/уход по возрасту + пора ли «выпускать» во взрослые ──
     if (p.hasBaby && p.babies && p.babies.length > 0 && p.rpDate) {
+        try { updateBabyCare(); } catch (e) { /* ignore */ }
         maybeGraduateBabies(s, p);
     }
 
@@ -675,16 +686,16 @@ function maybeGraduateBabies(s, p) {
                     setTimeout(renderInfoblock, 300);
                 });
             }).catch(e => {
-                console.warn('[Reproductive] graduation dialog import failed:', e);
+                dwarn('[Reproductive] graduation dialog import failed:', e);
                 // Тихий fallback: всё равно выпускаем
                 mod.graduateBabies(graduates);
                 _graduationDialogShowing = false;
             });
         }).catch(e => {
-            console.warn('[Reproductive] graduation check failed:', e);
+            dwarn('[Reproductive] graduation check failed:', e);
         });
     } catch (e) {
-        console.warn('[Reproductive] maybeGraduateBabies error:', e);
+        dwarn('[Reproductive] maybeGraduateBabies error:', e);
     }
 }
 
@@ -710,7 +721,7 @@ function revealPlannedComplications(s, p, oldWeeks, newWeeks) {
             } else if (p.healthStatus === 'normal') {
                 p.healthStatus = 'warning';
             }
-            console.log(`[Reproductive] Complication revealed at week ${pc.revealWeek}: ${pc.type}`);
+            dlog(`[Reproductive] Complication revealed at week ${pc.revealWeek}: ${pc.type}`);
             if (s.showNotifications) {
                 const icon = pc.severity === 'critical'
                     ? '<i class="fa-solid fa-circle-exclamation"></i>'
@@ -800,12 +811,12 @@ export function refreshRegenSnapshot() {
             if (len > 0) pushStateHistory(len);
         } catch (e) { /* ignore */ }
     } catch (e) {
-        console.warn('[Reproductive] refreshRegenSnapshot failed:', e);
+        dwarn('[Reproductive] refreshRegenSnapshot failed:', e);
     }
 }
 
 export async function onMessageReceived(messageIndex, type) {
-    console.log(`[Reproductive] MESSAGE_RECEIVED fired! index=${messageIndex}, type=${type}`);
+    dlog(`[Reproductive] MESSAGE_RECEIVED fired! index=${messageIndex}, type=${type}`);
     if (type === 'quiet') return;
     runScan();
 }
@@ -813,7 +824,7 @@ export async function onMessageReceived(messageIndex, type) {
 // User-side scan: triggered from MESSAGE_SENT so player descriptions
 // (я рожаю / кончает в меня / у нас будет девочка) are also detected.
 export async function onMessageSent(messageIndex, type) {
-    console.log(`[Reproductive] MESSAGE_SENT fired! index=${messageIndex}, type=${type}`);
+    dlog(`[Reproductive] MESSAGE_SENT fired! index=${messageIndex}, type=${type}`);
     if (type === 'quiet') return;
     runScan();
 }
@@ -841,7 +852,7 @@ export function processDateTag(text) {
                     const prev = scanDateTag(stripThink(msg.mes));
                     if (prev) {
                         prevRaw = prev.toISOString();
-                        console.log(`[Reproductive] RP_DATE bootstrap: found ${prevRaw.slice(0,10)} in msg ${i}`);
+                        dlog(`[Reproductive] RP_DATE bootstrap: found ${prevRaw.slice(0,10)} in msg ${i}`);
                         break;
                     }
                 }
@@ -864,12 +875,12 @@ export function processDateTag(text) {
         const w = Math.max(0, p.pregnancyWeeks || 0);
         p.conceptionDate = new Date(rpDate.getTime() - w * 7 * 86400000).toISOString();
         p._conceptionAnchored = true;
-        console.log(`[Reproductive] conceptionDate re-anchored to RP timeline: ${p.conceptionDate} (preserved ${w}w)`);
+        dlog(`[Reproductive] conceptionDate re-anchored to RP timeline: ${p.conceptionDate} (preserved ${w}w)`);
     } else if (p.isPregnant && !p.conceptionDate) {
         // Safety net: pregnant but no conceptionDate at all
         p.conceptionDate = newIso;
         p._conceptionAnchored = true;
-        console.log(`[Reproductive] conceptionDate backfilled from RP_DATE: ${p.conceptionDate}`);
+        dlog(`[Reproductive] conceptionDate backfilled from RP_DATE: ${p.conceptionDate}`);
     }
     // Clamp: if rpDate < conceptionDate (model rewound time), pull conceptionDate back
     // НО: если юзер только что вручную выставил беременность — НЕ трогаем его дату зачатия.
@@ -879,12 +890,12 @@ export function processDateTag(text) {
         const minutesSinceUserSet = (Date.now() - userSetMs) / 60000;
         const recentlyUserSet = userSetMs > 0 && minutesSinceUserSet < 30;
         if (recentlyUserSet) {
-            console.log(`[Reproductive] Clamp SKIPPED — user set pregnancy ${minutesSinceUserSet.toFixed(1)}min ago (preserving manual conceptionDate)`);
+            dlog(`[Reproductive] Clamp SKIPPED — user set pregnancy ${minutesSinceUserSet.toFixed(1)}min ago (preserving manual conceptionDate)`);
         } else {
             const w = Math.max(0, p.pregnancyWeeks || 0);
             // Preserve weeks: shift conceptionDate to (rpDate - weeks*7d)
             p.conceptionDate = new Date(rpDate.getTime() - w * 7 * 86400000).toISOString();
-            console.warn(`[Reproductive] rpDate < conceptionDate — re-anchored preserving ${w}w`);
+            dwarn(`[Reproductive] rpDate < conceptionDate — re-anchored preserving ${w}w`);
         }
     }
 
@@ -893,7 +904,7 @@ export function processDateTag(text) {
         const diffMs = rpDate.getTime() - prev.getTime();
         const diffDays = Math.round(diffMs / 86400000);
         if (diffDays > 0 && diffDays <= 365) {
-            console.log(`[Reproductive] RP_DATE: ${diffDays}d (${prevRaw.slice(0,10)} → ${newIso.slice(0,10)})`);
+            dlog(`[Reproductive] RP_DATE: ${diffDays}d (${prevRaw.slice(0,10)} → ${newIso.slice(0,10)})`);
             advanceTime(s, p, diffDays);
             saveSettingsDebounced();
             syncUI();
@@ -901,10 +912,10 @@ export function processDateTag(text) {
             setTimeout(renderInfoblock, 500);
             return true;
         } else if (diffDays < 0) {
-            console.log(`[Reproductive] RP_DATE: date went backwards, ignoring`);
+            dlog(`[Reproductive] RP_DATE: date went backwards, ignoring`);
         }
     } else {
-        console.log(`[Reproductive] RP_DATE: first date recorded ${newIso.slice(0,10)}`);
+        dlog(`[Reproductive] RP_DATE: first date recorded ${newIso.slice(0,10)}`);
         saveSettingsDebounced();
     }
     return false;

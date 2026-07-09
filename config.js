@@ -27,6 +27,9 @@ export const defaultSettings = {
     babyMaxAgeDays: 730,
     // Отладка: НЕ вырезать теги из текста сообщений (видны прямо в чате)
     debugKeepTags: false,
+    // Отладка: писать debug-логи в консоль (dlog/dwarn). По умолчанию выключено —
+    // логи с содержимым тегов/промпта заметно грузили консоль.
+    debugLogs: false,
 };
 
 export const defaultPregnancyData = {

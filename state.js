@@ -10,13 +10,28 @@ export function getSettings() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
+// Debug-логирование. По умолчанию ВЫКЛЮЧЕНО — расширка не пишет в консоль
+// (логи с содержимым тегов/промпта/инфоблоков создавали заметную нагрузку).
+// Включается галочкой «Debug-логи» в настройках (s.debugLogs).
+// ──────────────────────────────────────────────────────────────────────
+export function isDebug() {
+    try { return !!extension_settings[extensionName]?.debugLogs; } catch (e) { return false; }
+}
+export function dlog(...args) {
+    if (isDebug()) console['log'](...args);
+}
+export function dwarn(...args) {
+    if (isDebug()) console['warn'](...args);
+}
+
+// ──────────────────────────────────────────────────────────────────────
 // Управление chatId с кэшем.
 // ──────────────────────────────────────────────────────────────────────
 let _cachedChatId = null;
 
 export function resetChatIdCache() {
     if (_cachedChatId !== null) {
-        console.log(`[Reproductive] chatId cache reset (was: ${_cachedChatId})`);
+        dlog(`[Reproductive] chatId cache reset (was: ${_cachedChatId})`);
     }
     _cachedChatId = null;
 }
@@ -62,7 +77,7 @@ export function computeChatIdForms() {
             forms.push(s);
         }
     } catch (e) {
-        console.warn('[Reproductive] computeChatIdForms error:', e);
+        dwarn('[Reproductive] computeChatIdForms error:', e);
     }
     return forms;
 }
@@ -76,13 +91,13 @@ export function getCurrentChatId() {
 
         if (resolved) {
             _cachedChatId = resolved;
-            console.log(`[Reproductive] chatId resolved: ${resolved}`);
+            dlog(`[Reproductive] chatId resolved: ${resolved}`);
             return resolved;
         }
 
         return null;
     } catch (e) {
-        console.warn('[Reproductive] getCurrentChatId error:', e);
+        dwarn('[Reproductive] getCurrentChatId error:', e);
         return null;
     }
 }
@@ -119,7 +134,7 @@ function getFallback() {
 }
 
 export function resetFallback() {
-    if (_fallback) console.log('[Reproductive] Fallback state reset (any unsaved changes lost — this is intentional)');
+    if (_fallback) dlog('[Reproductive] Fallback state reset (any unsaved changes lost — this is intentional)');
     _fallback = null;
 }
 
@@ -147,7 +162,7 @@ export function getPregnancyData() {
             if (alt !== chatId && s.chatPregnancyData[alt]) {
                 s.chatPregnancyData[chatId] = s.chatPregnancyData[alt];
                 delete s.chatPregnancyData[alt];
-                console.log(`[Reproductive] Migrated pregnancy data key: ${alt} → ${chatId}`);
+                dlog(`[Reproductive] Migrated pregnancy data key: ${alt} → ${chatId}`);
                 break;
             }
         }
@@ -157,7 +172,7 @@ export function getPregnancyData() {
     // НЕ мигрируем fallback (даже если он модифицирован) — слишком высокий риск утечки.
     if (!s.chatPregnancyData[chatId]) {
         s.chatPregnancyData[chatId] = structuredClone(defaultPregnancyData);
-        console.log(`[Reproductive] Fresh pregnancy data for new chatId: ${chatId}`);
+        dlog(`[Reproductive] Fresh pregnancy data for new chatId: ${chatId}`);
     }
 
     return s.chatPregnancyData[chatId];

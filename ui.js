@@ -1,7 +1,8 @@
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo } from './helpers.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
+import { babyAgeDays, getCareNorms } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
 import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
@@ -189,6 +190,11 @@ export function buildInfoblockHtml() {
     const p = getPregnancyData();
     if (!s.isEnabled) return '';
 
+    // Фолбэк-перевод: модели иногда пишут значения по-английски ("High"/"Anxious")
+    // несмотря на требование языка. В русском чате известные значения переводим.
+    const isRuChat = detectChatLanguage() === 'ru';
+    const tr = (v) => (isRuChat ? translateStatusValue(v) : v);
+
     // ── BABY MODE ──
     if (p.hasBaby) {
         const babies = getBabies(p);
@@ -218,6 +224,17 @@ export function buildInfoblockHtml() {
             const milestones = (baby.milestones || []).slice(-2).map(m => m.text).join(', ');
             const ageStr = calcAge(baby);
 
+            // Возрастные нормы ухода (симуляция): кормление/сон/подгузники + зубки
+            let careNote = '';
+            const ageDays = babyAgeDays(baby, p);
+            if (ageDays !== null) {
+                const care = getCareNorms(ageDays, baby);
+                const parts = [care.feeding, care.sleep, care.diaper];
+                if (care.teething) parts.push(`🦷 ${care.teething}`);
+                if (care.upcoming) parts.push(`скоро: ${care.upcoming}`);
+                careNote = `<div class="repro-note"><i class="fa-solid fa-clipboard-list" style="margin-right:4px;opacity:0.5"></i>${parts.join(' · ')}</div>`;
+            }
+
             html += `<details class="repro">
                 <summary><div class="repro-header">
                     <div class="repro-icon baby">${ic('fa-baby')}</div>
@@ -227,9 +244,9 @@ export function buildInfoblockHtml() {
                 </div></summary>
                 <div class="repro-c"><div class="repro-grid">
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(baby.health || 'normal'))}
-                    ${stat('fa-face-smile', 'purple', 'Настроение', baby.mood || '—')}
-                    ${stat('fa-bottle-water', 'blue', 'Кормление', baby.feedingType || '—')}
-                    ${stat('fa-moon', 'purple', 'Сон', baby.sleep || '—')}
+                    ${stat('fa-face-smile', 'purple', 'Настроение', tr(baby.mood) || '—')}
+                    ${stat('fa-bottle-water', 'blue', 'Кормление', tr(baby.feedingType) || '—')}
+                    ${stat('fa-moon', 'purple', 'Сон', tr(baby.sleep) || '—')}
                     ${stat('fa-baby-carriage', baby.diaperClean ? 'green' : 'orange', 'Подгузник', baby.diaperClean ? 'Чистый' : '<span class="rp-val-warn">Смена!</span>')}
                     ${baby.teething ? stat('fa-tooth', 'blue', 'Зубки', 'Режутся') : ''}
                     ${baby.colicky ? stat('fa-face-sad-tear', 'pink', 'Колики', 'Да') : ''}
@@ -237,7 +254,8 @@ export function buildInfoblockHtml() {
                     ${baby.personality?.length ? `<div class="repro-note"><i class="fa-solid fa-brain" style="margin-right:4px;opacity:0.5"></i>${baby.personality.join(', ')}</div>` : ''}
                     ${baby.appearance?.length ? `<div class="repro-note"><i class="fa-solid fa-eye" style="margin-right:4px;opacity:0.5"></i>${baby.appearance.join(', ')}</div>` : ''}
                     ${baby.special ? `<div class="repro-note" style="border-color:rgba(255,215,64,.35);background:rgba(255,215,64,.06)"><i class="fa-solid fa-star" style="margin-right:4px;color:#ffd740"></i><b>${baby.special.name || baby.special}</b>${baby.special.desc ? ` — ${baby.special.desc}` : ''}</div>` : ''}
-                    ${milestones ? `<div class="repro-note">${milestones}</div>` : ''}
+                    ${milestones ? `<div class="repro-note"><i class="fa-solid fa-star" style="margin-right:4px;opacity:0.5"></i>${milestones}</div>` : ''}
+                    ${careNote}
                 </div></div>
             </details>`;
         });
@@ -286,14 +304,14 @@ export function buildInfoblockHtml() {
                     ${p.fatherName ? stat('fa-user', 'blue', 'Отец', p.fatherName) : ''}
                     ${stat('fa-ruler', 'blue', 'Размер', fetusSize)}
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(p.healthStatus))}
-                    ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', p.mood) : ''}
-                    ${p.weightGain ? stat('fa-weight-scale', 'orange', 'Вес', p.weightGain) : ''}
-                    ${p.babyActivity ? stat('fa-person-running', 'blue', 'Активность', p.babyActivity) : ''}
-                    ${p.libido ? stat('fa-fire', 'pink', 'Либидо', p.libido) : ''}
-                    ${pd.movements ? stat('fa-hand', 'purple', 'Шевеления', pd.movements) : ''}
-                    ${pd.swelling ? stat('fa-droplet', 'orange', 'Отёки', pd.swelling) : ''}
-                    ${pd.braxton_hicks ? stat('fa-bolt', 'pink', 'Схватки', pd.braxton_hicks) : ''}
-                    ${pd.fetal_position ? stat('fa-baby', 'blue', 'Положение', pd.fetal_position) : ''}
+                    ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', tr(p.mood)) : ''}
+                    ${p.weightGain ? stat('fa-weight-scale', 'orange', 'Вес', tr(p.weightGain)) : ''}
+                    ${p.babyActivity ? stat('fa-person-running', 'blue', 'Активность', tr(p.babyActivity)) : ''}
+                    ${p.libido ? stat('fa-fire', 'pink', 'Либидо', tr(p.libido)) : ''}
+                    ${pd.movements ? stat('fa-hand', 'purple', 'Шевеления', tr(pd.movements)) : ''}
+                    ${pd.swelling ? stat('fa-droplet', 'orange', 'Отёки', tr(pd.swelling)) : ''}
+                    ${pd.braxton_hicks ? stat('fa-bolt', 'pink', 'Схватки', tr(pd.braxton_hicks)) : ''}
+                    ${pd.fetal_position ? stat('fa-baby', 'blue', 'Положение', tr(pd.fetal_position)) : ''}
                     ${pd.recommendations ? `<div class="repro-note repro-rec">${ic('fa-lightbulb')} ${pd.recommendations}</div>` : ''}
                     ${noteLines.length ? `<div class="repro-note">${noteLines.join(' · ')}</div>` : ''}
                 </div>
@@ -318,10 +336,10 @@ export function buildInfoblockHtml() {
         <div class="repro-c">
             <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>
             <div class="repro-grid">
-                ${stat('fa-droplet', 'green', 'Фертильность', d.fertility || cd.fertility)}
-                ${stat('fa-fire', 'pink', 'Либидо', d.libido || cd.libido)}
-                ${stat('fa-face-smile', 'purple', 'Настроение', d.mood || cd.mood)}
-                ${stat('fa-heart', 'blue', 'Физически', d.physical || cd.physical)}
+                ${stat('fa-droplet', 'green', 'Фертильность', tr(d.fertility) || cd.fertility)}
+                ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || cd.libido)}
+                ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || cd.mood)}
+                ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || cd.physical)}
                 <div class="repro-note">${d.note || cd.note}</div>
             </div>
         </div>
@@ -339,6 +357,9 @@ export function syncUI() {
     const notify = el('repro-notify');
     if (enabled) enabled.checked = s.isEnabled;
     if (notify) notify.checked = s.showNotifications;
+
+    const debugLogs = el('repro-debuglogs');
+    if (debugLogs) debugLogs.checked = !!s.debugLogs;
 
     const contra = el('repro-contraception');
     if (contra) contra.value = s.contraception;
@@ -554,6 +575,7 @@ export function setupUI() {
         <div class="reproductive-system-settings">
             <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
+            <label class="checkbox_label" title="Писать отладочные логи в консоль (F12). Держи выключенным — с логами заметная нагрузка."><input type="checkbox" id="repro-debuglogs"><span style="opacity:0.6">Debug-логи</span></label>
             <hr>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
@@ -629,6 +651,8 @@ export function setupUI() {
                     <span style="font-size:9px;opacity:0.4">дн.</span>
                     <input type="text" id="repro-mb-father" class="text_pole" style="flex:1" maxlength="60" placeholder="Отец (необязательно)">
                 </div>
+                <input type="text" id="repro-mb-personality" class="text_pole" maxlength="200" placeholder="Характер: спокойный, любопытный (через запятую)" title="Черты характера через запятую — попадут в инфоблок и в промпт для модели">
+                <input type="text" id="repro-mb-appearance" class="text_pole" maxlength="200" placeholder="Внешность: мамины глаза, тёмные волосы (через запятую)" title="Черты внешности через запятую — попадут в инфоблок и в промпт для модели">
                 <button id="repro-manual-baby-add" class="menu_button" style="width:100%">Добавить малыша</button>
                 <button id="repro-reset" class="menu_button redWarningBG" style="width:100%;display:none">Сброс берем.</button>
                 <button id="repro-reset-baby" class="menu_button redWarningBG" style="width:100%;display:none">Сброс малыша</button>
@@ -662,6 +686,7 @@ export function setupUI() {
         // Events
         $('#repro-enabled').on('change', function() { getSettings().isEnabled = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
         $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
+        $('#repro-debuglogs').on('change', function() { getSettings().debugLogs = this.checked; saveSettingsDebounced(); });
         $('#repro-baby-max-age').on('change', function() {
             const v = parseInt(this.value) || 730;
             getSettings().babyMaxAgeDays = v;
@@ -752,16 +777,24 @@ export function setupUI() {
             const sex = $('#repro-mb-sex').val();
             const ageDays = Math.max(0, Math.min(730, parseInt($('#repro-mb-age-days').val()) || 0));
             const father = $('#repro-mb-father').val().trim();
+            // Характер/внешность: строка через запятую → массив черт (пустые отбрасываем)
+            const splitTraits = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
+            const personality = splitTraits($('#repro-mb-personality').val());
+            const appearance = splitTraits($('#repro-mb-appearance').val());
             startManualBaby([{
                 name: name,
                 sex: sex,
                 ageDays: ageDays,
+                personality: personality,
+                appearance: appearance,
                 fatherName: father,
             }]);
             // Очищаем поля
             $('#repro-mb-name').val('');
             $('#repro-mb-father').val('');
             $('#repro-mb-age-days').val('0');
+            $('#repro-mb-personality').val('');
+            $('#repro-mb-appearance').val('');
             syncUI();
             updatePromptInjection();
             setTimeout(() => {

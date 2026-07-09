@@ -1,12 +1,66 @@
 // ═══════════════════════════════════════════
 // HELPERS — чистые функции без зависимостей
 // ═══════════════════════════════════════════
+import { dlog } from './state.js';
 
 export function esc(str) {
     if (!str) return '';
     const div = document.createElement('div');
     div.textContent = str;
     return div.innerHTML;
+}
+
+// ─── Автодетект языка чата (по последним сообщениям) ───
+// Считаем кириллицу vs латиницу в последних 5 непустых сообщениях.
+// Нужен, чтобы промпт требовал значения тегов на языке истории,
+// а не на дефолтном английском модели.
+export function detectChatLanguage() {
+    try {
+        const chat = typeof SillyTavern?.getContext === 'function'
+            ? SillyTavern.getContext().chat : null;
+        if (!chat || chat.length === 0) return 'ru';
+        let cyr = 0, lat = 0, checked = 0;
+        for (let i = chat.length - 1; i >= 0 && checked < 5; i--) {
+            const m = chat[i];
+            if (!m || !m.mes || m.is_system) continue;
+            checked++;
+            const sample = m.mes.slice(0, 1500);
+            cyr += (sample.match(/[а-яё]/gi) || []).length;
+            lat += (sample.match(/[a-z]/gi) || []).length;
+        }
+        if (cyr === 0 && lat === 0) return 'ru';
+        return cyr >= lat ? 'ru' : 'en';
+    } catch (e) {
+        return 'ru';
+    }
+}
+
+// ─── Фолбэк-перевод типовых английских значений статуса → русский ───
+// Модели иногда игнорируют требование языка и пишут "High"/"Anxious".
+// Инфоблок переводит известные односложные значения, незнакомые оставляет как есть.
+const STATUS_EN_RU = {
+    'high': 'Высокая', 'low': 'Низкая', 'medium': 'Средняя', 'average': 'Средняя',
+    'normal': 'Норма', 'ok': 'Норма', 'good': 'Хорошо', 'bad': 'Плохо', 'none': 'Нет',
+    'very high': 'Очень высокая', 'very low': 'Очень низкая',
+    'anxious': 'Тревожное', 'worried': 'Встревоженное', 'nervous': 'Нервозное',
+    'calm': 'Спокойное', 'relaxed': 'Расслабленное', 'neutral': 'Нейтральное',
+    'happy': 'Радостное', 'joyful': 'Радостное', 'sad': 'Грустное', 'upset': 'Расстроенное',
+    'scared': 'Испуганное', 'afraid': 'Испуганное', 'angry': 'Злое', 'irritated': 'Раздражённое',
+    'excited': 'Взволнованное', 'playful': 'Игривое', 'flirty': 'Кокетливое',
+    'tired': 'Усталость', 'exhausted': 'Измотанность', 'energetic': 'Энергичное',
+    'sleepy': 'Сонливость', 'hungry': 'Голод', 'nauseous': 'Тошнота',
+    'cold': 'Холодно', 'warm': 'Тепло', 'hot': 'Жарко', 'freezing': 'Замёрзла',
+    'wet': 'Промокла', 'sore': 'Болезненность', 'aching': 'Ломота',
+    'horny': 'Возбуждённое', 'aroused': 'Возбуждённое',
+    'sleeping': 'Спит', 'awake': 'Бодрствует', 'crying': 'Плачет', 'fussy': 'Капризный',
+    'content': 'Довольный', 'breastfeeding': 'Грудное', 'formula': 'Смесь',
+    'sensitive': 'Чувствительность', 'sensitivity': 'Чувствительность',
+};
+
+export function translateStatusValue(val) {
+    if (!val || typeof val !== 'string') return val;
+    const key = val.trim().toLowerCase();
+    return STATUS_EN_RU[key] || val;
 }
 
 export function parseReproBlock(raw) {
@@ -241,7 +295,7 @@ export function rollPlannedComplications() {
                 revealWeek: week,
                 revealed: false,
             });
-            console.log(`[Reproductive] Planned complication: ${comp.type} at week ${week}`);
+            dlog(`[Reproductive] Planned complication: ${comp.type} at week ${week}`);
         }
     }
     return planned;
