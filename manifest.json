@@ -1,13 +1,13 @@
 {
-    "display_name": "Reproductive System",
+    "display_name": "Reproductive",
     "loading_order": 10,
     "requires": [],
     "optional": [],
     "js": "index.js",
-    "css": "",
-    "author": "Delidgi",
-    "version": "1.7.6",
-    "homePage": "https://github.com/delidgi/Pregnancy-and-menstruation",
-    "source": "https://github.com/delidgi/Pregnancy-and-menstruation",
+    "css": "style.css",
+    "author": "MomCta",
+    "version": "2.11.0",
+    "homePage": "",
+    "source": "",
     "auto_update": true
 }
