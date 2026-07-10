@@ -744,16 +744,19 @@ function advanceTime(s, p, daysPassed) {
         if (userSetMs > 0 && minutesSinceUserSet < 30) {
             dlog(`[Reproductive] Cycle auto-advance SKIPPED — user set cycle ${minutesSinceUserSet.toFixed(1)}min ago`);
         } else if (isOmegaverse(p) && (p.designation || 'omega') !== 'beta') {
-            // Омегаверс: у омеги течка, у альфы гон — 28-дневный цикл не двигаем
+            // Омегаверс: у омеги течка, у альфы гон — 28-дневный цикл не двигаем.
+            // Режим «гон только симпатический»: у альфы нет своего цикла — не тикаем.
             ensureOmegaFields(p, true);
-            const ev = advanceOmegaCycle(p, daysPassed, getCfg(s));
+            const skipOwnRut = p.designation === 'alpha' && p.rutSympatheticOnly;
+            const ev = skipOwnRut ? { changed: false } : advanceOmegaCycle(p, daysPassed, getCfg(s));
             if (ev.changed) changed = true;
             if (s.showNotifications && !p.heatSuppressant) {
                 if (ev.enteredPreheat) showNotification('<i class="fa-solid fa-temperature-half"></i> Пред-течка — симптомы нарастают', 'info');
                 if (ev.enteredHeat) showNotification('<i class="fa-solid fa-fire"></i> ТЕЧКА началась — фертильность экстремальная!', 'warning');
                 if (ev.heatEnded) showNotification('<i class="fa-solid fa-wind"></i> Течка закончилась', 'info');
             }
-            if (s.showNotifications) {
+            // Подавители у альфы гасят гон — молчим, как и у омеги с течкой
+            if (s.showNotifications && !p.heatSuppressant) {
                 if (ev.enteredRut) showNotification('<i class="fa-solid fa-fire"></i> Гон начался', 'warning');
                 if (ev.rutEnded) showNotification('<i class="fa-solid fa-wind"></i> Гон закончился', 'info');
             }
