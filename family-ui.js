@@ -50,18 +50,19 @@ function injectStyles() {
 }
 @keyframes rfPop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
 .rf-title {
-    font-size: 20px; font-weight: 700; text-align: center;
+    font-size: 21px; font-weight: 800; text-align: center;
+    letter-spacing: .3px;
     margin-bottom: 4px;
     background: linear-gradient(135deg, #82c8ff 0%, #b478ff 100%);
     -webkit-background-clip: text; background-clip: text;
     -webkit-text-fill-color: transparent;
 }
-.rf-subtitle { font-size: 12px; opacity: .7; text-align: center; margin-bottom: 16px; line-height: 1.4; }
+.rf-subtitle { font-size: 12px; opacity: .7; text-align: center; margin-bottom: 18px; line-height: 1.4; }
 .rf-btn {
     display: block; margin: 14px auto 0;
-    background: linear-gradient(135deg, rgba(130, 200, 255, 0.3), rgba(180, 120, 255, 0.3));
-    border: 1px solid rgba(255, 255, 255, 0.25);
-    color: rgba(255, 255, 255, 0.95);
+    background: linear-gradient(135deg, rgba(130, 200, 255, 0.28), rgba(180, 120, 255, 0.28));
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    color: rgba(255, 255, 255, 0.97);
     padding: 9px 26px; border-radius: 50px;
     font-size: 13px; font-weight: 600; cursor: pointer;
     transition: all .2s;

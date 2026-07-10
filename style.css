@@ -457,3 +457,33 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 .rb-confirm-btn i {
     font-size: 11px;
 }
+/* ── Секции панели настроек (v2.11): подписи-разделители с FA-иконками ── */
+.reproductive-system-settings {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+.reproductive-system-settings .repro-sec {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .8px;
+    text-transform: uppercase;
+    opacity: .6;
+    margin: 3px 0 1px;
+    user-select: none;
+}
+.reproductive-system-settings .repro-sec i {
+    width: 13px;
+    text-align: center;
+    color: var(--rp-purple);
+}
+.reproductive-system-settings hr {
+    opacity: .25;
+    margin: 5px 0;
+}
+.reproductive-system-settings .menu_button i {
+    margin-right: 4px;
+}

@@ -220,7 +220,7 @@ function buildPartnerInfoCard(s, p) {
     return `<details class="repro">
         <summary><div class="repro-header">
             <div class="repro-icon pregnancy">${ic('fa-heart')}</div>
-            <span class="repro-title">${name} — беременность</span>
+            <span class="repro-title">${name} — беременность${isOmegaverse(p) && (pp.designation || '') === 'omega' ? ' (омега)' : ''}</span>
             <span class="repro-badge pregnancy">${weeks}/${dur} нед. · ${trimester} трим.</span>
             <div class="repro-chev">${ic('fa-chevron-down')}</div>
         </div></summary>
@@ -250,6 +250,13 @@ function getOmegaDetails(phase, suppressed) {
     return { fertility: 'Низкая', libido: 'Обычное', physical: 'Стабильно', note: 'Спокойная фаза — до течки далеко, фертильность низкая.' };
 }
 
+// Дней до следующей течки/гона (0 = идёт прямо сейчас)
+function daysUntilPhase(day, cycleLength, activeDuration) {
+    const d = Math.max(1, Math.min(cycleLength, Math.round(day) || 1));
+    if (d <= activeDuration) return 0;
+    return cycleLength - d + 1;
+}
+
 // ── Карточка цикла юзера в омегаверсе (течка омеги / гон альфы) ──
 function buildOmegaCycleCard(s, p) {
     const cfg = getCfg(s);
@@ -258,16 +265,19 @@ function buildOmegaCycleCard(s, p) {
 
     if (desig === 'alpha') {
         const rut = getRutPhase(p.rutCycleDay || 30, cfg);
+        const toRut = daysUntilPhase(rut.day, cfg.rutCycleLength, cfg.rutDuration);
         return `<details class="repro">
             <summary><div class="repro-header">
-                <div class="repro-icon cycle">${ic('fa-fire')}</div>
-                <span class="repro-title">Альфа</span>
+                <div class="repro-icon ${rut.inRut ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
+                <span class="repro-title">Я — альфа</span>
                 <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rut.labelRu}</span>
                 <div class="repro-chev">${ic('fa-chevron-down')}</div>
             </div></summary>
             <div class="repro-c"><div class="repro-grid">
                 ${stat('fa-fire', 'pink', 'Гон', rut.inRut ? 'Активен' : 'Нет')}
-                ${stat('fa-face-smile', 'purple', 'Настроение', d.mood || (rut.inRut ? 'Взвинченное' : 'Ровное'))}
+                ${!rut.inRut ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
+                ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || (rut.inRut ? 'Взвинченное' : 'Ровное'))}
+                ${p.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
                 <div class="repro-note">${d.note || (rut.inRut ? 'Гон: обострённые инстинкты, собственничество, высокое либидо.' : 'Спокойная фаза — гон ещё не скоро.')}</div>
             </div></div>
         </details>`;
@@ -279,10 +289,11 @@ function buildOmegaCycleCard(s, p) {
     const od = getOmegaDetails(ph.phase, suppressed);
     const pct = Math.round(ph.day / cfg.heatCycleLength * 100);
     const phaseLabel = suppressed ? 'Подавлена' : ph.labelRu;
+    const toHeat = daysUntilPhase(ph.day, cfg.heatCycleLength, cfg.heatDuration);
     return `<details class="repro">
         <summary><div class="repro-header">
             <div class="repro-icon ${ph.phase === 'heat' && !suppressed ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
-            <span class="repro-title">Течка (омега)</span>
+            <span class="repro-title">Я — омега</span>
             <span class="repro-badge cycle">День ${ph.day}/${cfg.heatCycleLength} · ${phaseLabel}</span>
             <div class="repro-chev">${ic('fa-chevron-down')}</div>
         </div></summary>
@@ -290,10 +301,73 @@ function buildOmegaCycleCard(s, p) {
             <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${pct}%"></div></div>
             <div class="repro-grid">
                 ${stat('fa-droplet', 'green', 'Фертильность', tr(d.fertility) || od.fertility)}
+                ${!suppressed && toHeat > 0 ? stat('fa-hourglass-half', 'orange', 'До течки', `${toHeat} дн.`) : ''}
                 ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || od.libido)}
                 ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || '—')}
                 ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || od.physical)}
+                ${suppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
+                ${p.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
                 <div class="repro-note">${d.note || od.note}</div>
+            </div>
+        </div>
+    </details>`;
+}
+
+// ── Партнёрская карточка течки/гона в омегаверсе ──
+// Гон альфы-партнёра важен даже без трекинга его беременности (буст к зачатию юзера),
+// поэтому альфу показываем всегда; омегу — только при включённом «Партнёр может забеременеть»
+// (без трекинга её цикл не тикает). Беременного партнёра показывает карточка беременности.
+function buildPartnerOmegaCard(s, p) {
+    if (!isOmegaverse(p)) return '';
+    const pp = p.partner;
+    if (!pp || pp.isPregnant) return '';
+    const desig = pp.designation || 'alpha';
+    if (desig === 'beta') return '';
+    if (desig === 'omega' && !pp.enabled) return '';
+
+    const cfg = getCfg(s);
+    const name = getPartnerName(p);
+
+    if (desig === 'alpha') {
+        const rut = getRutPhase(pp.rutCycleDay || 30, cfg);
+        const toRut = daysUntilPhase(rut.day, cfg.rutCycleLength, cfg.rutDuration);
+        return `<details class="repro">
+            <summary><div class="repro-header">
+                <div class="repro-icon ${rut.inRut ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
+                <span class="repro-title">${name} — альфа</span>
+                <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rut.labelRu}</span>
+                <div class="repro-chev">${ic('fa-chevron-down')}</div>
+            </div></summary>
+            <div class="repro-c"><div class="repro-grid">
+                ${stat('fa-fire', 'pink', 'Гон', rut.inRut ? 'Активен' : 'Нет')}
+                ${!rut.inRut ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
+                ${pp.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
+                <div class="repro-note">${rut.inRut ? 'Гон партнёра: инстинкты и либидо на пике — плюс к зачатию носителя.' : 'Спокоен. Рядом с омегой в течке гон может вспыхнуть симпатически.'}</div>
+            </div></div>
+        </details>`;
+    }
+
+    // Партнёр-омега: цикл течки
+    const ph = getHeatPhase(pp.heatCycleDay || 20, cfg);
+    const suppressed = !!pp.heatSuppressant;
+    const od = getOmegaDetails(ph.phase, suppressed);
+    const pct = Math.round(ph.day / cfg.heatCycleLength * 100);
+    const toHeat = daysUntilPhase(ph.day, cfg.heatCycleLength, cfg.heatDuration);
+    return `<details class="repro">
+        <summary><div class="repro-header">
+            <div class="repro-icon ${ph.phase === 'heat' && !suppressed ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
+            <span class="repro-title">${name} — омега</span>
+            <span class="repro-badge cycle">День ${ph.day}/${cfg.heatCycleLength} · ${suppressed ? 'Подавлена' : ph.labelRu}</span>
+            <div class="repro-chev">${ic('fa-chevron-down')}</div>
+        </div></summary>
+        <div class="repro-c">
+            <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${pct}%"></div></div>
+            <div class="repro-grid">
+                ${stat('fa-droplet', 'green', 'Фертильность', od.fertility)}
+                ${!suppressed && toHeat > 0 ? stat('fa-hourglass-half', 'orange', 'До течки', `${toHeat} дн.`) : ''}
+                ${suppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
+                ${pp.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
+                <div class="repro-note">${od.note}</div>
             </div>
         </div>
     </details>`;
@@ -305,8 +379,9 @@ export function buildInfoblockHtml() {
     const p = getPregnancyData();
     if (!s.isEnabled) return '';
 
-    // Карточка партнёра добавляется к любому режиму (baby/pregnancy/cycle)
-    const partnerHtml = buildPartnerInfoCard(s, p);
+    // Карточки партнёра добавляются к любому режиму (baby/pregnancy/cycle):
+    // беременность партнёра + его течка/гон в омегаверсе
+    const partnerHtml = buildPartnerInfoCard(s, p) + buildPartnerOmegaCard(s, p);
 
     // ── BABY MODE ──
     if (p.hasBaby) {
@@ -343,7 +418,7 @@ export function buildInfoblockHtml() {
             const label = baby.name || (babies.length > 1 ? `Малыш ${i + 1}` : 'Малыш');
             const milestones = (baby.milestones || []).slice(-2).map(m => m.text).join(', ');
             const ageStr = calcAge(baby);
-            const stage = getStageOf(baby, p.rpDate);
+            const stage = getStageOf(baby, nowRefIso);
             const stageStr = stage && stage.id !== 'newborn' ? ` · ${stage.label}` : '';
 
             // Возрастные нормы ухода (симуляция): кормление/сон/подгузники + зубки
@@ -427,7 +502,7 @@ export function buildInfoblockHtml() {
         return `<details class="repro">
             <summary><div class="repro-header">
                 <div class="repro-icon pregnancy">${ic('fa-heart')}</div>
-                <span class="repro-title">Беременность</span>
+                <span class="repro-title">Беременность${isOmegaverse(p) && (p.designation || 'omega') !== 'beta' ? ` (${p.designation === 'alpha' ? 'альфа' : 'омега'})` : ''}</span>
                 <span class="repro-badge pregnancy">${weeks}/${dur} нед. · ${trimester} трим.</span>
                 <div class="repro-chev">${ic('fa-chevron-down')}</div>
             </div></summary>
@@ -851,11 +926,11 @@ export function syncUI() {
             const inp = el('repro-user-heatday');
             const phaseEl = el('repro-user-omega-phase');
             if (userDesig === 'omega') {
-                if (lbl) lbl.textContent = 'День течки:';
+                if (lbl) lbl.textContent = 'Моя течка, день:';
                 if (inp && document.activeElement !== inp) inp.value = p.heatCycleDay || 20;
                 if (phaseEl) phaseEl.textContent = p.heatSuppressant ? 'подавлена' : getHeatPhase(p.heatCycleDay || 20, cfg).labelRu;
             } else {
-                if (lbl) lbl.textContent = 'День гона:';
+                if (lbl) lbl.textContent = 'Мой гон, день:';
                 if (inp && document.activeElement !== inp) inp.value = p.rutCycleDay || 30;
                 if (phaseEl) phaseEl.textContent = getRutPhase(p.rutCycleDay || 30, cfg).labelRu;
             }
@@ -870,11 +945,11 @@ export function syncUI() {
             const phaseP = el('repro-partner-omega-phase');
             const ppo = p.partner || {};
             if (partnerDesig === 'omega') {
-                if (lblP) lblP.textContent = 'День течки:';
+                if (lblP) lblP.textContent = 'Течка партнёра:';
                 if (inpP && document.activeElement !== inpP) inpP.value = ppo.heatCycleDay || 20;
                 if (phaseP) phaseP.textContent = ppo.heatSuppressant ? 'подавлена' : getHeatPhase(ppo.heatCycleDay || 20, cfg).labelRu;
             } else {
-                if (lblP) lblP.textContent = 'День гона:';
+                if (lblP) lblP.textContent = 'Гон партнёра:';
                 if (inpP && document.activeElement !== inpP) inpP.value = ppo.rutCycleDay || 30;
                 if (phaseP) phaseP.textContent = getRutPhase(ppo.rutCycleDay || 30, cfg).labelRu;
             }
@@ -915,15 +990,7 @@ export function setupUI() {
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <label class="checkbox_label" title="Писать отладочные логи в консоль (F12). Держи выключенным — с логами заметная нагрузка."><input type="checkbox" id="repro-debuglogs"><span style="opacity:0.6">Debug-логи</span></label>
             <hr>
-            <div style="display:flex;gap:4px;align-items:center">
-                <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
-                <select id="repro-contraception" class="text_pole" style="flex:1">
-                    <option value="none">Нет</option>
-                    <option value="condom">Презерватив</option>
-                    <option value="pill">Таблетки</option>
-                    <option value="iud">ВМС</option>
-                </select>
-            </div>
+            <div class="repro-sec">${ic('fa-sliders')}Настройки семьи</div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Длит. берем.:</span>
                 <select id="repro-duration" class="text_pole" style="flex:1">
@@ -952,6 +1019,7 @@ export function setupUI() {
                 <span style="font-size:9px;opacity:0.5">% в день</span>
             </div>
             <hr>
+            <div class="repro-sec">${ic('fa-wand-magic-sparkles')}Вселенная</div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Вселенная:</span>
                 <select id="repro-universe" class="text_pole" style="flex:1">
@@ -961,7 +1029,7 @@ export function setupUI() {
             </div>
             <div id="repro-omega-panel" style="display:none;flex-direction:column;gap:4px">
                 <div style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5" title="Альфа не беременеет (гон). Омега — цикл течки. Бета — обычный 28-дневный цикл.">Я:</span>
+                    <span style="font-size:9px;opacity:0.5" title="Альфа не беременеет (гон). Омега — цикл течки. Бета — обычный 28-дневный цикл.">Моя роль:</span>
                     <select id="repro-user-designation" class="text_pole" style="flex:1">
                         <option value="omega">Омега</option>
                         <option value="beta">Бета</option>
@@ -977,7 +1045,7 @@ export function setupUI() {
                 <label class="checkbox_label" title="Подавители течки: течка не проявляется, фертильность ровно низкая"><input type="checkbox" id="repro-user-suppressant"><span style="font-size:11px">Подавители течки (я)</span></label>
                 <label class="checkbox_label" title="Блокаторы запаха — скрывают запах, чисто RP-эффект"><input type="checkbox" id="repro-user-blockers"><span style="font-size:11px">Блокаторы запаха (я)</span></label>
                 <div style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5">Партнёр:</span>
+                    <span style="font-size:9px;opacity:0.5" title="Роль партнёра. Выберешь «Омега» — трекинг его беременности включится сам.">Роль партнёра:</span>
                     <select id="repro-partner-designation" class="text_pole" style="flex:1">
                         <option value="alpha">Альфа</option>
                         <option value="beta">Бета</option>
@@ -1001,22 +1069,33 @@ export function setupUI() {
                 </div>
             </div>
             <hr>
+            <div class="repro-sec" title="Мой персонаж как носитель. Цикл, течка и контрацепция здесь — МОИ; у партнёра всё своё в секции ниже.">${ic('fa-venus')}Я — носитель</div>
             <label class="checkbox_label" title="Выключи, если твой персонаж не может беременеть (носитель — только партнёр). RP-дата и семья продолжают отслеживаться."><input type="checkbox" id="repro-user-carry" checked><span>Я могу забеременеть</span></label>
+            <div style="display:flex;gap:4px;align-items:center" title="Моя контрацепция. У партнёра — своя, в его секции.">
+                <span style="font-size:9px;opacity:0.5">Моя контрацепция:</span>
+                <select id="repro-contraception" class="text_pole" style="flex:1">
+                    <option value="none">Нет</option>
+                    <option value="condom">Презерватив</option>
+                    <option value="pill">Таблетки</option>
+                    <option value="iud">ВМС</option>
+                </select>
+            </div>
             <div id="repro-currentcycle" class="rp-cycle-info"></div>
-            <div id="repro-cycle-row" style="display:flex;gap:4px;align-items:center">
-                <span style="font-size:9px;opacity:0.5">День цикла:</span>
+            <div id="repro-cycle-row" style="display:flex;gap:4px;align-items:center" title="Мой 28-дневный цикл. НЕ связан с циклом партнёра — у каждого носителя свой, оба тикают сами от RP-даты сообщений.">
+                <span style="font-size:9px;opacity:0.5">Мой день цикла:</span>
                 <input type="number" id="repro-cycleday" min="1" max="28" value="${getCycleDay()}" class="text_pole" style="width:45px">
                 <button id="repro-setcycle" class="menu_button">${ic('fa-check')}</button>
             </div>
             <hr>
+            <div class="repro-sec" title="Партнёр ({{char}}) как носитель: свой цикл/течка, своя контрацепция, свои проверки зачатия. Дети — в общую семью.">${ic('fa-heart')}Партнёр — носитель</div>
             <label class="checkbox_label" title="Партнёр ({{char}}) получает свой цикл, контрацепцию и может забеременеть. Дети попадают в общую семью."><input type="checkbox" id="repro-partner-enabled"><span>Партнёр может забеременеть</span></label>
             <div id="repro-partner-panel" style="display:none;flex-direction:column;gap:4px">
                 <div style="display:flex;gap:4px;align-items:center">
                     <span style="font-size:9px;opacity:0.5">Имя:</span>
                     <input type="text" id="repro-partner-name" class="text_pole" style="flex:1" maxlength="60" placeholder="имя персонажа (авто)">
                 </div>
-                <div style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
+                <div style="display:flex;gap:4px;align-items:center" title="Контрацепция партнёра — независима от моей.">
+                    <span style="font-size:9px;opacity:0.5">Его/её контрацепция:</span>
                     <select id="repro-partner-contraception" class="text_pole" style="flex:1">
                         <option value="none">Нет</option>
                         <option value="condom">Презерватив</option>
@@ -1024,24 +1103,25 @@ export function setupUI() {
                         <option value="iud">ВМС</option>
                     </select>
                 </div>
-                <div id="repro-partner-cycle-row" style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5">День цикла:</span>
+                <div id="repro-partner-cycle-row" style="display:flex;gap:4px;align-items:center" title="Собственный 28-дневный цикл партнёра. Не связан с моим — оба тикают сами от RP-даты.">
+                    <span style="font-size:9px;opacity:0.5">Его/её день цикла:</span>
                     <input type="number" id="repro-partner-cycleday" min="1" max="28" class="text_pole" style="width:45px">
                     <button id="repro-partner-setcycle" class="menu_button">${ic('fa-check')}</button>
                 </div>
                 <div id="repro-partner-mon" class="rp-m" style="display:none"></div>
-                <button id="repro-partner-force-birth" class="menu_button" style="width:100%;display:none">🍼 Роды партнёра сейчас</button>
+                <button id="repro-partner-force-birth" class="menu_button" style="width:100%;display:none">${ic('fa-baby-carriage')}Роды партнёра сейчас</button>
                 <button id="repro-partner-reset" class="menu_button redWarningBG" style="width:100%;display:none">Сброс берем. партнёра</button>
             </div>
             <hr>
+            <div class="repro-sec">${ic('fa-children')}Семья</div>
             <div style="font-size:10px;opacity:0.7">Статус: <span id="repro-status"></span></div>
             <div id="repro-preg-mon" class="rp-m" style="display:none"></div>
             <div id="repro-baby-mon" class="rp-m" style="display:none"></div>
-            <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none">🍼 Принять роды сейчас</button>
-            <button id="repro-family-tree-btn" class="menu_button" style="width:100%;display:none">🌳 Семейное древо</button>
-            <button id="repro-chronicle-btn" class="menu_button" style="width:100%;display:none">📖 Семейная хроника</button>
+            <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none">${ic('fa-baby-carriage')}Принять роды сейчас</button>
+            <button id="repro-family-tree-btn" class="menu_button" style="width:100%;display:none">${ic('fa-tree')}Семейное древо</button>
+            <button id="repro-chronicle-btn" class="menu_button" style="width:100%;display:none">${ic('fa-book-open')}Семейная хроника</button>
             <hr>
-            <div id="repro-manual-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">Ручная беременность / малыш ▼</div>
+            <div id="repro-manual-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">${ic('fa-hand-holding-heart')}Ручная беременность / малыш ▼</div>
             <div id="repro-manual-panel" style="display:none;gap:4px;flex-direction:column">
                 <small style="opacity:0.5;font-size:9px;font-weight:600">Беременность</small>
                 <div style="display:flex;gap:4px;align-items:center">
@@ -1085,6 +1165,7 @@ export function setupUI() {
                 <button id="repro-reset-baby" class="menu_button redWarningBG" style="width:100%;display:none">Сброс малыша</button>
             </div>
             <hr>
+            <div class="repro-sec">${ic('fa-palette')}Инфоблок</div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Инфоблок:</span>
                 <select id="repro-infoblock" class="text_pole" style="flex:1">
@@ -1093,7 +1174,7 @@ export function setupUI() {
                     <option value="bottom">Внизу</option>
                 </select>
             </div>
-            <div id="repro-css-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">CSS инфоблока ▼</div>
+            <div id="repro-css-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">${ic('fa-code')}CSS инфоблока ▼</div>
             <div id="repro-css-panel" style="display:none;flex-direction:column;gap:4px">
                 <textarea id="repro-custom-css" class="text_pole" rows="10" style="font-family:monospace;font-size:10px;resize:vertical;min-height:80px;white-space:pre;tab-size:2" placeholder="/* Свой CSS для инфоблока */\ndetails.repro { ... }"></textarea>
                 <div style="display:flex;gap:4px">
