@@ -45,7 +45,19 @@ let _snapshotChatId = null;
 function snapshotOf(p) {
     const c = structuredClone(p);
     delete c._history;
+    delete c._swipeStates;
     return c;
+}
+
+// Полная замена состояния из снапшота (с удалением ключей, появившихся позже),
+// сохраняя контейнеры истории/свайпов текущего чата.
+function restoreState(p, state) {
+    const keepHist = p._history;
+    const keepSwipes = p._swipeStates;
+    for (const k of Object.keys(p)) delete p[k];
+    Object.assign(p, structuredClone(state));
+    if (keepHist) p._history = keepHist;
+    if (keepSwipes) p._swipeStates = keepSwipes;
 }
 
 // Быстрый хэш текста — для дедупа сканов. Позиция сама по себе не годится:
@@ -164,15 +176,27 @@ function runScan() {
     // ТОЛЬКО если снапшот принадлежит текущему чату — иначе утечка состояния между чатами.
     const p = getPregnancyData();
     const chatIdNow = getCurrentChatId();
-    if (isRegen && _preRegenSnapshot) {
-        if (_snapshotChatId === chatIdNow) {
-            dlog('[Reproductive] Regen: restoring pre-scan state snapshot');
-            Object.assign(p, _preRegenSnapshot);
+    const swipeId = typeof lastMessage.swipe_id === 'number' ? lastMessage.swipe_id : 0;
+    if (isRegen) {
+        // Навигация на УЖЕ просканенный свайп (листание туда-сюда): восстанавливаем
+        // состояние ИМЕННО этого свайпа. Раньше восстанавливался общий pre-снапшот,
+        // и ручные правки со свайпа Б (день течки и т.п.) «перетекали» в свайп А.
+        const sw = p._swipeStates;
+        if (sw && sw.pos === positionId && sw.chatId === chatIdNow && sw.states && sw.states[swipeId]) {
+            dlog(`[Reproductive] Swipe nav: restoring stored state of swipe #${swipeId}`);
+            restoreState(p, sw.states[swipeId]);
             saveSettingsDebounced();
-        } else {
-            dwarn(`[Reproductive] Regen snapshot belongs to another chat (${_snapshotChatId} ≠ ${chatIdNow}) — NOT restoring`);
+            _preRegenSnapshot = null;
+        } else if (_preRegenSnapshot) {
+            if (_snapshotChatId === chatIdNow) {
+                dlog('[Reproductive] Regen: restoring pre-scan state snapshot');
+                Object.assign(p, _preRegenSnapshot);
+                saveSettingsDebounced();
+            } else {
+                dwarn(`[Reproductive] Regen snapshot belongs to another chat (${_snapshotChatId} ≠ ${chatIdNow}) — NOT restoring`);
+            }
+            _preRegenSnapshot = null;
         }
-        _preRegenSnapshot = null;
         // Свайп = новое сообщение на той же позиции: проверка зачатия должна кидаться заново
         s._lastConceptionRollAt = null;
         s._lastPartnerConceptionRollAt = null;
@@ -477,6 +501,13 @@ function runScan() {
     if (p.hasBaby) {
         try { updateBabyCare(); } catch (e) { /* ignore */ }
     }
+
+    // 1.9) Пер-свайп состояние: запоминаем итог обработки ИМЕННО этого свайпа,
+    // чтобы листание свайпов туда-сюда восстанавливало состояние каждого
+    if (!p._swipeStates || p._swipeStates.pos !== positionId || p._swipeStates.chatId !== chatIdNow) {
+        p._swipeStates = { pos: positionId, chatId: chatIdNow, states: {} };
+    }
+    p._swipeStates.states[swipeId] = snapshotOf(p);
 
     // 2) UI update — динамика приходит из RP_STATUS тега от основной модели (без Extra API)
     pushStateHistory(positionId);
@@ -1090,6 +1121,17 @@ export function refreshRegenSnapshot() {
         const p = getPregnancyData();
         _preRegenSnapshot = snapshotOf(p);
         _snapshotChatId = getCurrentChatId();
+        // Ручная правка принадлежит ТЕКУЩЕМУ свайпу: обновляем его сохранённое
+        // состояние, чтобы возврат на этот свайп её не потерял, а на другие — не унёс.
+        try {
+            const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : null;
+            const chat = ctx?.chat;
+            const last = chat && chat.length > 0 ? chat[chat.length - 1] : null;
+            if (last && p._swipeStates && p._swipeStates.pos === chat.length && p._swipeStates.chatId === _snapshotChatId) {
+                const swipeId = typeof last.swipe_id === 'number' ? last.swipe_id : 0;
+                p._swipeStates.states[swipeId] = snapshotOf(p);
+            }
+        } catch (e) { /* ignore */ }
         // Ручное изменение фиксируем и в истории состояний — иначе откат при удалении
         // сообщения отменил бы и ручные правки, сделанные после этого сообщения.
         try {
@@ -1221,9 +1263,19 @@ export function processDateTag(text) {
             setTimeout(renderInfoblock, 500);
             return true;
         } else if (diffDays < 0) {
-            dlog(`[Reproductive] RP_DATE: date went backwards, ignoring`);
+            // Модель прислала дату ИЗ ПРОШЛОГО (частый глюк после таймскипа: следующий
+            // ответ «возвращается» к старой дате). Выше p.rpDate уже был перезаписан —
+            // ОТКАТЫВАЕМ, иначе возраст детей и срок беременности молча едут назад.
+            p.rpDate = prevRaw;
+            p._lastRpDateTag = prevRaw;
+            dwarn(`[Reproductive] RP_DATE: ${newIso.slice(0,10)} is BEFORE ${prevRaw.slice(0,10)} — backwards date rejected, keeping ${prevRaw.slice(0,10)}`);
+            saveSettingsDebounced();
         } else if (diffDays > 36500) {
-            dwarn(`[Reproductive] RP_DATE: jump of ${diffDays}d looks like a broken date — time not advanced`);
+            // Прыжок >100 лет = битая дата (перепутан век и т.п.) — откатываем полностью
+            p.rpDate = prevRaw;
+            p._lastRpDateTag = prevRaw;
+            dwarn(`[Reproductive] RP_DATE: jump of ${diffDays}d looks like a broken date — rejected, keeping ${prevRaw.slice(0,10)}`);
+            saveSettingsDebounced();
         }
     } else {
         dlog(`[Reproductive] RP_DATE: first date recorded ${newIso.slice(0,10)}`);
