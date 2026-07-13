@@ -264,44 +264,21 @@ function buildOmegaCycleCard(s, p) {
     const d = p._dynamic || {};
 
     if (desig === 'alpha') {
-        const rutSuppressed = !!p.heatSuppressant;
-        // Симпатический режим: свой цикл не тикает, гон = омега (партнёр) в течке
-        if (p.rutSympatheticOnly) {
-            const ppO = p.partner || {};
-            const partnerOmegaInHeat = (ppO.designation === 'omega') && !ppO.heatSuppressant
-                && getHeatPhase(ppO.heatCycleDay || 20, cfg).phase === 'heat';
-            const active = partnerOmegaInHeat && !rutSuppressed;
-            return `<details class="repro">
-                <summary><div class="repro-header">
-                    <div class="repro-icon ${active ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
-                    <span class="repro-title">Я — альфа</span>
-                    <span class="repro-badge cycle">${rutSuppressed ? 'Гон подавлен' : (active ? 'СИМПАТИЧЕСКИЙ ГОН' : 'Спокоен')}</span>
-                    <div class="repro-chev">${ic('fa-chevron-down')}</div>
-                </div></summary>
-                <div class="repro-c"><div class="repro-grid">
-                    ${stat('fa-fire', 'pink', 'Гон', rutSuppressed ? 'Подавлен' : (active ? 'Активен (омега в течке)' : 'Нет'))}
-                    ${rutSuppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
-                    ${p.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
-                    <div class="repro-note">${d.note || 'Собственного цикла гона нет — гон вспыхивает, когда омега рядом в течке.'}</div>
-                </div></div>
-            </details>`;
-        }
         const rut = getRutPhase(p.rutCycleDay || 30, cfg);
         const toRut = daysUntilPhase(rut.day, cfg.rutCycleLength, cfg.rutDuration);
         return `<details class="repro">
             <summary><div class="repro-header">
-                <div class="repro-icon ${rut.inRut && !rutSuppressed ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
+                <div class="repro-icon ${rut.inRut ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
                 <span class="repro-title">Я — альфа</span>
-                <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rutSuppressed ? 'Гон подавлен' : rut.labelRu}</span>
+                <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rut.labelRu}</span>
                 <div class="repro-chev">${ic('fa-chevron-down')}</div>
             </div></summary>
             <div class="repro-c"><div class="repro-grid">
-                ${stat('fa-fire', 'pink', 'Гон', rutSuppressed ? 'Подавлен' : (rut.inRut ? 'Активен' : 'Нет'))}
-                ${!rut.inRut && !rutSuppressed ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
-                ${rutSuppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
-                ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || (rut.inRut && !rutSuppressed ? 'Взвинченное' : 'Ровное'))}
+                ${stat('fa-fire', 'pink', 'Гон', rut.inRut ? 'Активен' : 'Нет')}
+                ${!rut.inRut ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
+                ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || (rut.inRut ? 'Взвинченное' : 'Ровное'))}
                 ${p.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
-                <div class="repro-note">${d.note || (rutSuppressed ? 'Супрессанты: гон химически подавлен — ни симптомов, ни буста к зачатию.' : (rut.inRut ? 'Гон: обострённые инстинкты, собственничество, высокое либидо.' : 'Спокойная фаза — гон ещё не скоро.'))}</div>
+                <div class="repro-note">${d.note || (rut.inRut ? 'Гон: обострённые инстинкты, собственничество, высокое либидо.' : 'Спокойная фаза — гон ещё не скоро.')}</div>
             </div></div>
         </details>`;
     }
@@ -352,42 +329,20 @@ function buildPartnerOmegaCard(s, p) {
     const name = getPartnerName(p);
 
     if (desig === 'alpha') {
-        const rutSuppressed = !!pp.heatSuppressant;
-        // Симпатический режим: гон партнёра = юзер-омега в течке
-        if (p.rutSympatheticOnly) {
-            const userOmegaInHeat = (p.designation || 'omega') === 'omega' && !p.heatSuppressant
-                && getHeatPhase(p.heatCycleDay || 20, cfg).phase === 'heat';
-            const active = userOmegaInHeat && !rutSuppressed;
-            return `<details class="repro">
-                <summary><div class="repro-header">
-                    <div class="repro-icon ${active ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
-                    <span class="repro-title">${name} — альфа</span>
-                    <span class="repro-badge cycle">${rutSuppressed ? 'Гон подавлен' : (active ? 'СИМПАТИЧЕСКИЙ ГОН' : 'Спокоен')}</span>
-                    <div class="repro-chev">${ic('fa-chevron-down')}</div>
-                </div></summary>
-                <div class="repro-c"><div class="repro-grid">
-                    ${stat('fa-fire', 'pink', 'Гон', rutSuppressed ? 'Подавлен' : (active ? 'Активен (омега в течке)' : 'Нет'))}
-                    ${rutSuppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
-                    ${pp.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
-                    <div class="repro-note">${active ? 'Симпатический гон: омега в течке — инстинкты на пике, плюс к зачатию.' : 'Собственного цикла гона нет — гон вспыхнет от течки омеги.'}</div>
-                </div></div>
-            </details>`;
-        }
         const rut = getRutPhase(pp.rutCycleDay || 30, cfg);
         const toRut = daysUntilPhase(rut.day, cfg.rutCycleLength, cfg.rutDuration);
         return `<details class="repro">
             <summary><div class="repro-header">
-                <div class="repro-icon ${rut.inRut && !rutSuppressed ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
+                <div class="repro-icon ${rut.inRut ? 'pregnancy' : 'cycle'}">${ic('fa-fire')}</div>
                 <span class="repro-title">${name} — альфа</span>
-                <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rutSuppressed ? 'Гон подавлен' : rut.labelRu}</span>
+                <span class="repro-badge cycle">День ${rut.day}/${cfg.rutCycleLength} · ${rut.labelRu}</span>
                 <div class="repro-chev">${ic('fa-chevron-down')}</div>
             </div></summary>
             <div class="repro-c"><div class="repro-grid">
-                ${stat('fa-fire', 'pink', 'Гон', rutSuppressed ? 'Подавлен' : (rut.inRut ? 'Активен' : 'Нет'))}
-                ${!rut.inRut && !rutSuppressed ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
-                ${rutSuppressed ? stat('fa-pills', 'blue', 'Супрессанты', 'Активны') : ''}
+                ${stat('fa-fire', 'pink', 'Гон', rut.inRut ? 'Активен' : 'Нет')}
+                ${!rut.inRut ? stat('fa-hourglass-half', 'orange', 'До гона', `${toRut} дн.`) : ''}
                 ${pp.scentBlockers ? stat('fa-wind', 'blue', 'Запах', 'Скрыт блокаторами') : ''}
-                <div class="repro-note">${rutSuppressed ? 'Супрессанты: гон подавлен — ни симптомов, ни буста к зачатию носителя.' : (rut.inRut ? 'Гон партнёра: инстинкты и либидо на пике — плюс к зачатию носителя.' : 'Спокоен. Рядом с омегой в течке гон может вспыхнуть симпатически.')}</div>
+                <div class="repro-note">${rut.inRut ? 'Гон партнёра: инстинкты и либидо на пике — плюс к зачатию носителя.' : 'Спокоен. Рядом с омегой в течке гон может вспыхнуть симпатически.'}</div>
             </div></div>
         </details>`;
     }
@@ -632,13 +587,6 @@ export function syncUI() {
     if (famEvChance && document.activeElement !== famEvChance) {
         famEvChance.value = Math.max(0, Math.min(50, parseInt(s.familyEventChance ?? 15) || 0));
     }
-
-    const pCompact = el('repro-prompt-compact');
-    if (pCompact) pCompact.checked = !!s.promptCompact;
-    const pCare = el('repro-prompt-care');
-    if (pCare) pCare.checked = s.promptCareNorms !== false;
-    const pChildUpd = el('repro-prompt-childupd');
-    if (pChildUpd) pChildUpd.checked = s.promptChildUpdateTag !== false;
 
     const babyMaxAge = el('repro-baby-max-age');
     if (babyMaxAge) {
@@ -970,16 +918,10 @@ export function syncUI() {
         const pdSel = el('repro-partner-designation');
         if (pdSel) pdSel.value = partnerDesig;
 
-        const sympOnly = !!p.rutSympatheticOnly;
-        const sympC = el('repro-rut-sympathetic');
-        if (sympC) sympC.checked = sympOnly;
-
-        // Ряд дня течки/гона юзера: бета — обычный цикл выше;
-        // альфа в симпатическом режиме — своего цикла гона нет, поле прячем
+        // Ряд дня течки/гона юзера (бета пользуется обычным циклом выше)
         const uRow = el('repro-user-omega-cycle');
-        const hideURow = userDesig === 'beta' || (userDesig === 'alpha' && sympOnly);
-        if (uRow) uRow.style.display = hideURow ? 'none' : 'flex';
-        if (!hideURow) {
+        if (uRow) uRow.style.display = userDesig === 'beta' ? 'none' : 'flex';
+        if (userDesig !== 'beta') {
             const lbl = el('repro-user-omega-lbl');
             const inp = el('repro-user-heatday');
             const phaseEl = el('repro-user-omega-phase');
@@ -994,11 +936,10 @@ export function syncUI() {
             }
         }
 
-        // Ряд партнёра (та же логика с симпатическим гоном)
+        // Ряд партнёра
         const pRow = el('repro-partner-omega-cycle');
-        const hidePRow = partnerDesig === 'beta' || (partnerDesig === 'alpha' && sympOnly);
-        if (pRow) pRow.style.display = hidePRow ? 'none' : 'flex';
-        if (!hidePRow) {
+        if (pRow) pRow.style.display = partnerDesig === 'beta' ? 'none' : 'flex';
+        if (partnerDesig !== 'beta') {
             const lblP = el('repro-partner-omega-lbl');
             const inpP = el('repro-partner-heatday');
             const phaseP = el('repro-partner-omega-phase');
@@ -1014,22 +955,12 @@ export function syncUI() {
             }
         }
 
-        // Подпись подавителей зависит от роли: у омеги — течка, у альфы — гон, бете не нужны
-        const syncSuppressant = (inputEl, desig, who) => {
-            if (!inputEl) return;
-            const label = inputEl.closest('label');
-            if (label) label.style.display = desig === 'beta' ? 'none' : '';
-            const span = inputEl.nextElementSibling;
-            if (span) span.textContent = desig === 'alpha' ? `Подавители гона (${who})` : `Подавители течки (${who})`;
-        };
         const usC = el('repro-user-suppressant');
         if (usC) usC.checked = !!p.heatSuppressant;
-        syncSuppressant(usC, userDesig, 'я');
         const ubC = el('repro-user-blockers');
         if (ubC) ubC.checked = !!p.scentBlockers;
         const psC = el('repro-partner-suppressant');
         if (psC) psC.checked = !!p.partner?.heatSuppressant;
-        syncSuppressant(psC, partnerDesig, 'партнёр');
         const pbC = el('repro-partner-blockers');
         if (pbC) pbC.checked = !!p.partner?.scentBlockers;
 
@@ -1088,11 +1019,6 @@ export function setupUI() {
                 <span style="font-size:9px;opacity:0.5">% в день</span>
             </div>
             <hr>
-            <div class="repro-sec" title="Сколько текста расширение добавляет в каждый запрос к модели.">${ic('fa-align-left')}Промпт</div>
-            <label class="checkbox_label" title="Режет длинные пояснения (гайд по стадиям, инструкции ухода и CHILD_UPDATE) до коротких. Данные детей остаются полными. Экономит токены."><input type="checkbox" id="repro-prompt-compact"><span style="font-size:11px">Компактный промпт</span></label>
-            <label class="checkbox_label" title="Нормы кормления/сна/подгузников по возрасту и потребности по времени суток. Выключи, если малышковый микроменеджмент не нужен."><input type="checkbox" id="repro-prompt-care" checked><span style="font-size:11px">Уход за малышом в промпте</span></label>
-            <label class="checkbox_label" title="Инструкция CHILD_UPDATE: модель может сама дописывать профили детей. Выключи, если хочешь вести профили только вручную."><input type="checkbox" id="repro-prompt-childupd" checked><span style="font-size:11px">ИИ дополняет профили детей</span></label>
-            <hr>
             <div class="repro-sec">${ic('fa-wand-magic-sparkles')}Вселенная</div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Вселенная:</span>
@@ -1134,7 +1060,6 @@ export function setupUI() {
                 </div>
                 <label class="checkbox_label"><input type="checkbox" id="repro-partner-suppressant"><span style="font-size:11px">Подавители течки (партнёр)</span></label>
                 <label class="checkbox_label"><input type="checkbox" id="repro-partner-blockers"><span style="font-size:11px">Блокаторы запаха (партнёр)</span></label>
-                <label class="checkbox_label" title="Лор-режим: у альф НЕТ собственного цикла гона — гон вспыхивает только когда их омега в течке. Поле «день гона» исчезает."><input type="checkbox" id="repro-rut-sympathetic"><span style="font-size:11px">Гон альф — только реакция на течку</span></label>
                 <div style="display:flex;gap:4px;align-items:center" title="Длина цикла течки в днях и длительность самой течки. Общие для всех чатов.">
                     <span style="font-size:9px;opacity:0.5">Цикл течки:</span>
                     <input type="number" id="repro-heat-length" min="14" max="180" class="text_pole" style="width:48px">
@@ -1282,10 +1207,6 @@ export function setupUI() {
             getSettings().familyEventChance = v;
             saveSettingsDebounced();
         });
-        // Тюнинг промпта
-        $('#repro-prompt-compact').on('change', function() { getSettings().promptCompact = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
-        $('#repro-prompt-care').on('change', function() { getSettings().promptCareNorms = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
-        $('#repro-prompt-childupd').on('change', function() { getSettings().promptChildUpdateTag = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
 
         // Семейное древо — модалка династии (модуль грузим лениво)
         $('#repro-family-tree-btn').on('click', function() {
@@ -1443,24 +1364,6 @@ export function setupUI() {
         $('#repro-partner-heatday-set').on('click', () => applyOmegaDay('partner', $('#repro-partner-heatday').val()));
         $('#repro-partner-heatday').on('keydown', function(e) {
             if (e.key === 'Enter') { e.preventDefault(); applyOmegaDay('partner', $(this).val()); }
-        });
-        // Авто-сохранение при уходе из поля: раньше введённый день «сбрасывался»,
-        // если не нажать ✓ — syncUI перезаписывал input значением из состояния
-        $('#repro-user-heatday').on('change', function() { applyOmegaDay('user', $(this).val()); });
-        $('#repro-partner-heatday').on('change', function() { applyOmegaDay('partner', $(this).val()); });
-        // Режим «гон только симпатический» (пер-чат, лор-переключатель)
-        $('#repro-rut-sympathetic').on('change', function() {
-            const p = getPregnancyData();
-            if (!getCurrentChatId()) {
-                showNotification('Чат не определён — открой чат и повтори', 'warning');
-                this.checked = !!p.rutSympatheticOnly;
-                return;
-            }
-            p.rutSympatheticOnly = this.checked;
-            import('./message-handler.js').then(m => m.refreshRegenSnapshot());
-            saveSettingsDebounced();
-            updatePromptInjection();
-            syncUI();
         });
         // Супрессанты и блокаторы
         const bindOmegaFlag = (sel, who, field) => {

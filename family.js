@@ -465,9 +465,7 @@ const SPECIAL_STAGE_FLAVOR = {
 
 // ─── Блок семьи для промпта (EN, стадийно-осознанный) ───
 // Заменяет прежние списки [FAMILY — CHILDREN] и [OLDER CHILDREN] в prompts.js.
-// opts.compact — резать пояснения (гайд по стадиям и т.п.), данные детей полные.
-export function buildFamilyPromptBlock(p, opts = {}) {
-    const compact = !!opts.compact;
+export function buildFamilyPromptBlock(p) {
     const all = getAllChildren(p);
     if (all.length === 0) return '';
 
@@ -497,9 +495,8 @@ export function buildFamilyPromptBlock(p, opts = {}) {
             if (child.designation) block += ` | Secondary gender: ${String(child.designation).toUpperCase()}`;
             else block += ` | not yet presented`;
         }
-        // «carrier» не приписываем матери жёстко: в омегаверсе выносить мог папа-омега
         if (child.fatherName) block += ` | Father: ${child.fatherName}${omegaUni && child.fatherDesignation ? ` (${child.fatherDesignation})` : ''}`;
-        if (child.motherName) block += ` | Mother: ${child.motherName}${omegaUni && child.motherDesignation ? ` (${child.motherDesignation})` : ''}`;
+        if (child.motherName) block += ` | Mother: ${child.motherName}${omegaUni && child.motherDesignation ? ` (${child.motherDesignation}, carrier)` : ''}`;
         if (origin === 'grown') block += ` | (no infant tracking — still in the family)`;
         block += `\n`;
         // Свободный лор ребёнка (из профиля) — вторая строка, чтобы не раздувать первую
@@ -516,20 +513,15 @@ export function buildFamilyPromptBlock(p, opts = {}) {
     // Близнецовая связь — парная специя
     for (const group of findTwinGroups(p)) {
         const names = group.map(g => g.child.name || 'unnamed').join(' & ');
-        block += compact
-            ? `[TWINS] ${names} — twin bond.\n`
-            : `[TWIN BOND] ${names} are ${group.length === 2 ? 'twins' : 'multiples'} — they share an uncanny bond, sense each other's moods and often act in sync.\n`;
+        block += `[TWIN BOND] ${names} are ${group.length === 2 ? 'twins' : 'multiples'} — they share an uncanny bond, sense each other's moods and often act in sync.\n`;
     }
 
     // Омегаверс: правило презентации для непрезентованных детей
     if (omegaUni && all.some(({ child }) => !child.designation)) {
-        block += compact
-            ? `[A/B/O] Unpresented children show NO alpha/omega traits until early-teen presentation.\n`
-            : `[A/B/O] Children PRESENT their secondary gender (alpha/beta/omega) in their early teens. Before presentation a child is indistinguishable from a beta and must NOT show alpha/omega traits.\n`;
+        block += `[A/B/O] Children PRESENT their secondary gender (alpha/beta/omega) in their early teens. Before presentation a child is indistinguishable from a beta and must NOT show alpha/omega traits.\n`;
     }
 
-    // Компакт: модель и так знает, что такое тоддлер — гайд по стадиям режем
-    if (usedStages.size > 0 && !compact) {
+    if (usedStages.size > 0) {
         block += `[STAGE GUIDE — play each child true to their stage]\n`;
         for (const id of usedStages) {
             if (STAGE_PROMPT_HINTS[id]) block += `${id}: ${STAGE_PROMPT_HINTS[id]}\n`;

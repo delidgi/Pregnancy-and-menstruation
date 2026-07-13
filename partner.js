@@ -103,7 +103,7 @@ export function checkPartnerConception() {
         ensureOmegaFields(pp, false);
         const info = getFertilityModifierOmegaverse(
             { designation: pp.designation, heatCycleDay: pp.heatCycleDay, heatSuppressant: pp.heatSuppressant, cycleDay: day },
-            { designation: p.designation || 'omega', rutCycleDay: p.rutCycleDay, heatSuppressant: !!p.heatSuppressant, sympatheticOnly: !!p.rutSympatheticOnly },
+            { designation: p.designation || 'omega', rutCycleDay: p.rutCycleDay },
             getCfg(s),
         );
         if (info.modifier <= 0) {
@@ -483,19 +483,16 @@ export function advancePartnerTime(s, p, daysPassed) {
         const recentlySet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
         if (!recentlySet) {
             if (isOmegaverse(p) && (pp.designation || 'alpha') !== 'beta') {
-                // Омегаверс: течка (омега) / гон (альфа) вместо 28-дневного цикла.
-                // Режим «гон только симпатический»: свой цикл альфы не тикает.
+                // Омегаверс: течка (омега) / гон (альфа) вместо 28-дневного цикла
                 ensureOmegaFields(pp, false);
-                const skipOwnRut = (pp.designation || 'alpha') === 'alpha' && p.rutSympatheticOnly;
-                const ev = skipOwnRut ? { changed: false } : advanceOmegaCycle(pp, daysPassed, getCfg(s));
+                const ev = advanceOmegaCycle(pp, daysPassed, getCfg(s));
                 if (ev.changed) changed = true;
                 if (s.showNotifications && !pp.heatSuppressant) {
                     if (ev.enteredPreheat) showNotification(`<i class="fa-solid fa-temperature-half"></i> ${name}: пред-течка`, 'info');
                     if (ev.enteredHeat) showNotification(`<i class="fa-solid fa-fire"></i> ${name}: ТЕЧКА началась!`, 'warning');
                     if (ev.heatEnded) showNotification(`<i class="fa-solid fa-wind"></i> ${name}: течка закончилась`, 'info');
                 }
-                // Подавители у альфы гасят гон — молчим, как и у омеги с течкой
-                if (s.showNotifications && !pp.heatSuppressant) {
+                if (s.showNotifications) {
                     if (ev.enteredRut) showNotification(`<i class="fa-solid fa-fire"></i> ${name}: гон начался`, 'warning');
                     if (ev.rutEnded) showNotification(`<i class="fa-solid fa-wind"></i> ${name}: гон закончился`, 'info');
                 }

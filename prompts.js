@@ -26,25 +26,12 @@ function sexToText(arr) {
     return arr.map(s => s === 'M' ? 'boy' : 'girl').join(', ');
 }
 
-// Опции размера промпта (галочки в панели: компакт / уход / CHILD_UPDATE)
-function promptOpts() {
-    const s = getSettings();
-    return { compact: !!s.promptCompact };
-}
-
 // ─── CHILD_UPDATE — опциональный тег: модель сама дополняет профиль ребёнка ───
 // Добавляется везде, где в контексте есть дети (вместе с семейным блоком).
 function childUpdateInstruction(p) {
-    const s = getSettings();
-    if (s.promptChildUpdateTag === false) return '';
     const all = getAllChildren(p);
     if (all.length === 0) return '';
     const names = all.map(({ child }, i) => child.name || `Baby${i + 1}`).join('", "');
-    if (s.promptCompact) {
-        let t = `\n[CHILD_UPDATE — optional] If THIS reply sets a lasting NEW fact about a child ("${names}"), append (only changed fields, sparingly, story language):\n`;
-        t += `<!-- [CHILD_UPDATE:{"name":"...","add_personality":["..."],"add_appearance":["..."],"eyes":"...","hair":"...","special":"...","note":"..."}] -->\n`;
-        return t;
-    }
     let t = `\n[CHILD PROFILE UPDATE — optional tag]\n`;
     t += `When THIS reply establishes a lasting NEW fact about a child ("${names}") — a personality trait shows itself, an appearance detail is described (eye/hair color!), a talent emerges, a memorable quirk — you MAY record it with an HTML comment at the END of your reply:\n`;
     t += `<!-- [CHILD_UPDATE:{"name":"<child's name>","add_personality":["..."],"add_appearance":["..."],"eyes":"...","hair":"...","special":"...","note":"..."}] -->\n`;
@@ -75,43 +62,21 @@ function buildUniverseBlock(p, s) {
             block += `\n`;
         }
     } else if (userDesig === 'alpha') {
-        if (p.heatSuppressant) {
-            block += `{{user}} is an ALPHA (cannot get pregnant) on rut suppressants — rut is chemically muted (no rut symptoms, no rut fertility boost).\n`;
-        } else if (p.rutSympatheticOnly) {
-            const pOmegaInHeat = (p.partner?.designation === 'omega') && !p.partner?.heatSuppressant
-                && getHeatPhase(p.partner?.heatCycleDay || 20, cfg).phase === 'heat';
-            block += `{{user}} is an ALPHA (cannot get pregnant). Alphas here have NO rut cycle of their own — rut flares only SYMPATHETICALLY when their omega is in heat.${pOmegaInHeat ? ' RIGHT NOW the omega is in heat — {{user}} is in sympathetic rut.' : ''}\n`;
-        } else {
-            const rut = getRutPhase(p.rutCycleDay || 1, cfg);
-            block += `{{user}} is an ALPHA (cannot get pregnant). Rut status: ${rut.labelEn}.\n`;
-        }
+        const rut = getRutPhase(p.rutCycleDay || 1, cfg);
+        block += `{{user}} is an ALPHA (cannot get pregnant). Rut status: ${rut.labelEn}.\n`;
     } else {
         block += `{{user}} is a BETA (regular human cycle).\n`;
     }
 
     // Статус партнёра ({{char}}) — важен даже без трекинга его беременности
     if (partnerDesig === 'alpha') {
-        if (p.partner?.heatSuppressant) {
-            block += `{{char}} is an ALPHA on rut suppressants — rut is chemically muted, no rut boost, no sympathetic rut.\n`;
-        } else if (p.rutSympatheticOnly) {
-            const userInHeatS = userDesig === 'omega' && !p.heatSuppressant && getHeatPhase(p.heatCycleDay || 1, cfg).phase === 'heat';
-            block += `{{char}} is an ALPHA. Alphas here have NO rut cycle of their own — rut flares only SYMPATHETICALLY when their omega is in heat.${userInHeatS ? ' RIGHT NOW {{user}} is in heat — {{char}} is in sympathetic rut: heightened instincts, possessiveness, extreme libido.' : ''}\n`;
-        } else {
-            const rutP = getRutPhase(p.partner?.rutCycleDay || 30, cfg);
-            block += `{{char}} is an ALPHA. Rut status: ${rutP.labelEn}.`;
-            const userInHeat = userDesig === 'omega' && !p.heatSuppressant && getHeatPhase(p.heatCycleDay || 1, cfg).phase === 'heat';
-            if (userInHeat && !rutP.inRut) block += ` (An alpha close to an omega in heat typically slips into sympathetic rut.)`;
-            block += `\n`;
-        }
-    } else if (partnerDesig === 'omega') {
-        if (p.partner?.heatSuppressant) {
-            block += `{{char}} is an OMEGA on heat suppressants — heat is chemically muted (no heat symptoms, low fertility).\n`;
-        } else {
-            const phP = getHeatPhase(p.partner?.heatCycleDay || 20, cfg);
-            block += `{{char}} is an OMEGA. Heat cycle day ${phP.day}/${cfg.heatCycleLength} — ${phP.labelEn}.\n`;
-        }
+        const rutP = getRutPhase(p.partner?.rutCycleDay || 30, cfg);
+        block += `{{char}} is an ALPHA. Rut status: ${rutP.labelEn}.`;
+        const userInHeat = userDesig === 'omega' && !p.heatSuppressant && getHeatPhase(p.heatCycleDay || 1, cfg).phase === 'heat';
+        if (userInHeat && !rutP.inRut) block += ` (An alpha close to an omega in heat typically slips into sympathetic rut.)`;
+        block += `\n`;
     } else {
-        block += `{{char}} is a BETA.\n`;
+        block += `{{char}} is ${partnerDesig === 'omega' ? 'an OMEGA' : 'a BETA'}.\n`;
     }
 
     // Блокаторы запаха — только RP-флейвор
@@ -284,7 +249,7 @@ export function getPregnancyPrompt() {
     prompt += `Recommendations: ${recommendations}\n`;
 
     // Старшие дети — семья остаётся в контексте и во время новой беременности
-    prompt += buildFamilyPromptBlock(p, promptOpts());
+    prompt += buildFamilyPromptBlock(p);
     prompt += childUpdateInstruction(p);
 
     // ── PREGNANCY_STATE тег — ИММУТАБЕЛЬНЫЕ данные беременности ──
@@ -376,7 +341,7 @@ function getBabyPrompt(p) {
     const teethingText = p.babyTeething ? 'teething' : 'no';
 
     // Единый семейный блок (активные + выросшие, стадии жизни, дни рождения)
-    let prompt = buildFamilyPromptBlock(p, promptOpts());
+    let prompt = buildFamilyPromptBlock(p);
     if (!prompt) {
         // Legacy fallback: hasBaby без массива babies (очень старые сохранения)
         const sexText = p.babySex?.length > 0 ? sexToText(p.babySex) : 'unknown';
@@ -387,10 +352,8 @@ function getBabyPrompt(p) {
 
     prompt += childUpdateInstruction(p);
 
-    // ── Возрастные нормы ухода (симуляция baby-care) — только активные малыши.
-    // Выключается галочкой «Уход за малышом в промпте»; компакт режет пояснение.
-    const sPrompt = getSettings();
-    if (sPrompt.promptCareNorms !== false && Array.isArray(p.babies) && p.babies.length > 0) {
+    // ── Возрастные нормы ухода (симуляция baby-care) — только активные малыши ──
+    if (Array.isArray(p.babies) && p.babies.length > 0) {
         for (const baby of p.babies) {
             const ageDays = babyAgeDays(baby, p);
             if (ageDays === null) continue;
@@ -410,12 +373,8 @@ function getBabyPrompt(p) {
             const recentMs = (baby.milestones || []).slice(-3).map(m => m.text).join(', ');
             if (recentMs) prompt += `  Recent development: ${recentMs}\n`;
         }
-        if (sPrompt.promptCompact) {
-            prompt += `[INFANT NEEDS] The baby ACTS on the needs above unprompted (cries when hungry/wet/tired, teething fussiness, shows new skills); caring takes {{user}}'s real scene time. Update RP_STATUS fields accordingly.\n`;
-        } else {
-            prompt += `\n[INFANT NEEDS — play them proactively]\n`;
-            prompt += `The baby has REAL needs on a realistic schedule (see care norms and RIGHT NOW status above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update ALL fields in RP_STATUS (mood/sleep/feeding/diaper/care_note) accordingly.\n`;
-        }
+        prompt += `\n[INFANT NEEDS — play them proactively]\n`;
+        prompt += `The baby has REAL needs on a realistic schedule (see care norms and RIGHT NOW status above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update ALL fields in RP_STATUS (mood/sleep/feeding/diaper/care_note) accordingly.\n`;
     }
 
     // Состояние младшего (для совместимости с RP_STATUS)
@@ -579,7 +538,7 @@ function getFamilyContextPrompt() {
     const p = getPregnancyData();
     if (p.isPregnant || p.hasBaby) return '';
     if (getAllChildren(p).length === 0) return '';
-    return buildFamilyPromptBlock(p, promptOpts()) + childUpdateInstruction(p);
+    return buildFamilyPromptBlock(p) + childUpdateInstruction(p);
 }
 
 export function updatePromptInjection() {

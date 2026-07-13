@@ -420,11 +420,9 @@ export function checkConception() {
         // Омегаверс: фертильность от фазы течки (омега) / цикла (бета);
         // альфа не беременеет. Гон партнёра-альфы даёт бонус.
         ensureOmegaFields(p, true);
-        // FIX: подавители гона партнёра и режим «только симпатический гон» должны
-        // доходить до расчёта — иначе буст шёл даже на супрессантах
         const sire = p.partner
-            ? { designation: p.partner.designation || 'alpha', rutCycleDay: p.partner.rutCycleDay, heatSuppressant: !!p.partner.heatSuppressant, sympatheticOnly: !!p.rutSympatheticOnly }
-            : { designation: 'alpha', rutCycleDay: 30, sympatheticOnly: !!p.rutSympatheticOnly };
+            ? { designation: p.partner.designation || 'alpha', rutCycleDay: p.partner.rutCycleDay }
+            : { designation: 'alpha', rutCycleDay: 30 };
         const info = getFertilityModifierOmegaverse(
             { designation: p.designation, heatCycleDay: p.heatCycleDay, heatSuppressant: p.heatSuppressant, cycleDay: currentCycleDay },
             sire,

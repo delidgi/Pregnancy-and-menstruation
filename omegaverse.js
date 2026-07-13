@@ -25,9 +25,7 @@ export const OMEGA_DEFAULTS = {
 };
 
 // Пер-чат поля юзера, которые должен переживать сброс/bootstrap (см. scanFullHistory)
-// rutSympatheticOnly — лор-режим чата: у альф НЕТ собственного цикла гона,
-// гон вспыхивает только симпатически, когда их омега в течке.
-export const OMEGA_USER_FIELDS = ['universe', 'designation', 'heatCycleDay', 'rutCycleDay', 'heatSuppressant', 'scentBlockers', 'rutSympatheticOnly'];
+export const OMEGA_USER_FIELDS = ['universe', 'designation', 'heatCycleDay', 'rutCycleDay', 'heatSuppressant', 'scentBlockers'];
 
 export const DESIGNATION_LABELS = {
     alpha: { ru: 'Альфа', en: 'ALPHA' },
@@ -148,13 +146,11 @@ export function getFertilityModifierOmegaverse(carrier, sire, cfg) {
         phaseLabelEn = ph.labelEn;
     }
 
-    // Гон отца-альфы: собственный по циклу ИЛИ симпатический (носитель в течке).
-    // Подавители гона (heatSuppressant у альфы) гасят и то и другое — буста нет.
-    // sympatheticOnly (лор-режим): своего цикла у альфы нет, только реакция на течку.
+    // Гон отца-альфы: собственный по циклу ИЛИ симпатический (носитель в течке)
     let sireBoost = 1;
-    if (sire && (sire.designation || '') === 'alpha' && !sire.heatSuppressant) {
-        const ownRut = sire.sympatheticOnly ? false : getRutPhase(sire.rutCycleDay, cfg).inRut;
-        if (ownRut || inHeat) sireBoost = FERT_MODS.sireRutBoost;
+    if (sire && (sire.designation || '') === 'alpha') {
+        const rut = getRutPhase(sire.rutCycleDay, cfg);
+        if (rut.inRut || inHeat) sireBoost = FERT_MODS.sireRutBoost;
     }
 
     return { modifier, phaseLabelRu, phaseLabelEn, inHeat, sireBoost };

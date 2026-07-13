@@ -267,26 +267,6 @@ jQuery(async () => {
             eventSource.on(event_types.MESSAGE_SWIPED, () => {
                 dlog('[Reproductive] Swipe detected — marking regeneration');
                 markRegeneration();
-                // Листание к УЖЕ существующему свайпу не запускает генерацию — скана
-                // не будет, состояние того свайпа само не восстановится, а флаг регена
-                // «протухнет» и его съест скан следующего юзерского сообщения.
-                // Подталкиваем скан вручную, но ТОЛЬКО если у этого свайпа уже есть
-                // сохранённое состояние (новый свайп обработает обычный поток генерации).
-                setTimeout(() => {
-                    try {
-                        const ctx = SillyTavern.getContext();
-                        const chat = ctx?.chat;
-                        const last = chat && chat.length ? chat[chat.length - 1] : null;
-                        if (!last || last.is_user || !last.mes) return;
-                        const swipeId = typeof last.swipe_id === 'number' ? last.swipe_id : 0;
-                        const p = getPregnancyData();
-                        const sw = p._swipeStates;
-                        if (sw && sw.pos === chat.length && sw.states && sw.states[swipeId]) {
-                            dlog(`[Reproductive] Swipe nav to known swipe #${swipeId} — rescanning to restore its state`);
-                            onMessageReceived(chat.length - 1, 'swipe-nav');
-                        }
-                    } catch (e) { /* ignore */ }
-                }, 250);
             });
         }
         if (event_types.GENERATION_STARTED) {
