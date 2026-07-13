@@ -23,198 +23,246 @@ function escapeHtml(s) {
 }
 
 function injectStyles() {
-    if ($('#repro-family-style').length > 0) return;
-    $('head').append(`<style id="repro-family-style">
-/* ── Общий оверлей семейных диалогов ── */
+    // v2: перезаливаем стили при обновлении версии дизайна
+    if ($('#repro-family-style').attr('data-v') === '2') return;
+    $('#repro-family-style').remove();
+    $('head').append(`<style id="repro-family-style" data-v="2">
+/* ═══ Семейные окна v2: плоский тёмный стиль, шапка + скролл-тело, мобильная вёрстка ═══ */
 .rf-overlay {
     position: fixed; inset: 0; z-index: 1000000;
-    background: rgba(0, 0, 0, 0.55);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: rgba(8, 9, 14, 0.62);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
     display: flex; align-items: center; justify-content: center;
-    animation: rfFadeIn .3s ease-out;
+    padding: 16px; box-sizing: border-box;
+    animation: rfFadeIn .22s ease-out;
 }
 @keyframes rfFadeIn { from { opacity: 0; } to { opacity: 1; } }
 .rf-card {
     position: relative;
-    /* Плотный тёмный фон: прозрачное «стекло» было нечитаемым поверх чата */
-    background: linear-gradient(160deg, #262b3d 0%, #2e2745 100%);
-    border: 1px solid rgba(255, 255, 255, 0.22);
-    border-radius: 24px;
-    padding: 26px 30px;
-    min-width: 340px; max-width: 640px;
-    max-height: 82vh; overflow-y: auto;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.55);
-    color: rgba(255, 255, 255, 0.97);
-    animation: rfPop .45s cubic-bezier(.34,1.56,.64,1);
+    background: #1d2130;
+    border: 1px solid rgba(255, 255, 255, 0.09);
+    border-radius: 18px;
+    width: min(620px, 100%);
+    max-height: min(86vh, 900px);
+    display: flex; flex-direction: column;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.6);
+    color: #e8eaf2;
+    overflow: hidden;
+    animation: rfPop .28s cubic-bezier(.22, 1.1, .36, 1);
 }
-@keyframes rfPop { from { transform: scale(.7); opacity: 0; } to { transform: scale(1); opacity: 1; } }
-.rf-title {
-    font-size: 21px; font-weight: 800; text-align: center;
-    letter-spacing: .3px;
-    margin-bottom: 4px;
-    background: linear-gradient(135deg, #82c8ff 0%, #b478ff 100%);
-    -webkit-background-clip: text; background-clip: text;
-    -webkit-text-fill-color: transparent;
+@keyframes rfPop { from { transform: translateY(14px) scale(.97); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* ── Шапка: иконка-бейдж, заголовок слева, крестик ── */
+.rf-head {
+    display: flex; align-items: center; gap: 12px;
+    padding: 15px 18px 13px;
+    border-bottom: 1px solid rgba(255,255,255,.07);
+    background: linear-gradient(180deg, rgba(130,160,255,.07), transparent);
+    flex: 0 0 auto;
 }
-.rf-subtitle { font-size: 12px; opacity: .7; text-align: center; margin-bottom: 18px; line-height: 1.4; }
-.rf-btn {
-    display: block; margin: 14px auto 0;
-    background: linear-gradient(135deg, rgba(130, 200, 255, 0.28), rgba(180, 120, 255, 0.28));
-    border: 1px solid rgba(255, 255, 255, 0.28);
-    color: rgba(255, 255, 255, 0.97);
-    padding: 9px 26px; border-radius: 50px;
-    font-size: 13px; font-weight: 600; cursor: pointer;
-    transition: all .2s;
+.rf-head-ic {
+    width: 38px; height: 38px; border-radius: 12px; flex: 0 0 38px;
+    display: flex; align-items: center; justify-content: center;
+    background: linear-gradient(135deg, rgba(100,160,255,.18), rgba(170,110,255,.22));
+    border: 1px solid rgba(160,160,255,.25);
+    color: #b9c8ff; font-size: 15px;
 }
-.rf-btn:hover {
-    background: linear-gradient(135deg, rgba(130, 200, 255, 0.5), rgba(180, 120, 255, 0.5));
-    transform: translateY(-1px);
-    box-shadow: 0 6px 20px rgba(120, 160, 255, 0.3);
-}
+.rf-head-tx { flex: 1; min-width: 0; }
+.rf-title { font-size: 15.5px; font-weight: 700; color: #fff; letter-spacing: .2px; }
+.rf-subtitle { font-size: 11.5px; opacity: .6; margin-top: 2px; line-height: 1.35; }
 .rf-close {
-    position: absolute; top: 12px; right: 16px;
-    background: none; border: none; color: rgba(255,255,255,.6);
-    font-size: 20px; cursor: pointer; line-height: 1;
+    flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
+    background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.1);
+    color: rgba(255,255,255,.65); font-size: 13px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    transition: all .15s; padding: 0;
 }
-.rf-close:hover { color: #fff; }
+.rf-close:hover { background: rgba(255,90,110,.14); border-color: rgba(255,90,110,.4); color: #ff98a8; }
+
+/* ── Скроллящееся тело ── */
+.rf-body { padding: 16px 18px 18px; overflow-y: auto; flex: 1 1 auto; overscroll-behavior: contain; }
+.rf-body::-webkit-scrollbar { width: 8px; }
+.rf-body::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
+
+/* ── Кнопки ── */
+.rf-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    background: linear-gradient(135deg, #5a8de8, #8a5ae8);
+    border: none; color: #fff;
+    padding: 9px 20px; border-radius: 11px;
+    font-size: 12.5px; font-weight: 600; cursor: pointer;
+    transition: filter .15s, transform .15s;
+}
+.rf-btn:hover { filter: brightness(1.18); transform: translateY(-1px); }
+.rf-btn i { font-size: 11px; }
+.rf-btn.ghost {
+    background: rgba(255,255,255,.06);
+    border: 1px solid rgba(255,255,255,.14);
+    color: rgba(255,255,255,.85);
+}
+.rf-btn.ghost:hover { background: rgba(255,255,255,.11); }
+.rf-actions { display: flex; gap: 10px; justify-content: center; margin-top: 16px; flex-wrap: wrap; }
 
 /* ── Диалог взросления ── */
 .rf-stageup {
-    border: 1px solid rgba(255,255,255,.15); border-radius: 16px;
-    padding: 14px 16px; margin-bottom: 12px;
-    background: rgba(255,255,255,.05);
+    border: 1px solid rgba(255,255,255,.09); border-radius: 13px;
+    padding: 13px 15px; margin-bottom: 10px;
+    background: #252a3c;
 }
-.rf-stageup-head { font-size: 14px; font-weight: 700; margin-bottom: 10px; }
-.rf-stageup-head i { margin-right: 6px; opacity: .8; }
+.rf-stageup-head { font-size: 13.5px; font-weight: 700; margin-bottom: 9px; }
+.rf-stageup-head i { margin: 0 5px; opacity: .8; }
 .rf-stageup-head .m { color: #4dabf7; }
 .rf-stageup-head .f { color: #ff9ff3; }
-.rf-stageup-lbl { font-size: 10px; opacity: .55; margin-bottom: 6px; }
+.rf-stageup-lbl { font-size: 10.5px; opacity: .55; margin-bottom: 6px; }
 .rf-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
 .rf-chip {
-    padding: 4px 12px; border-radius: 50px; font-size: 11px; cursor: pointer;
-    border: 1px solid rgba(255,255,255,.2); background: rgba(255,255,255,.06);
+    padding: 5px 12px; border-radius: 9px; font-size: 11.5px; cursor: pointer;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.05);
     transition: all .15s; user-select: none;
 }
-.rf-chip:hover { border-color: rgba(130,200,255,.6); }
+.rf-chip:hover { border-color: rgba(130,160,255,.55); }
 .rf-chip.selected {
-    border-color: #82c8ff; color: #82c8ff;
-    background: rgba(130,200,255,.15); font-weight: 600;
+    border-color: #7ea0ff; color: #aabfff;
+    background: rgba(110,140,255,.16); font-weight: 600;
 }
 .rf-chip.rf-reroll { opacity: .6; }
 .rf-trait-input {
     width: 100%; box-sizing: border-box;
-    background: rgba(0,0,0,.25); border: 1px solid rgba(255,255,255,.15);
-    border-radius: 10px; color: #fff; padding: 6px 10px; font-size: 12px;
+    background: #171a26; border: 1px solid rgba(255,255,255,.11);
+    border-radius: 9px; color: #fff; padding: 7px 10px; font-size: 12px;
 }
-.rf-trait-input:focus { outline: none; border-color: rgba(130,200,255,.6); }
+.rf-trait-input:focus { outline: none; border-color: rgba(130,160,255,.55); }
 
 /* ── Семейное древо ── */
-.rf-tree-card { min-width: 420px; }
-.rf-union { margin-bottom: 20px; }
-.rf-parents { display: flex; align-items: center; justify-content: center; gap: 10px; }
+.rf-union { margin-bottom: 18px; }
+.rf-union:last-of-type { margin-bottom: 6px; }
+.rf-parents { display: flex; align-items: center; justify-content: center; gap: 10px; flex-wrap: wrap; }
 .rf-parent {
     display: flex; align-items: center; gap: 7px;
-    padding: 7px 16px; border-radius: 50px; font-size: 12px; font-weight: 600;
-    border: 1.5px solid rgba(255,215,64,.4); color: rgba(255,235,180,.95);
-    background: rgba(255,215,64,.07);
+    padding: 6px 14px; border-radius: 10px; font-size: 12px; font-weight: 600;
+    border: 1px solid rgba(255,215,120,.25); color: #ffe9b8;
+    background: rgba(255,215,120,.07);
 }
-.rf-parent i { font-size: 11px; opacity: .8; }
-.rf-heart { color: #ff6b9d; font-size: 13px; }
-.rf-tree-connector {
-    width: 2px; height: 14px; margin: 0 auto;
-    background: rgba(255,255,255,.2);
+.rf-parent i { font-size: 10px; opacity: .75; }
+.rf-par-desig {
+    margin-left: 6px; font-size: 11px; font-weight: 800;
+    font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", sans-serif;
 }
+.rf-par-desig.a { color: #ff8a8a; }
+.rf-par-desig.b { color: #9fb6c9; }
+.rf-par-desig.o { color: #c9a0ff; }
+.rf-heart { color: #ff6b9d; font-size: 12px; }
+.rf-tree-connector { width: 2px; height: 14px; margin: 0 auto; background: rgba(255,255,255,.14); }
 .rf-children { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
 .rf-child {
-    flex: 0 1 185px; min-width: 160px;
-    border-radius: 14px; padding: 11px 13px;
-    border: 1.5px solid rgba(255,255,255,.22);
-    background: rgba(255,255,255,.09);
+    position: relative;
+    flex: 1 1 180px; min-width: 150px; max-width: 250px;
+    border-radius: 13px; padding: 11px 13px 12px;
+    background: #252a3c;
+    border: 1px solid rgba(255,255,255,.08);
+    border-top: 2px solid rgba(255,255,255,.18);
+    box-sizing: border-box;
 }
-.rf-child[data-origin] { cursor: pointer; transition: all .15s; }
-.rf-child[data-origin]:hover {
-    background: rgba(130,200,255,.14);
-    border-color: rgba(130,200,255,.7);
+.rf-child.m { border-top-color: #4dabf7; }
+.rf-child.f { border-top-color: #ff9ff3; }
+.rf-child.expected { border-style: dashed; opacity: .85; }
+.rf-child[data-origin] { cursor: pointer; transition: transform .15s, box-shadow .15s, background .15s; }
+.rf-child[data-origin]:hover, .rf-child[data-origin]:active {
+    background: #2b3148;
     transform: translateY(-2px);
+    box-shadow: 0 8px 22px rgba(0,0,0,.35);
 }
 .rf-child[data-origin]:hover .rf-child-edit { opacity: .9; }
 .rf-child-edit {
-    position: absolute; top: 7px; right: 9px;
-    font-size: 10px; opacity: .35; transition: opacity .15s;
+    position: absolute; top: 8px; right: 10px;
+    font-size: 10px; opacity: .3; transition: opacity .15s;
 }
-.rf-child { position: relative; }
-.rf-child.m { border-color: rgba(77,171,247,.55); }
-.rf-child.f { border-color: rgba(255,159,243,.55); }
-.rf-child.expected { border-style: dashed; opacity: .85; }
-.rf-child-head { font-size: 14px; font-weight: 700; margin-bottom: 3px; }
+.rf-child-head { font-size: 13.5px; font-weight: 700; margin-bottom: 3px; }
 .rf-child-head .sx { margin-right: 4px; }
 .rf-child.m .sx { color: #4dabf7; }
 .rf-child.f .sx { color: #ff9ff3; }
-.rf-child-stage { font-size: 11px; opacity: .8; margin-bottom: 6px; }
+.rf-child-stage { font-size: 11px; opacity: .75; margin-bottom: 6px; }
 .rf-child-stage i { margin-right: 4px; opacity: .7; }
-.rf-child-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 4px; }
+.rf-child-chips { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 5px; }
 .rf-child-chip {
-    font-size: 10px; padding: 2px 9px; border-radius: 50px;
-    border: 1px solid rgba(255,255,255,.22); opacity: .9;
+    font-size: 10px; padding: 2px 8px; border-radius: 7px;
+    border: 1px solid rgba(255,255,255,.14); background: rgba(255,255,255,.04); opacity: .95;
 }
-.rf-twin-chip { border-color: rgba(255,215,64,.4); color: #ffd740; }
-.rf-desig-chip { border-color: rgba(180,120,255,.5); color: #c9a0ff; font-weight: 600; }
+.rf-twin-chip { border-color: rgba(255,215,64,.35); color: #ffd740; }
+.rf-twin-chip i { font-size: 8px; margin-right: 3px; }
+.rf-desig-chip { border-color: rgba(180,120,255,.45); color: #c9a0ff; font-weight: 600; }
 /* Знаки зодиака — не во всех UI-шрифтах есть ♈..♓: подставляем символьный шрифт */
 .rf-zsym { font-family: "Segoe UI Symbol", "Noto Sans Symbols 2", "Apple Color Emoji", sans-serif; }
-.rf-title i { margin-right: 8px; }
-.rf-btn i { margin-right: 6px; }
-.rf-child-look { font-size: 10px; opacity: .65; line-height: 1.4; }
-.rf-child-event { margin-top: 5px; font-size: 10px; color: #82c8ff; }
+.rf-child-look { font-size: 10.5px; opacity: .6; line-height: 1.4; }
+.rf-child-event { margin-top: 5px; font-size: 10.5px; color: #8fb8ff; }
 .rf-child-event i { margin-right: 3px; }
-.rf-child-special {
-    margin-top: 5px; font-size: 10px; color: #ffd740;
-}
+.rf-child-special { margin-top: 5px; font-size: 10.5px; color: #ffd740; }
 .rf-child-special i { margin-right: 3px; }
 .rf-grown-badge {
     display: inline-block; margin-top: 5px; font-size: 9px; padding: 1px 8px;
-    border-radius: 50px; border: 1px solid rgba(130,230,120,.4); color: rgba(130,230,120,.95);
+    border-radius: 7px; border: 1px solid rgba(130,230,120,.35); color: rgba(130,230,120,.95);
 }
-.rf-tree-stats { text-align: center; font-size: 11px; opacity: .55; margin-top: 6px; }
-.rf-tree-hint { text-align: center; font-size: 10px; opacity: .45; margin-top: 3px; }
-.rf-actions { display: flex; gap: 10px; justify-content: center; margin-top: 14px; }
-.rf-actions .rf-btn { display: inline-block; margin: 0; }
+.rf-tree-stats { text-align: center; font-size: 11px; opacity: .5; margin-top: 10px; }
+.rf-tree-hint { text-align: center; font-size: 10px; opacity: .4; margin-top: 3px; }
 
 /* ── Хроника ── */
-.rf-chron-list { max-height: 56vh; overflow-y: auto; padding-right: 6px; }
 .rf-chron-year {
-    font-size: 12px; font-weight: 700; opacity: .6; letter-spacing: 2px;
-    text-align: center; margin: 12px 0 6px;
+    font-size: 11px; font-weight: 700; opacity: .55; letter-spacing: 2px;
+    text-align: center; margin: 12px 0 5px;
 }
 .rf-chron-item {
     display: flex; gap: 10px; align-items: flex-start;
-    padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,.08);
+    padding: 7px 4px; border-bottom: 1px solid rgba(255,255,255,.06);
 }
 .rf-chron-item:last-child { border-bottom: none; }
-.rf-chron-item i { width: 18px; text-align: center; margin-top: 2px; color: #82c8ff; opacity: .9; }
-.rf-chron-date { flex: 0 0 68px; font-size: 11px; opacity: .6; padding-top: 1px; }
-.rf-chron-text { font-size: 13px; line-height: 1.45; }
+.rf-chron-item i { width: 18px; text-align: center; margin-top: 2px; color: #8fb8ff; opacity: .9; flex: 0 0 18px; }
+.rf-chron-date { flex: 0 0 64px; font-size: 11px; opacity: .55; padding-top: 1px; }
+.rf-chron-text { font-size: 12.5px; line-height: 1.45; min-width: 0; }
 
 /* ── Профиль ребёнка ── */
 .rf-prof-grid {
     display: grid; grid-template-columns: 92px 1fr;
-    gap: 8px 10px; align-items: center; margin-bottom: 4px;
+    gap: 8px 10px; align-items: center;
 }
-.rf-prof-grid label { font-size: 11px; opacity: .7; text-align: right; }
+.rf-prof-grid label { font-size: 11px; opacity: .65; text-align: right; }
 .rf-prof-input, .rf-prof-select, .rf-prof-textarea {
     width: 100%; box-sizing: border-box;
-    background: rgba(0,0,0,.3); border: 1px solid rgba(255,255,255,.18);
-    border-radius: 10px; color: #fff; padding: 6px 10px; font-size: 12px;
+    background: #171a26; border: 1px solid rgba(255,255,255,.11);
+    border-radius: 9px; color: #fff; padding: 7px 10px; font-size: 12px;
     font-family: inherit;
 }
 .rf-prof-textarea { resize: vertical; min-height: 64px; line-height: 1.4; }
 .rf-prof-input:focus, .rf-prof-select:focus, .rf-prof-textarea:focus {
-    outline: none; border-color: rgba(130,200,255,.6);
+    outline: none; border-color: rgba(130,160,255,.55);
 }
-.rf-prof-select option { background: #262b3d; }
-.rf-prof-meta { text-align: center; font-size: 12px; opacity: .8; margin-bottom: 12px; }
-.rf-prof-note { font-size: 10px; opacity: .45; grid-column: 2; margin-top: -4px; }
+.rf-prof-select option { background: #1d2130; }
+.rf-prof-note { font-size: 10px; opacity: .45; grid-column: 2; margin-top: -3px; }
+
+/* ── Телефон ── */
+@media (max-width: 540px) {
+    .rf-overlay { padding: 8px; align-items: flex-start; padding-top: 20px; }
+    .rf-card { width: 100%; max-height: calc(100dvh - 36px); border-radius: 15px; }
+    .rf-head { padding: 12px 13px 11px; gap: 10px; }
+    .rf-body { padding: 12px 13px 14px; }
+    .rf-child { flex: 1 1 100%; max-width: none; }
+    .rf-prof-grid { grid-template-columns: 1fr; gap: 3px 0; }
+    .rf-prof-grid label { text-align: left; margin-top: 7px; }
+    .rf-prof-note { grid-column: 1; }
+    .rf-actions .rf-btn { flex: 1 1 auto; }
+    .rf-chron-date { flex: 0 0 52px; font-size: 10px; }
+}
 </style>`);
+}
+
+// ── Клики внутри модалки не должны «протекать» в документ ──
+// SillyTavern закрывает свои панели/дровер настроек по клику вне их (особенно
+// на телефоне) — из-за всплытия любой тап в нашем окне выглядел «кликом мимо»,
+// и после закрытия модалки интерфейс таверны оказывался свёрнут.
+function guardOverlay(overlay) {
+    overlay.on('mousedown mouseup click touchstart touchend pointerdown pointerup', (e) => {
+        e.stopPropagation();
+    });
 }
 
 // ═══ Диалог взросления: «X теперь тоддлер!» + выбор новой черты ═══
@@ -251,14 +299,22 @@ export function showStageUpDialog(events, onConfirm) {
     const overlay = $(`
     <div id="repro-stageup-overlay" class="rf-overlay">
         <div class="rf-card">
-            <div class="rf-title"><i class="fa-solid fa-seedling"></i>Время летит!</div>
-            <div class="rf-subtitle">${events.length === 1 ? 'Ребёнок переходит на новую стадию жизни' : 'Дети переходят на новые стадии жизни'}</div>
-            ${cardsHtml}
-            <button class="rf-btn rf-confirm"><i class="fa-solid fa-heart"></i> Принять</button>
+            <div class="rf-head">
+                <div class="rf-head-ic"><i class="fa-solid fa-seedling"></i></div>
+                <div class="rf-head-tx">
+                    <div class="rf-title">Время летит!</div>
+                    <div class="rf-subtitle">${events.length === 1 ? 'Ребёнок переходит на новую стадию жизни' : 'Дети переходят на новые стадии жизни'}</div>
+                </div>
+            </div>
+            <div class="rf-body">
+                ${cardsHtml}
+                <div class="rf-actions"><button class="rf-btn rf-confirm"><i class="fa-solid fa-heart"></i> Принять</button></div>
+            </div>
         </div>
     </div>`);
 
     $('body').append(overlay);
+    guardOverlay(overlay);
 
     // Выбор чипа (один на событие)
     overlay.on('click', '.rf-chip:not(.rf-reroll)', function() {
@@ -320,27 +376,48 @@ export function showFamilyTree() {
     } catch (e) { /* ignore */ }
 
     const all = getAllChildren(p);
-
-    // Группируем детей по «второму родителю»: для юзерских детей это отец,
-    // для рождённых партнёром — мать (отец там обычно сам игрок).
-    const otherParentOf = (child) => (child.motherName || child.fatherName || '').trim();
-    const groups = new Map();
-    for (const entry of all) {
-        const key = otherParentOf(entry.child);
-        if (!groups.has(key)) groups.set(key, []);
-        groups.get(key).push(entry);
-    }
-    // Ожидаемые малыши: юзерская беременность → группа отца, партнёрская → группа партнёра
-    if (p.isPregnant) {
-        const key = (p.fatherName || '').trim();
-        if (!groups.has(key)) groups.set(key, []);
-    }
     const pp = p.partner;
-    const partnerPregnant = !!(pp && pp.enabled && pp.isPregnant);
-    const partnerName = partnerPregnant ? (pp.name || charName || 'Партнёр') : '';
-    if (partnerPregnant && !groups.has(partnerName)) {
-        groups.set(partnerName, []);
+    const partnerName = (pp?.name || charName || '').trim();
+    const isOmegaUni = p.universe === 'omegaverse';
+
+    // Роль (A/B/O) родителя по имени: совпало с юзером → его роль, с партнёром → его,
+    // иначе — сохранённая при рождении роль из карточки ребёнка.
+    const nameMatch = (a, b) => {
+        a = String(a || '').trim().toLowerCase();
+        b = String(b || '').trim().toLowerCase();
+        return a && b && (a === b || a.startsWith(b) || b.startsWith(a));
+    };
+    const desigOf = (name, storedDesig) => {
+        if (!isOmegaUni || !name) return storedDesig || null;
+        if (nameMatch(name, playerName)) return p.designation || storedDesig || null;
+        if (nameMatch(name, partnerName)) return pp?.designation || storedDesig || null;
+        return storedDesig || null;
+    };
+
+    // Группируем детей по ПАРЕ родителей из их карточек (отец|мать) — раньше
+    // древо всегда рисовало «юзер ♥ второй родитель» и теряло настоящую пару,
+    // если в профиле вписаны оба (например папа-омега и мама-альфа).
+    const groups = new Map(); // key → { father, mother, entries }
+    const groupFor = (father, mother) => {
+        father = String(father || '').trim();
+        mother = String(mother || '').trim();
+        // Ни одного родителя не вписано — считаем, что растит юзер
+        if (!father && !mother) mother = playerName;
+        const key = `${father.toLowerCase()}|${mother.toLowerCase()}`;
+        if (!groups.has(key)) groups.set(key, { father, mother, entries: [] });
+        return groups.get(key);
+    };
+    for (const entry of all) {
+        const c = entry.child;
+        // Старые записи: только отец вписан → мать по умолчанию юзер
+        const mother = (c.motherName || '').trim() || playerName;
+        groupFor(c.fatherName, mother).entries.push(entry);
     }
+    // Ожидаемые малыши: юзерская беременность → пара (отец, юзер);
+    // партнёрская → пара (отец из pp, партнёр-носитель)
+    if (p.isPregnant) groupFor(p.fatherName, playerName);
+    const partnerPregnant = !!(pp && pp.enabled && pp.isPregnant);
+    if (partnerPregnant) groupFor(pp.fatherName || playerName, partnerName || 'Партнёр');
 
     // Близнецы: набор ключей origin:index всех детей из близнецовых групп
     const twinKeys = new Set(findTwinGroups(p).flat().map(e => `${e.origin}:${e.index}`));
@@ -389,8 +466,16 @@ export function showFamilyTree() {
         </div>`;
     };
 
+    // Чип родителя: имя + значок роли (α/β/Ω) в омегаверсе
+    const parentChip = (name, storedDesig) => {
+        const d = desigOf(name, storedDesig);
+        const mark = { alpha: '<span class="rf-par-desig a">α</span>', beta: '<span class="rf-par-desig b">β</span>', omega: '<span class="rf-par-desig o">Ω</span>' }[d] || '';
+        return `<span class="rf-parent"><i class="fa-solid fa-user"></i>${escapeHtml(name)}${mark}</span>`;
+    };
+
     let unionsHtml = '';
-    for (const [father, entries] of groups.entries()) {
+    for (const g of groups.values()) {
+        const { father, mother, entries } = g;
         // Сортируем детей по дате рождения (старшие слева)
         entries.sort((a, b) => {
             const am = a.child.birthRpDate ? new Date(a.child.birthRpDate).getTime() : 0;
@@ -398,17 +483,21 @@ export function showFamilyTree() {
             return am - bm;
         });
         let childrenHtml = entries.map(childCard).join('');
-        if (p.isPregnant && (p.fatherName || '').trim() === father) {
+        if (p.isPregnant && nameMatch(mother, playerName) && String(p.fatherName || '').trim().toLowerCase() === father.toLowerCase()) {
             childrenHtml += expectedCard(p, '');
         }
-        if (partnerPregnant && partnerName === father) {
+        if (partnerPregnant && nameMatch(mother, partnerName)) {
             childrenHtml += expectedCard(pp, partnerName);
         }
         if (!childrenHtml) continue;
+        // Роли из карточек детей группы (если имя не совпало с юзером/партнёром)
+        const anyChild = entries[0]?.child || {};
+        const chips = [];
+        if (father) chips.push(parentChip(father, anyChild.fatherDesignation));
+        if (mother) chips.push(parentChip(mother, anyChild.motherDesignation));
         unionsHtml += `<div class="rf-union">
             <div class="rf-parents">
-                <span class="rf-parent"><i class="fa-solid fa-user"></i>${escapeHtml(playerName)}</span>
-                ${father ? `<span class="rf-heart">♥</span><span class="rf-parent"><i class="fa-solid fa-user"></i>${escapeHtml(father)}</span>` : ''}
+                ${chips.join('<span class="rf-heart">♥</span>')}
             </div>
             <div class="rf-tree-connector"></div>
             <div class="rf-children">${childrenHtml}</div>
@@ -428,41 +517,49 @@ export function showFamilyTree() {
 
     const overlay = $(`
     <div id="repro-tree-overlay" class="rf-overlay">
-        <div class="rf-card rf-tree-card">
-            <button class="rf-close">×</button>
-            <div class="rf-title"><i class="fa-solid fa-tree"></i>Семейное древо</div>
-            <div class="rf-subtitle">Династия этого чата</div>
-            ${unionsHtml}
-            ${statsBits.length ? `<div class="rf-tree-stats">${statsBits.join(' · ')}</div>` : ''}
-            ${all.length ? `<div class="rf-tree-hint"><i class="fa-solid fa-pen"></i> нажми на карточку ребёнка — профиль: внешность, черты, лор</div>` : ''}
-            <div class="rf-actions">
-                <button class="rf-btn rf-open-chronicle"><i class="fa-solid fa-book-open"></i>Хроника</button>
+        <div class="rf-card">
+            <div class="rf-head">
+                <div class="rf-head-ic"><i class="fa-solid fa-tree"></i></div>
+                <div class="rf-head-tx">
+                    <div class="rf-title">Семейное древо</div>
+                    <div class="rf-subtitle">Династия этого чата${statsBits.length ? ` · ${statsBits.join(' · ')}` : ''}</div>
+                </div>
+                <button class="rf-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rf-body">
+                ${unionsHtml}
+                ${all.length ? `<div class="rf-tree-hint"><i class="fa-solid fa-pen"></i> нажми на карточку ребёнка — профиль: внешность, черты, лор</div>` : ''}
+                <div class="rf-actions">
+                    <button class="rf-btn rf-open-chronicle"><i class="fa-solid fa-book-open"></i>Хроника</button>
+                </div>
             </div>
         </div>
     </div>`);
 
     $('body').append(overlay);
+    guardOverlay(overlay);
 
     const close = () => {
+        $(document).off('keydown.rfTree');
         overlay.css({ opacity: 0, transition: 'opacity .25s' });
         setTimeout(() => overlay.remove(), 260);
     };
     overlay.find('.rf-close').on('click', close);
     overlay.on('click', (e) => { if (e.target === overlay[0]) close(); });
-    $(document).one('keydown.rfTree', (e) => { if (e.key === 'Escape') close(); });
+    $(document).on('keydown.rfTree', (e) => { if (e.key === 'Escape') close(); });
 
     // Клик по карточке ребёнка → профиль (у «ожидается…» нет data-origin)
     overlay.on('click', '.rf-child[data-origin]', function() {
         const origin = $(this).attr('data-origin');
         const index = parseInt($(this).attr('data-index'));
         if (isNaN(index)) return;
-        overlay.remove();
         $(document).off('keydown.rfTree');
+        overlay.remove();
         showChildProfile(origin, index);
     });
     overlay.find('.rf-open-chronicle').on('click', () => {
-        overlay.remove();
         $(document).off('keydown.rfTree');
+        overlay.remove();
         showFamilyChronicle();
     });
 }
@@ -507,32 +604,41 @@ export function showFamilyChronicle() {
 
     const overlay = $(`
     <div id="repro-chron-overlay" class="rf-overlay">
-        <div class="rf-card rf-tree-card">
-            <button class="rf-close">×</button>
-            <div class="rf-title"><i class="fa-solid fa-book-open"></i>Семейная хроника</div>
-            <div class="rf-subtitle">Вся история семьи по RP-датам${entries.length ? ` · записей: ${entries.length}` : ''}</div>
-            <div class="rf-chron-list">${listHtml}</div>
-            <div class="rf-actions">
-                <button class="rf-btn rf-open-tree"><i class="fa-solid fa-tree"></i>Древо</button>
+        <div class="rf-card">
+            <div class="rf-head">
+                <div class="rf-head-ic"><i class="fa-solid fa-book-open"></i></div>
+                <div class="rf-head-tx">
+                    <div class="rf-title">Семейная хроника</div>
+                    <div class="rf-subtitle">Вся история семьи по RP-датам${entries.length ? ` · записей: ${entries.length}` : ''}</div>
+                </div>
+                <button class="rf-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rf-body">
+                <div class="rf-chron-list">${listHtml}</div>
+                <div class="rf-actions">
+                    <button class="rf-btn ghost rf-open-tree"><i class="fa-solid fa-tree"></i>Древо</button>
+                </div>
             </div>
         </div>
     </div>`);
 
     $('body').append(overlay);
-    // Свежее — внизу: мотаем ленту в конец
-    const list = overlay.find('.rf-chron-list')[0];
-    if (list) list.scrollTop = list.scrollHeight;
+    guardOverlay(overlay);
+    // Свежее — внизу: мотаем тело окна в конец
+    const body = overlay.find('.rf-body')[0];
+    if (body) body.scrollTop = body.scrollHeight;
 
     const close = () => {
+        $(document).off('keydown.rfChron');
         overlay.css({ opacity: 0, transition: 'opacity .25s' });
         setTimeout(() => overlay.remove(), 260);
     };
     overlay.find('.rf-close').on('click', close);
     overlay.on('click', (e) => { if (e.target === overlay[0]) close(); });
-    $(document).one('keydown.rfChron', (e) => { if (e.key === 'Escape') close(); });
+    $(document).on('keydown.rfChron', (e) => { if (e.key === 'Escape') close(); });
     overlay.find('.rf-open-tree').on('click', () => {
-        overlay.remove();
         $(document).off('keydown.rfChron');
+        overlay.remove();
         showFamilyTree();
     });
 }
@@ -560,9 +666,15 @@ export function showChildProfile(origin, index) {
     const overlay = $(`
     <div id="repro-profile-overlay" class="rf-overlay">
         <div class="rf-card">
-            <button class="rf-close">×</button>
-            <div class="rf-title"><i class="fa-solid ${child.sex === 'F' ? 'fa-child-dress' : 'fa-child'}"></i>Профиль: ${v(child.name) || 'без имени'}</div>
-            <div class="rf-prof-meta">${stage ? `${stage.label} · ` : ''}${formatAgeRu(ageDays)}<span class="rf-prof-zodiac">${zodiac ? ` · <span class="rf-zsym">${zodiac.symbol}</span> ${zodiac.name}` : ''}</span></div>
+            <div class="rf-head">
+                <div class="rf-head-ic"><i class="fa-solid ${child.sex === 'F' ? 'fa-child-dress' : 'fa-child'}"></i></div>
+                <div class="rf-head-tx">
+                    <div class="rf-title">${v(child.name) || 'Без имени'}</div>
+                    <div class="rf-subtitle">${stage ? `${stage.label} · ` : ''}${formatAgeRu(ageDays)}<span class="rf-prof-zodiac">${zodiac ? ` · <span class="rf-zsym">${zodiac.symbol}</span> ${zodiac.name}` : ''}</span></div>
+                </div>
+                <button class="rf-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rf-body">
             <div class="rf-prof-grid">
                 <label>Имя</label>
                 <input type="text" class="rf-prof-input" id="rfp-name" maxlength="60" value="${v(child.name)}">
@@ -601,12 +713,14 @@ export function showChildProfile(origin, index) {
             </div>
             <div class="rf-actions">
                 <button class="rf-btn rfp-save"><i class="fa-solid fa-check"></i>Сохранить</button>
-                <button class="rf-btn rfp-back"><i class="fa-solid fa-arrow-left"></i>Древо</button>
+                <button class="rf-btn ghost rfp-back"><i class="fa-solid fa-arrow-left"></i>Древо</button>
+            </div>
             </div>
         </div>
     </div>`);
 
     $('body').append(overlay);
+    guardOverlay(overlay);
 
     // Живой пересчёт зодиака при смене даты рождения
     overlay.find('#rfp-birth').on('change', function() {
@@ -615,12 +729,13 @@ export function showChildProfile(origin, index) {
     });
 
     const close = () => {
+        $(document).off('keydown.rfProf');
         overlay.css({ opacity: 0, transition: 'opacity .25s' });
         setTimeout(() => overlay.remove(), 260);
     };
     overlay.find('.rf-close').on('click', close);
     overlay.on('click', (e) => { if (e.target === overlay[0]) close(); });
-    $(document).one('keydown.rfProf', (e) => { if (e.key === 'Escape') close(); });
+    $(document).on('keydown.rfProf', (e) => { if (e.key === 'Escape') close(); });
 
     const toList = (s) => String(s || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
 
