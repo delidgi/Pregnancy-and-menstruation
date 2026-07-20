@@ -1,105 +1,459 @@
-/* Reproductive System v3 — merged styles */
+/* Reproductive System — Style v5 */
+:root {
+    --rp-pink: #ff6b9d;
+    --rp-blue: #64b5f6;
+    --rp-purple: #b388ff;
+    --rp-green: #69f0ae;
+    --rp-yellow: #ffd740;
+    --rp-red: #ff5252;
+    --rp-glass: rgba(255,255,255,0.06);
+    --rp-glass-border: rgba(255,255,255,0.1);
+}
 
 /* ── Settings panel ── */
-.repro-settings .inline-drawer-content { padding: 10px; display: flex; flex-direction: column; gap: 6px; }
-.repro-settings hr { margin: 8px 0; border: none; border-top: 1px solid var(--SmartThemeBorderColor); opacity: 0.3; }
-.repro-field { display: flex; align-items: center; gap: 8px; font-size: 13px; }
-.repro-field span:first-child { min-width: 100px; opacity: 0.7; }
-.repro-field select, .repro-field input[type="number"], .repro-field input[type="date"] {
-    flex: 1; min-width: 0;
-    background: var(--SmartThemeBlurTintColor, rgba(50,50,60,0.8));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
-    color: var(--SmartThemeBodyColor, #eee);
-    border-radius: 5px;
+.reproductive-system-settings .inline-drawer-content {
+    display: flex !important;
+    flex-direction: column !important;
+    gap: 4px !important;
+    padding: 6px !important;
+    font-size: 11px !important;
+}
+.reproductive-system-settings label.checkbox_label {
+    font-size: 11px !important;
+    gap: 5px !important;
+}
+.reproductive-system-settings .text_pole {
+    font-size: 11px !important;
+    padding: 2px 5px !important;
+    height: 24px !important;
+    border-radius: 4px !important;
+}
+.reproductive-system-settings select.text_pole {
+    height: 24px !important;
+}
+.reproductive-system-settings .menu_button {
+    font-size: 11px !important;
+    padding: 3px 8px !important;
+    border-radius: 4px !important;
+    min-height: unset !important;
+}
+.reproductive-system-settings .repro-button-row {
+    display: flex !important;
+    flex-wrap: wrap !important;
+    gap: 4px !important;
+    align-items: center !important;
+}
+.reproductive-system-settings .repro-button-row .menu_button {
+    flex: none !important;
+}
+.reproductive-system-settings hr {
+    margin: 3px 0 !important;
+    border-color: var(--rp-glass-border) !important;
+    opacity: 0.5 !important;
+}
+
+/* ── CSS editor ── */
+.reproductive-system-settings #repro-custom-css {
+    background: rgba(0,0,0,0.3) !important;
+    border: 1px solid var(--rp-glass-border) !important;
+    border-radius: 6px !important;
+    color: rgba(255,255,255,0.85) !important;
+    font-family: 'Cascadia Code', 'Fira Code', 'Consolas', monospace !important;
+    font-size: 10px !important;
+    line-height: 1.4 !important;
+    padding: 6px 8px !important;
+    height: auto !important;
+    min-height: 80px !important;
+}
+
+/* ── Cycle info ── */
+.reproductive-system-settings .rp-cycle-info {
+    font-size: 10px;
+    padding: 3px 6px;
+    background: var(--rp-glass);
+    border-radius: 4px;
+    border: 1px solid var(--rp-glass-border);
+}
+
+/* ── Monitor (pregnancy & baby) ── */
+.reproductive-system-settings .rp-m {
+    border-radius: 8px;
+    overflow: hidden;
+    background: linear-gradient(145deg, rgba(0,0,0,0.3), rgba(0,0,0,0.15));
+    border: 1px solid var(--rp-glass-border);
+    margin: 2px 0;
+}
+.reproductive-system-settings .rp-m-head {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 5px 8px;
+    letter-spacing: 0.3px;
+}
+.reproductive-system-settings .rp-m-head.pink {
+    background: linear-gradient(135deg, rgba(255,107,157,0.25), rgba(255,107,157,0.08));
+    color: var(--rp-pink);
+    border-bottom: 1px solid rgba(255,107,157,0.15);
+}
+.reproductive-system-settings .rp-m-head.blue {
+    background: linear-gradient(135deg, rgba(100,181,246,0.25), rgba(100,181,246,0.08));
+    color: var(--rp-blue);
+    border-bottom: 1px solid rgba(100,181,246,0.15);
+}
+
+.reproductive-system-settings .rp-m-progress {
+    height: 3px;
+    background: rgba(255,255,255,0.05);
+}
+.reproductive-system-settings .rp-m-progress-fill {
+    height: 100%;
+    border-radius: 2px;
+    transition: width 0.5s ease;
+}
+.reproductive-system-settings .rp-m-progress-fill.pink {
+    background: linear-gradient(90deg, var(--rp-pink), #ff8ec4);
+    box-shadow: 0 0 6px rgba(255,107,157,0.5);
+}
+
+.reproductive-system-settings .rp-m-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1px;
     padding: 4px 6px;
 }
-.repro-settings select, .repro-settings input[type="number"], .repro-settings input[type="date"] {
-    background: var(--SmartThemeBlurTintColor, rgba(50,50,60,0.8));
-    border: 1px solid var(--SmartThemeBorderColor, rgba(255,255,255,0.15));
-    color: var(--SmartThemeBodyColor, #eee);
-    border-radius: 5px;
-    padding: 4px 6px;
+.reproductive-system-settings .rp-m-cell {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 2px 4px;
+    border-radius: 3px;
+    background: rgba(255,255,255,0.02);
 }
-.repro-dim { opacity: 0.6; font-size: 12px; }
-.repro-center { text-align: center; }
-.repro-pregnant { color: #ff9ff3; font-weight: 600; }
-
-/* Glass panel (settings) */
-.repro-glass-panel { margin-top: 10px; padding: 12px; background: rgba(255,159,243,0.06); backdrop-filter: blur(10px); border: 1px solid rgba(255,159,243,0.15); border-radius: 10px; }
-.repro-row { display: flex; justify-content: space-between; align-items: center; padding: 5px 0; border-bottom: 1px solid rgba(255,159,243,0.08); font-size: 12px; }
-.repro-row:last-of-type { border-bottom: none; }
-.repro-row span:first-child { opacity: 0.7; }
-.repro-progress { width: 100%; height: 6px; background: rgba(255,159,243,0.12); border-radius: 6px; overflow: hidden; margin: 8px 0 4px; }
-.repro-progress-fill { height: 100%; background: linear-gradient(90deg, #ff9ff3, #ffc2d1); border-radius: 6px; transition: width 0.3s; }
-.repro-section { margin-top: 8px; padding: 8px; background: rgba(255,159,243,0.04); border-radius: 6px; border-left: 2px solid #ff9ff3; font-size: 11px; }
-.repro-section.repro-recs { border-left-color: #00ff88; background: rgba(0,255,136,0.04); }
-.repro-section-title { font-weight: 600; color: #ff9ff3; margin-bottom: 4px; font-size: 11px; }
-.repro-recs .repro-section-title { color: #00ff88; }
-.repro-complications { margin-top: 8px; padding: 8px; background: rgba(255,68,68,0.04); border-radius: 6px; border-left: 2px solid #ff4444; }
-.repro-complications .repro-section-title { color: #ff4444; }
-.repro-comp-item { padding: 6px; margin-bottom: 4px; background: rgba(255,68,68,0.04); border-radius: 4px; font-size: 11px; }
-.repro-comp-item.repro-resolved { text-decoration: line-through; opacity: 0.4; }
-.repro-comp-item.repro-crit { border-left: 2px solid #ff4444; }
-.repro-comp-item.repro-warn { border-left: 2px solid #ffaa00; }
-.repro-warn-text { color: #ffaa00; font-size: 11px; }
-.repro-doctor-btn { margin-top: 8px; width: 100%; }
-
-/* ── Chat visual widget (from repro blocks) ── */
-.repro { margin: 12px 0; max-width: 420px; font: 12px Comfortaa, sans-serif; }
-.repro summary {
-    padding: 8px 14px; background: rgba(255,255,255,0.04); backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.08); border-radius: 6px;
-    cursor: pointer; color: rgba(255,255,255,0.85); font-weight: 500;
-    list-style: none; transition: 0.2s; display: flex; align-items: center; gap: 8px;
+.reproductive-system-settings .rp-m-lbl {
+    font-size: 9px;
+    opacity: 0.4;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
 }
-.repro summary::-webkit-details-marker { display: none; }
-.repro summary:hover { background: rgba(255,255,255,0.06); }
-.repro[open] summary { border-radius: 6px 6px 0 0; }
-
-.repro-badge {
-    margin-left: auto; font-size: 9px; padding: 2px 7px; border-radius: 10px;
-    font-weight: 700; letter-spacing: 0.3px;
+.reproductive-system-settings .rp-m-val {
+    font-size: 10px;
+    font-weight: 600;
 }
-.repro-badge.cycle { background: rgba(180,120,255,0.15); color: rgba(180,120,255,0.9); }
-.repro-badge.pregnancy { background: rgba(255,150,180,0.15); color: rgba(255,150,180,0.9); }
-.repro-badge.baby { background: rgba(130,200,255,0.15); color: rgba(130,200,255,0.9); }
+.reproductive-system-settings .rp-m-hp-ok { color: var(--rp-green); }
+.reproductive-system-settings .rp-m-hp-warn { color: var(--rp-yellow); }
+.reproductive-system-settings .rp-m-hp-crit { color: var(--rp-red); }
 
-.repro-c {
-    background: rgba(255,255,255,0.02); backdrop-filter: blur(10px);
-    border: 1px solid rgba(255,255,255,0.08); border-top: none;
-    border-radius: 0 0 6px 6px; padding: 10px 14px;
+.reproductive-system-settings .rp-m-text {
+    font-size: 9px;
+    padding: 2px 8px;
+    opacity: 0.7;
+    line-height: 1.3;
 }
-.repro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
-
-.repro-stat {
-    padding: 5px 8px; background: rgba(255,255,255,0.03);
-    border: 1px solid rgba(255,255,255,0.06); border-radius: 5px;
-    font-size: 11px; display: flex; align-items: center; gap: 5px;
+.reproductive-system-settings .rp-m-warn {
+    font-size: 9px;
+    padding: 3px 8px;
+    color: var(--rp-yellow);
 }
-.repro-stat i { font-size: 10px; opacity: 0.5; width: 14px; text-align: center; flex-shrink: 0; }
-.repro-stat .rl { color: rgba(255,255,255,0.4); font-size: 9px; margin-right: 3px; }
-.repro-stat .rv { color: rgba(255,255,255,0.8); }
-.repro-wide { grid-column: 1 / -1; }
-
-.repro-bar { grid-column: 1 / -1; height: 4px; background: rgba(255,255,255,0.06); border-radius: 2px; overflow: hidden; margin: 4px 0; }
-.repro-bar-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
-.repro-bar-fill.cycle { background: linear-gradient(90deg, #b478ff, #ff78b4); }
-.repro-bar-fill.pregnancy { background: linear-gradient(90deg, #ff9eb4, #ffcb8e); }
-.repro-bar-fill.baby { background: linear-gradient(90deg, #82c8ff, #b4e0ff); }
-
-.repro-note {
-    grid-column: 1 / -1; margin-top: 4px; padding: 6px 8px;
-    background: rgba(255,150,180,0.04); border-left: 2px solid rgba(255,150,180,0.25);
-    border-radius: 0 4px 4px 0; font-size: 10px; color: rgba(255,255,255,0.65);
-    line-height: 1.4; font-style: italic;
+.reproductive-system-settings .rp-m-btn {
+    font-size: 9px;
+    margin: 2px 8px 4px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    background: rgba(255,215,64,0.15);
+    border: 1px solid rgba(255,215,64,0.25);
+    color: var(--rp-yellow);
+    cursor: pointer;
+    transition: background 0.2s;
 }
-.repro-note.baby-note { background: rgba(130,200,255,0.04); border-left-color: rgba(130,200,255,0.25); }
-.repro-note.cycle-note { background: rgba(180,120,255,0.04); border-left-color: rgba(180,120,255,0.25); }
+.reproductive-system-settings .rp-m-btn:hover {
+    background: rgba(255,215,64,0.25);
+}
 
-.repro-health {
+/* ═══════════════════════════════════════════════════
+   INFOBLOCK — clean outline style, no glass
+   All selectors scoped under details.repro to avoid conflicts
+   ═══════════════════════════════════════════════════ */
+details.repro { margin: 0 auto 12px; max-width: 420px; font: 12px system-ui, sans-serif; color: rgba(255,255,255,.85); }
+details.repro summary { list-style: none; cursor: pointer; padding: 0; margin: 0; background: none; border: none; outline: none; }
+details.repro summary::-webkit-details-marker { display: none; }
+
+/* ── Header ── */
+details.repro .repro-header {
+    display: flex; align-items: center; gap: 10px; padding: 10px 16px;
+    background: transparent;
+    border: 1.5px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    transition: border-radius .2s;
+}
+details.repro[open] .repro-header { border-radius: 14px 14px 0 0; border-bottom-color: transparent; }
+
+/* ── Icon circle ── */
+details.repro .repro-icon {
+    width: 26px; height: 26px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+details.repro .repro-icon i { font-size: 11px; }
+details.repro .repro-icon.cycle      { border: 1.5px solid rgba(180,120,255,.4); }
+details.repro .repro-icon.cycle i    { color: rgba(180,120,255,.8); }
+details.repro .repro-icon.pregnancy  { border: 1.5px solid rgba(255,120,180,.4); }
+details.repro .repro-icon.pregnancy i{ color: rgba(255,120,180,.8); }
+details.repro .repro-icon.baby       { border: 1.5px solid rgba(130,200,255,.4); }
+details.repro .repro-icon.baby i     { color: rgba(130,200,255,.8); }
+
+/* ── Title & badge ── */
+details.repro .repro-title { font-weight: 600; font-size: 13px; color: rgba(255,255,255,.85); }
+details.repro .repro-badge {
+    margin-left: auto; font-size: 10px; padding: 2px 8px; border-radius: 50px;
+    font-weight: 600; letter-spacing: .3px;
+}
+details.repro .repro-badge.cycle     { border: 1px solid rgba(180,120,255,.3); color: rgba(180,120,255,.9); }
+details.repro .repro-badge.pregnancy { border: 1px solid rgba(255,120,180,.3); color: rgba(255,120,180,.9); }
+details.repro .repro-badge.baby      { border: 1px solid rgba(130,200,255,.3); color: rgba(130,200,255,.9); }
+
+/* ── Chevron ── */
+details.repro .repro-chev {
+    width: 16px; height: 16px; flex-shrink: 0; transition: transform .25s;
+    display: flex; align-items: center; justify-content: center;
+}
+details.repro .repro-chev i { font-size: 10px; color: rgba(255,255,255,.3); }
+details.repro[open] .repro-chev { transform: rotate(180deg); }
+
+/* ── Content body ── */
+details.repro .repro-c {
+    padding: 12px 16px;
+    background: transparent;
+    border: 1.5px solid rgba(255,255,255,.18); border-top: none;
+    border-radius: 0 0 14px 14px;
+}
+
+/* ── Progress bar ── */
+details.repro .repro-bar {
+    height: 3px; background: rgba(255,255,255,.08); border-radius: 50px;
+    overflow: hidden; margin-bottom: 10px;
+}
+details.repro .repro-bar-fill { height: 100%; border-radius: 50px; transition: width .3s; }
+details.repro .repro-bar-fill.cycle     { background: #b478ff; }
+details.repro .repro-bar-fill.pregnancy { background: #ff9eb4; }
+details.repro .repro-bar-fill.baby      { background: #82c8ff; }
+
+/* ── Grid ── */
+details.repro .repro-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+
+/* ── Stat card ── */
+details.repro .repro-stat {
+    display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 10px;
+}
+details.repro .repro-wide { grid-column: 1 / -1; }
+
+/* ── Stat icon ── */
+details.repro .rp-si {
+    width: 20px; height: 20px; flex-shrink: 0; border-radius: 6px;
+    display: flex; align-items: center; justify-content: center;
+}
+details.repro .rp-si i { font-size: 10px; }
+details.repro .rp-si.green  i { color: rgba(0,200,130,.7); }
+details.repro .rp-si.pink   i { color: rgba(255,100,150,.7); }
+details.repro .rp-si.purple i { color: rgba(180,120,255,.7); }
+details.repro .rp-si.blue   i { color: rgba(130,200,255,.7); }
+details.repro .rp-si.orange i { color: rgba(255,180,60,.7); }
+details.repro .rp-si.red    i { color: rgba(255,80,80,.7); }
+
+/* ── Stat text ── */
+details.repro .rp-lbl { color: rgba(255,255,255,.35); font-size: 9px; }
+details.repro .rp-val { color: rgba(255,255,255,.85); font-size: 11px; font-weight: 600; }
+details.repro .rp-val-warn { color: rgba(255,170,0,.9) !important; }
+
+/* ── Note ── */
+details.repro .repro-note {
+    grid-column: 1 / -1; margin-top: 6px; padding: 8px 12px;
+    background: transparent;
+    border: 1px solid rgba(255,255,255,.1);
+    border-radius: 10px; font-size: 10px; color: rgba(255,255,255,.5);
+    line-height: 1.5; font-style: italic;
+}
+details.repro .repro-rec { font-style: normal; color: rgba(255,215,64,.6); }
+details.repro .repro-rec i { margin-right: 4px; opacity: .7; }
+
+/* ── Health badge ── */
+details.repro .repro-health {
     display: inline-flex; align-items: center; gap: 3px;
     padding: 1px 6px; border-radius: 8px; font-size: 9px; font-weight: 600;
 }
-.repro-health.normal { background: rgba(0,200,100,0.1); color: rgba(0,200,100,0.9); }
-.repro-health.warning { background: rgba(255,170,0,0.1); color: rgba(255,170,0,0.9); }
-.repro-health.critical { background: rgba(255,60,60,0.1); color: rgba(255,60,60,0.9); }
+details.repro .repro-health.normal   { border: 1px solid rgba(0,200,100,.3);  color: rgba(0,200,100,.9); }
+details.repro .repro-health.warning  { border: 1px solid rgba(255,170,0,.3);  color: rgba(255,170,0,.9); }
+details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  color: rgba(255,60,60,.9); }
+
+/* ── Mom stat (after baby cards) ── */
+.rp-infoblock-inserted .repro-mom-stat { margin: 6px auto; max-width: 420px; }
+
+/* ── Infoblock wrapper in chat ── */
+.rp-infoblock-inserted {
+    margin: 6px 0;
+    animation: rpFadeIn 0.3s ease;
+}
+@keyframes rpFadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+/* ═══════════════════════════════════════
+   BIRTH DIALOG — matches infoblock outline style
+   ═══════════════════════════════════════ */
+#repro-birth-overlay {
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    width: 100vw; height: 100vh;
+    z-index: 999999;
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 16px;
+    box-sizing: border-box;
+    animation: rbFadeIn 0.25s ease;
+    font: 12px system-ui, sans-serif;
+    color: rgba(255,255,255,.85);
+}
+@keyframes rbFadeIn { from { opacity: 0; } to { opacity: 1; } }
+@keyframes rbFadeOut { from { opacity: 1; } to { opacity: 0; } }
+@keyframes rbSlideIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes rbSlideOut { from { opacity: 1; transform: translateY(0); } to { opacity: 0; transform: translateY(4px); } }
+
+.rb-dialog {
+    background: rgba(20, 20, 30, 0.92);
+    border: 1.5px solid rgba(255,255,255,.18);
+    border-radius: 14px;
+    padding: 14px 16px;
+    max-width: 420px;
+    width: 100%;
+    max-height: 85vh;
+    overflow-y: auto;
+    box-sizing: border-box;
+    margin: auto;
+    animation: rbSlideIn 0.25s ease;
+}
+
+.rb-header {
+    display: flex; align-items: center; gap: 10px;
+    padding: 8px 4px 12px;
+    border-bottom: 1px solid rgba(255,255,255,.1);
+    margin-bottom: 12px;
+}
+.rb-header-icon {
+    width: 26px; height: 26px; border-radius: 50%;
+    border: 1.5px solid rgba(255,120,180,.4);
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.rb-header-icon i { font-size: 11px; color: rgba(255,120,180,.8); }
+.rb-header-title { font-weight: 600; font-size: 13px; color: rgba(255,255,255,.85); }
+.rb-multi {
+    margin-left: auto;
+    font-size: 10px; padding: 2px 8px; border-radius: 50px;
+    font-weight: 600; letter-spacing: .3px;
+    border: 1px solid rgba(180,120,255,.3); color: rgba(180,120,255,.9);
+}
+
+.rb-babies {
+    display: flex; flex-direction: column; gap: 8px;
+    margin-bottom: 12px;
+}
+
+.rb-baby-card {
+    background: transparent;
+    border: 1px solid rgba(255,255,255,.12);
+    border-radius: 10px;
+    padding: 10px 12px;
+}
+.rb-baby-head {
+    display: flex; align-items: center; gap: 8px;
+    margin-bottom: 8px;
+}
+.rb-sex-icon {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    font-size: 12px; font-weight: 700;
+}
+.rb-sex-icon.f { border: 1.5px solid rgba(255,120,180,.4); color: rgba(255,120,180,.9); }
+.rb-sex-icon.m { border: 1.5px solid rgba(130,200,255,.4); color: rgba(130,200,255,.9); }
+.rb-sex-text {
+    font-size: 11px; font-weight: 600;
+}
+.rb-sex-text.f { color: rgba(255,120,180,.9); }
+.rb-sex-text.m { color: rgba(130,200,255,.9); }
+
+.rb-name-input {
+    width: 100%;
+    padding: 7px 10px;
+    border: 1px solid rgba(255,255,255,.15);
+    border-radius: 8px;
+    background: rgba(255,255,255,.03);
+    color: rgba(255,255,255,.9);
+    font: 600 11px system-ui, sans-serif;
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color .15s;
+}
+.rb-name-input::placeholder {
+    color: rgba(255,255,255,.3);
+    font-weight: 400;
+}
+.rb-name-input:focus {
+    border-color: rgba(255,120,180,.5);
+}
+
+.rb-traits {
+    margin-top: 8px;
+    display: flex; flex-direction: column; gap: 3px;
+}
+.rb-trait-section {
+    font-size: 10px;
+    line-height: 1.4;
+    color: rgba(255,255,255,.5);
+}
+.rb-trait-label {
+    color: rgba(255,255,255,.35);
+    margin-right: 4px;
+}
+.rb-trait-label i {
+    font-size: 9px; margin-right: 3px; opacity: .7;
+}
+.rb-trait-values {
+    color: rgba(255,255,255,.7);
+    font-weight: 500;
+}
+
+.rb-special {
+    margin-top: 8px;
+    padding: 6px 10px;
+    border: 1px solid rgba(255,215,64,.35);
+    border-radius: 8px;
+    background: rgba(255,215,64,.06);
+    display: flex; align-items: center; gap: 6px;
+    font-size: 10px;
+    color: rgba(255,215,64,.95);
+    line-height: 1.3;
+}
+.rb-special i { font-size: 10px; opacity: .9; }
+.rb-special-name { font-weight: 700; }
+.rb-special-desc { color: rgba(255,255,255,.6); font-weight: 400; }
+
+.rb-confirm-btn {
+    display: flex; align-items: center; justify-content: center; gap: 6px;
+    width: 100%;
+    padding: 9px 12px;
+    border: 1.5px solid rgba(255,120,180,.4);
+    border-radius: 10px;
+    background: transparent;
+    color: rgba(255,120,180,.9);
+    font: 600 12px system-ui, sans-serif;
+    cursor: pointer;
+    transition: background .15s, border-color .15s;
+}
+.rb-confirm-btn:hover {
+    background: rgba(255,120,180,.08);
+    border-color: rgba(255,120,180,.6);
+}
+.rb-confirm-btn i {
+    font-size: 11px;
+}

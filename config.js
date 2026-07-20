@@ -13,42 +13,82 @@ export const defaultSettings = {
     lastCycleUpdate: null,
     totalChecks: 0,
     totalConceptions: 0,
-    currentChatId: null,
     chatPregnancyData: {},
-    lastCheckedMessageId: null,
     pregnancyDuration: 40,
     twinsChance: 3,
-    tripletsChance: 0.1
+    tripletsChance: 0.1,
+    scanDepth: 10,
+    scanResponseLength: 1500,
+    autoScan: true,
+    infoblockPosition: 'off',
+    customInfoblockCss: '',
+    // Возраст в RP-днях, после которого малыш считается «выросшим»: инфоблок сбрасывается,
+    // ребёнок переходит в архив p.grownChildren. Дефолт 730 = 2 года.
+    babyMaxAgeDays: 730,
+    // Отладка: НЕ вырезать теги из текста сообщений (видны прямо в чате)
+    debugKeepTags: false,
+    // Отладка: писать debug-логи в консоль (dlog/dwarn). По умолчанию выключено —
+    // логи с содержимым тегов/промпта заметно грузили консоль.
+    debugLogs: false,
 };
 
 export const defaultPregnancyData = {
     isPregnant: false,
+    // Цикл — ПЕР-CHAT (раньше был в глобальных settings → утечка между чатами)
+    cycleDay: 1,
+    lastCycleUpdate: null,
     conceptionDate: null,
     pregnancyWeeks: 0,
     rpDate: null,
+    _lastRpDateTag: null,
     fetusCount: 1,
     fetusSex: [],
+    fetusSexRevealed: false,
     complications: [],
+    _plannedComplications: [],
     healthStatus: 'normal',
     lastComplicationCheck: null,
     lastComplicationCheckRpDate: null,
-    lastDoctorVisitRpDate: null
+    lastDoctorVisitRpDate: null,
+    // Pregnancy extras
+    mood: '',
+    libido: '',
+    weightGain: '',
+    babyActivity: '',
+    // Baby data (after birth)
+    hasBaby: false,
+    babyName: '',
+    babySex: [],
+    babyCount: 0,
+    babyAge: '',
+    babyHealth: 'normal',
+    babyTeething: false,
+    babyColicky: false,
+    babyDiaperClean: true,
+    babyFeedingType: '',
+    babySleep: '',
+    babyMood: '',
+    babyMilestones: [],
+    babyBirthRpDate: null,
+    babyLastFeedRpDate: null,
+    babyLastChangeRpDate: null,
+    momState: '',
+    // Per-baby data (array of individual baby objects)
+    babies: [],
+    // Архив выросших детей (>babyMaxAgeDays). Не показываются в инфоблоке, но помнятся для промпта.
+    grownChildren: [],
+    // Dynamic descriptions from AI
+    _dynamic: {},
 };
 
 export const CHANCES = {
     base: 20,
-    cycleModifier: {
-        '1-7': { low: 0.25 },
-        '8-11': { medium: 0.5 },
-        '12-16': { high: 1.65 },
-        '17-28': { luteal: 0.25 }
-    },
     contraception: {
         none: 0,
         condom: 85,
         pill: 91,
-        iud: 99
-    }
+        iud: 99,
+    },
 };
 
 export const LANG = {
@@ -61,7 +101,7 @@ export const LANG = {
             none: 'Нет защиты',
             condom: 'Презерватив (85%)',
             pill: 'Таблетки (91%)',
-            iud: 'ВМС (99%)'
+            iud: 'ВМС (99%)',
         },
         cycleDay: 'День цикла',
         status: 'Статус',
@@ -71,7 +111,11 @@ export const LANG = {
         conceptionFail: 'Зачатия не произошло',
         contraceptionFailed: 'Контрацепция ПОДВЕЛА!',
         stats: 'Проверок: {checks} | Зачатий: {conceptions}',
-        reset: 'Сбросить беременность'
+        reset: 'Сбросить беременность',
+        scan: 'Сканировать чат',
+        scanning: 'Сканирование...',
+        scanDepth: 'Глубина сканирования',
+        autoScan: 'Авто-сканирование',
     },
     en: {
         title: 'Reproductive System',
@@ -82,7 +126,7 @@ export const LANG = {
             none: 'None',
             condom: 'Condom (85%)',
             pill: 'Pill (91%)',
-            iud: 'IUD (99%)'
+            iud: 'IUD (99%)',
         },
         cycleDay: 'Cycle day',
         status: 'Status',
@@ -92,6 +136,13 @@ export const LANG = {
         conceptionFail: 'No conception',
         contraceptionFailed: 'Contraception failed!',
         stats: 'Checks: {checks} | Conceptions: {conceptions}',
-        reset: 'Reset pregnancy'
-    }
+        reset: 'Reset pregnancy',
+        scan: 'Scan chat',
+        scanning: 'Scanning...',
+        scanDepth: 'Scan depth',
+        autoScan: 'Auto-scan',
+    },
 };
+
+export const REPRO_REGEX = /<repro>([\s\S]*?)<\/repro>/i;
+export const EXPIRATION_DEPTH = 50;

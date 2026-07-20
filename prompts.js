@@ -2,12 +2,27 @@
 // PROMPTS — инъекция промптов для AI
 // ═══════════════════════════════════════════
 
-import { setExtensionPrompt, extension_prompt_types, saveSettingsDebounced } from '../../../../script.js';
+import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData } from './state.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo } from './helpers.js';
+import { getSettings, getPregnancyData, getCycleDay, dlog } from './state.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
-import { updateCycleDay, checkComplications } from './pregnancy.js';
+import { babyAgeDays, getCareNorms, getCareNeeds } from './baby-care.js';
+
+// Требование языка для значений в тегах: детектим язык чата, чтобы модель
+// не писала "High"/"Anxious" в русской истории.
+function langRequirement() {
+    const lang = detectChatLanguage();
+    const langName = lang === 'ru' ? 'Russian' : 'English';
+    let line = `ALL values inside the tag JSON must be written in ${langName} — the language of the story.`;
+    if (lang === 'ru') line += ` Do NOT write English values like "High"/"Normal"/"Anxious" — write «Высокая»/«Норма»/«Тревожное» etc.`;
+    return { lang, langName, line };
+}
+
+function sexToText(arr) {
+    if (!arr || arr.length === 0) return '';
+    return arr.map(s => s === 'M' ? 'boy' : 'girl').join(', ');
+}
 
 export function getBasePrompt() {
     const s = getSettings();
@@ -15,31 +30,73 @@ export function getBasePrompt() {
 
     if (!s.isEnabled) return '';
 
-    const day = s.cycleDay;
-    const phaseMap = { 1: 'Menstruation', 6: 'Follicular', 12: 'Ovulation', 17: 'Luteal' };
-    let phase = 'Luteal';
+    const day = getCycleDay();
+    let phase = '';
     if (day <= 5) phase = 'Menstruation';
     else if (day <= 11) phase = 'Follicular';
     else if (day <= 16) phase = 'Ovulation';
+    else phase = 'Luteal';
 
-    const contraMap = { condom: 'Condom', pill: 'Pill', iud: 'IUD', none: 'None' };
-    const contra = contraMap[s.contraception] || 'None';
+    const contraLabel =
+        s.contraception === 'condom' ? 'Condom' :
+        s.contraception === 'pill' ? 'Birth control pill' :
+        s.contraception === 'iud' ? 'IUD' : 'No protection';
 
-    let prompt = `[OOC: REPRODUCTIVE SYSTEM ACTIVE]\n`;
-    prompt += `Cycle: Day ${day}/28 | ${phase} | Contraception: ${contra}\n`;
+    let prompt = `[REPRO TRACKER] Cycle day ${day}/28 (${phase}) | ${contraLabel}\n`;
+    prompt += `You are running a fertility/cycle simulation for {{user}}. Each reply must END with hidden HTML-comment markers that update the tracker. These markers ARE INVISIBLE to the reader (HTML comments don't render) — they are a technical channel, not narration. Never paraphrase them into visible text.\n\n`;
+
+    // ── TAG 1 — DATE (always) ──
+    prompt += `[DATE TAG — REQUIRED every reply]\n`;
+    prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply (replace DD.MM.YYYY with the in-story date, advance it if time passed):\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
+    prompt += `Must be an HTML comment exactly as shown. Do not turn it into prose like "Today: 15.06.2025".\n\n`;
 
     if (s.contraception === 'condom') {
-        prompt += `Condom: {{char}} uses it during sex. May break (~15%).\n`;
+        prompt += `Condom is in use (~15% failure chance — still possible to fail).\n\n`;
     }
 
+    // If pregnant — forbid conception tag, return early
     if (p.isPregnant) {
-        prompt += `{{user}} is PREGNANT. Tag [CONCEPTION_CHECK] is FORBIDDEN.`;
+        prompt += `{{user}} IS PREGNANT — never add CONCEPTION_CHECK tag.\n`;
         return prompt;
     }
 
-    prompt += `\nTag [CONCEPTION_CHECK]: add ONLY when vaginal ejaculation inside has ALREADY HAPPENED (past tense).\n`;
-    prompt += `DO NOT add for: ongoing sex, future tense ("will cum"), anal, oral, external ejaculation, pull-out, intact condom.\n`;
-    prompt += `Format (hidden at end): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->`;
+    if (p.hasBaby) {
+        prompt += `{{user}} has a baby (postpartum — fertility may still apply, follow tag rules below).\n\n`;
+    }
+
+    // ── TAG 2 — CONCEPTION (conditional) ──
+    // ВАЖНО: модели парафразят инструкцию ("Output this tag" → "{Pregnancy Check: TRIGGERED}" в видимом тексте).
+    // Нужно ЯВНО подчеркнуть: COPY VERBATIM, это HTML-комментарий, СКРЫТЫЙ ОТ ЧИТАТЕЛЯ.
+    prompt += `[CONCEPTION TAG — conditional]\n`;
+    prompt += `Trigger: in this reply's narrative, a male partner finishes inside {{user}}'s vagina (internal release / creampie / cum-inside / condom failure with release inside). Add the tag whenever the trigger is true.\n`;
+    prompt += `\n`;
+    prompt += `When triggered, COPY THIS LINE VERBATIM at the END of your reply (after all the prose, on its own line):\n`;
+    prompt += `<!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
+    prompt += `\n`;
+    prompt += `CRITICAL FORMAT RULES (most models break these — read carefully):\n`;
+    prompt += `  • It MUST be an HTML comment: starts with the four characters \`<!--\` and ends with the three characters \`-->\`.\n`;
+    prompt += `  • The tag IS HIDDEN from the reader (HTML comments don't render). Do NOT visualize it.\n`;
+    prompt += `  • DO NOT paraphrase. DO NOT write \`{Pregnancy Check: TRIGGERED}\`, \`[Conception happened]\`, \`*conception marker*\`, \`<conception_check>\`, or any other natural-language version. Those break the tracker.\n`;
+    prompt += `  • DO NOT translate the tag to Russian. Leave \`CYCLE_DAY\` and \`CONCEPTION_CHECK\` exactly as English caps.\n`;
+    prompt += `  • Even if your character card uses a different status format (SIMS-blocks, status panels, etc.), this specific tag MUST still be the HTML comment above — it's a separate technical channel.\n`;
+    prompt += `\n`;
+    prompt += `Do NOT add it if: no sex scene this reply / withdrawal before finish / release outside the vagina (mouth, hand, body, anal only) / only foreplay.\n\n`;
+
+    // ── TAG 3 — RP_STATUS (always, dynamic) ──
+    const langReq = langRequirement();
+    prompt += `[STATUS TAG — REQUIRED every reply]\n`;
+    prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, fields in ${langReq.langName} 2-4 words, describes {{user}}):\n`;
+    prompt += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
+    prompt += `"note" = 1 short sentence about {{user}}'s sensations from THIS scene. Must be an HTML comment; do NOT replace with a visible status block.\n`;
+    prompt += `${langReq.line}\n\n`;
+
+    prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
+    prompt += `Line N-2 (only if creampie this reply): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
+    prompt += `Line N-1: <!-- [RP_STATUS:{...}] -->\n`;
+    prompt += `Line N (very last): <!-- [RP_DATE:DD.MM.YYYY] -->\n`;
+    prompt += `\n`;
+    prompt += `Reminder: these are HTML comments — INVISIBLE to the reader. They are NOT a SIMS-style status block, NOT a header, NOT a tag the reader sees. If your character card has its own visible status format, KEEP using it normally — these HTML-comment markers are an additional, separate technical channel for the tracker.\n`;
 
     return prompt;
 }
@@ -47,49 +104,267 @@ export function getBasePrompt() {
 export function getPregnancyPrompt() {
     const s = getSettings();
     const p = getPregnancyData();
-    
-    if (!p.isPregnant) return '';
+
+    if (!p.isPregnant && !p.hasBaby) return '';
+
+    // Baby prompt
+    if (p.hasBaby) {
+        return getBabyPrompt(p);
+    }
 
     const duration = s.pregnancyDuration || 40;
     const { weeks } = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
     const progressPercent = (weeks / duration) * 100;
-    
-    let symptoms = getSymptomsForProgress(progressPercent, weeks);
-    let recommendations = getRecommendationsForProgress(progressPercent);
-    
+
+    const symptoms = getSymptomsForProgress(progressPercent, weeks, 'en');
+    const recommendations = getRecommendationsForProgress(progressPercent, 'en');
+    const fetusSize = getFetusSizeForProgress(progressPercent, false, 'en');
+    const sexText = sexToText(p.fetusSex);
+    const fetusCountText = formatFetusCount(p.fetusCount, 'full', 'en');
+    const healthInfo = getHealthInfo(p.healthStatus, 'en');
+
     let dueDateStr = '—';
     if (p.conceptionDate) {
         const dueDate = calculateDueDate(p.conceptionDate);
         if (dueDate) {
-            dueDateStr = dueDate.toLocaleDateString('ru-RU', { day: 'numeric', month: 'long', year: 'numeric' });
+            dueDateStr = dueDate.toLocaleDateString('en-US', { day: 'numeric', month: 'long', year: 'numeric' });
         }
     }
 
-    const sexText = formatSexIcons(p.fetusSex, true);
-    const fetusCountText = formatFetusCount(p.fetusCount, 'full');
-    const fetusSize = getFetusSizeForProgress(progressPercent, false);
-    
-    const healthInfo = getHealthInfo(p.healthStatus);
     let healthDetails = '';
-    if (p.healthStatus !== 'normal' && p.complications?.length) {
+    if (p.healthStatus !== 'normal' && p.complications?.length > 0) {
         healthDetails = ` (${p.complications.filter(c => !c.resolved).map(c => c.type).join(', ')})`;
     }
 
-    let prompt = `\n[OOC: PREGNANCY ACTIVE]\n`;
+    let prompt = `\n[PREGNANCY]\n`;
     prompt += `Term: ${weeks}/${duration} weeks (${Math.round(progressPercent)}%)\n`;
     prompt += `Due date: ${dueDateStr}\n`;
     prompt += `Fetus: ${fetusCountText}`;
-    if (sexText) prompt += ` | Sex: ${sexText}`;
+    if (p.fetusSexRevealed && sexText) prompt += ` | Sex: ${sexText}`;
+    else prompt += ` | Sex: unknown yet`;
     prompt += `\nSize: ${fetusSize}\n`;
     prompt += `Health: ${healthInfo.text}${healthDetails}\n`;
     prompt += `Symptoms: ${symptoms}\n`;
     prompt += `Recommendations: ${recommendations}\n`;
 
-    const birthThreshold = Math.floor(duration * 0.9);
-    if (weeks >= birthThreshold) {
-        prompt += `\nBIRTH possible now (${weeks}/${duration} wk). If {{user}} gives birth, add at end: <!-- [BIRTH] -->\n`;
-        prompt += `Do NOT add if: just talking about birth, preparing, not yet born.`;
+    // ── PREGNANCY_STATE тег — ИММУТАБЕЛЬНЫЕ данные беременности ──
+    // Расширка инструктирует модель ставить этот тег в КАЖДОМ ответе пока активна беременность.
+    // Это источник правды для conception_date, fetus_count, fetus_sex, father.
+    // Недели всегда считаются от conception_date в этом теге, не из текста ответа.
+    {
+        // Конвертируем conceptionDate в DD.MM.YYYY для модели (нам потом всё равно как парсить)
+        let conceptionStr = '';
+        if (p.conceptionDate) {
+            const cd = new Date(p.conceptionDate);
+            const dd = String(cd.getDate()).padStart(2, '0');
+            const mm = String(cd.getMonth() + 1).padStart(2, '0');
+            conceptionStr = `${dd}.${mm}.${cd.getFullYear()}`;
+        }
+        const sexJson = JSON.stringify(p.fetusSex || []);
+        const fatherStr = p.fatherName || '?';
+
+        prompt += `\n[PREGNANCY_STATE TAG — REQUIRED every reply while pregnant]\n`;
+        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, hidden from reader):\n`;
+        prompt += `<!-- [PREGNANCY_STATE:{"conception_date":"${conceptionStr}","fetus_count":${p.fetusCount || 1},"fetus_sex":${sexJson},"father":"${fatherStr}"}] -->\n`;
+        prompt += `\n`;
+        prompt += `Must be an HTML comment exactly as shown. DO NOT paraphrase into visible prose like "Pregnancy: 4 weeks" or {Pregnancy Active}.\n`;
+        prompt += `Fields are IMMUTABLE — copy values AS-IS unless the RP narrative reveals a new fact (ultrasound reveals sex → update "fetus_sex"; second fetus discovered → update "fetus_count"). Never change "conception_date".\n`;
     }
+
+    // Birth tag instruction — ВСЕГДА когда беременна. Роды могут случиться в любой момент:
+    // преждевременные роды, выкидыш-как-роды по сюжету, ускоренное РП, ручная беременность
+    // на нестандартной длительности и т.п. Расширка должна ловить роды независимо от срока.
+    {
+        const nearTerm = weeks >= Math.floor(duration * 0.85);
+        prompt += `\n[BIRTH TAG — conditional${nearTerm ? ' — near due date!' : ''}]\n`;
+        prompt += `If the baby is ACTUALLY BORN in this reply (delivered, out, first cry, cord cut — NOT just labor/contractions/pushing), COPY THIS LINE VERBATIM at the END of your reply (HTML comment, hidden from reader):\n`;
+        prompt += `<!-- [BIRTH] -->\n`;
+        prompt += `Plus this BABY_TRAITS line (values in ${langRequirement().langName}; "name" empty if not yet named):\n`;
+        prompt += `<!-- [BABY_TRAITS:{"babies":[{"name":"...","fatherName":"...","personality":["...","..."],"appearance":["...","...","..."]}]}] -->\n`;
+        prompt += `Must be HTML comments. Do NOT write "{BIRTH: triggered}" or similar visible text.\n`;
+    }
+
+    // Miscarriage / abortion — прерывание беременности по сюжету
+    {
+        prompt += `\n[PREGNANCY LOSS TAGS — conditional]\n`;
+        prompt += `If a MISCARRIAGE actually happens in this reply's narrative (the pregnancy is LOST: heavy bleeding with confirmed loss, doctor confirms fetal demise, etc. — NOT mere pain, fear or a threat), COPY THIS LINE VERBATIM at the END of your reply (HTML comment, hidden from reader):\n`;
+        prompt += `<!-- [MISCARRIAGE] -->\n`;
+        prompt += `If an ABORTION is actually performed on {{user}} in this reply (procedure completed — NOT just discussed, planned, or on the way to the clinic), add instead:\n`;
+        prompt += `<!-- [ABORTION] -->\n`;
+        prompt += `Either tag ENDS the pregnancy in the tracker. Never output them for scares, arguments, threats or intentions — only when the loss/procedure truly happens in this scene. Do NOT also output BIRTH.\n`;
+    }
+
+    // Sex reveal tag instruction when sex is still unknown — always injected
+    if (!p.fetusSexRevealed) {
+        prompt += `\n[SEX_REVEAL TAG — conditional]\n`;
+        prompt += `If the baby's sex is DEFINITIVELY learned in this reply via medical means (ultrasound / test / doctor) — NOT guessing or dreaming — COPY THIS LINE VERBATIM at the END of your reply (HTML comment, hidden):\n`;
+        prompt += `<!-- [SEX_REVEAL] -->\n`;
+    }
+
+    // RP_STATUS — dynamic scene data for pregnancy mode — always injected
+    {
+        const optFields = [];
+        optFields.push('"mood"');
+        optFields.push('"libido"');
+        optFields.push('"weight_gain"');
+        optFields.push('"baby_activity"');
+        optFields.push('"father_name" (or null)');
+        optFields.push('"symptoms"');
+        optFields.push('"recommendations"');
+        if (weeks >= 16) optFields.push('"movements"');
+        if (weeks >= 20) optFields.push('"swelling" (or null)');
+        if (weeks >= 28) optFields.push('"braxton_hicks" (or null)');
+        if (weeks >= 32) optFields.push('"fetal_position"');
+        optFields.push('"note"');
+        const langReqP = langRequirement();
+        prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
+        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqP.langName} 2-5 words/field, null if irrelevant, describes {{user}}):\n`;
+        prompt += `<!-- [RP_STATUS:{${optFields.join(',')}}] -->\n`;
+        prompt += `"note" = 1 short sentence about {{user}}'s state from THIS scene. Must be HTML comment, not a visible status block.\n`;
+        prompt += `${langReqP.line}\n`;
+    }
+
+    prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
+    prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply:\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY] -->\n\n`;
+
+    prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
+    prompt += `<!-- [PREGNANCY_STATE:{...}] -->\n`;
+    if (!p.fetusSexRevealed) prompt += `<!-- [SEX_REVEAL] --> (if sex revealed this reply)\n`;
+    prompt += `<!-- [BIRTH] --> + <!-- [BABY_TRAITS:{...}] --> (if birth this reply)\n`;
+    prompt += `<!-- [MISCARRIAGE] --> or <!-- [ABORTION] --> (if the pregnancy ends this reply)\n`;
+    prompt += `<!-- [RP_STATUS:{...}] -->\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY] --> (very last)\n`;
+    prompt += `\n`;
+    prompt += `Reminder: these are HTML comments — INVISIBLE to the reader. They are NOT a SIMS-style block, NOT a status header, NOT a marker the reader sees. If your character card uses its own visible status format, keep using it normally — these HTML-comment markers are a separate technical channel for the tracker.\n`;
+
+    return prompt;
+}
+
+function getBabyPrompt(p) {
+    const healthInfo = getHealthInfo(p.babyHealth || 'normal', 'en');
+    const diaperText = p.babyDiaperClean ? 'clean' : 'needs changing';
+    const teethingText = p.babyTeething ? 'teething' : 'no';
+
+    // Хелпер: считаем возраст в днях/месяцах/годах от birthRpDate до p.rpDate
+    const ageOf = (baby) => {
+        if (!baby.birthRpDate || !p.rpDate) return 'newborn';
+        const ms = new Date(p.rpDate).getTime() - new Date(baby.birthRpDate).getTime();
+        if (isNaN(ms) || ms < 0) return 'newborn';
+        const days = Math.floor(ms / 86400000);
+        if (days < 30) return `${days}d`;
+        const months = Math.floor(days / 30);
+        if (months < 12) return `${months}m`;
+        const years = Math.floor(months / 12);
+        const rem = months % 12;
+        return rem > 0 ? `${years}y ${rem}m` : `${years}y`;
+    };
+
+    let prompt = `\n[FAMILY — CHILDREN]\n`;
+
+    // Активные дети (в инфоблоке)
+    if (p.babies && p.babies.length > 0) {
+        p.babies.forEach((baby, i) => {
+            const sexT = baby.sex === 'M' ? 'boy' : baby.sex === 'F' ? 'girl' : 'unknown';
+            const age = ageOf(baby);
+            prompt += `Child ${i + 1}: ${baby.name || 'unnamed'} (${sexT}, ${age})`;
+            if (baby.personality?.length > 0) prompt += ` | Personality: ${baby.personality.join(', ')}`;
+            if (baby.appearance?.length > 0) prompt += ` | Appearance: ${baby.appearance.join(', ')}`;
+            if (baby.fatherName) prompt += ` | Father: ${baby.fatherName}`;
+            prompt += `\n`;
+
+            // ── Возрастные нормы ухода (симуляция) ──
+            const ageDays = babyAgeDays(baby, p);
+            if (ageDays !== null) {
+                const care = getCareNorms(ageDays, baby);
+                prompt += `  Care norms (age ${ageDays}d): кормление — ${care.feeding} | сон — ${care.sleep} | ${care.diaper}`;
+                if (care.teething) prompt += ` | зубки: ${care.teething}`;
+                if (care.colic) prompt += ` | период колик (вечерний плач 1–3 ч, поджимает ножки)`;
+                if (care.upcoming) prompt += ` | скоро: ${care.upcoming}`;
+                prompt += `\n`;
+                // Текущие потребности по времени суток
+                const needs = getCareNeeds(ageDays, p.rpTime, baby);
+                if (needs.feeding || needs.sleep || needs.diaper) {
+                    prompt += `  RIGHT NOW (${p.rpTime || '??:??'}): кормление=«${needs.feeding || '?'}» сон=«${needs.sleep || '?'}» подгузник=«${needs.diaper || '?'}»`;
+                    if (needs.careNote) prompt += ` (рек.: ${needs.careNote})`;
+                    prompt += `\n`;
+                }
+                const recentMs = (baby.milestones || []).slice(-3).map(m => m.text).join(', ');
+                if (recentMs) prompt += `  Recent development: ${recentMs}\n`;
+            }
+        });
+
+        prompt += `\n[INFANT NEEDS — play them proactively]\n`;
+        prompt += `The baby has REAL needs on a realistic schedule (see care norms and RIGHT NOW status above): gets hungry, needs diaper changes, gets tired and fussy, wakes at night, feels teething pain. In your replies the baby ACTS on these needs UNPROMPTED — cries when hungry/wet/tired, demands feeding on schedule, refuses to sleep, drools and chews things while teething, shows off new skills from "Recent development". Caring for the baby takes {{user}}'s real time and attention in scenes. Update ALL fields in RP_STATUS (mood/sleep/feeding/diaper/care_note) accordingly.\n`;
+    } else {
+        const sexText = p.babySex?.length > 0 ? sexToText(p.babySex) : 'unknown';
+        prompt += `Name: ${p.babyName || 'not named yet'}\n`;
+        prompt += `Sex: ${sexText}\n`;
+    }
+
+    // Архив старших детей (выросших) — для контекста
+    if (Array.isArray(p.grownChildren) && p.grownChildren.length > 0) {
+        prompt += `\n[OLDER CHILDREN — grown, no infant tracking but still in the family]\n`;
+        p.grownChildren.forEach((c, i) => {
+            const sexT = c.sex === 'M' ? 'son' : c.sex === 'F' ? 'daughter' : 'child';
+            prompt += `${i + 1}: ${c.name || 'unnamed'} (${sexT})`;
+            if (c.personality?.length > 0) prompt += ` | ${c.personality.join(', ')}`;
+            if (c.fatherName) prompt += ` | Father: ${c.fatherName}`;
+            prompt += `\n`;
+        });
+    }
+
+    // Состояние младшего (для совместимости с RP_STATUS)
+    prompt += `\n[YOUNGEST CHILD STATE]\n`;
+    prompt += `Health: ${healthInfo.text}\n`;
+    prompt += `Teething: ${teethingText}\n`;
+    prompt += `Diaper: ${diaperText}\n`;
+    prompt += `Feeding: ${p.babyFeedingType || 'breastfeeding'}\n`;
+    prompt += `Sleep: ${p.babySleep || '—'}\n`;
+    prompt += `Mood: ${p.babyMood || '—'}\n`;
+
+    if (p.babyMilestones && p.babyMilestones.length > 0) {
+        const recent = p.babyMilestones.slice(-3);
+        prompt += `Milestones: ${recent.map(m => m.text).join(', ')}\n`;
+    }
+
+    // RP_STATUS — dynamic scene data for baby mode — always injected
+    // ВАЖНО: не включаем поле "name" в шаблон. Имя малыша задаётся ОДИН РАЗ через диалог
+    // именования или через BABY_TRAITS при родах. Если бы name был в шаблоне RP_STATUS,
+    // модель могла бы либо вернуть плейсхолдер ("..."), либо самовольно поменять имя
+    // в каждом сообщении. RP_STATUS — это только динамические состояния (настроение, сон, кормление).
+    {
+        let babyKeys = '';
+        if (p.babies && p.babies.length > 0) {
+            babyKeys = p.babies.map((baby, i) => {
+                // Идентифицируем малыша по имени/индексу для модели, но НЕ просим её возвращать имя
+                const label = baby.name || `Baby${i+1}`;
+                return `{"label":"${label}","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
+            }).join(',');
+        } else {
+            babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
+        }
+        const langReqB = langRequirement();
+        prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
+        prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqB.langName} 2-4 words/field; "label" identifies the baby — keep as-is, do NOT rename):\n`;
+        prompt += `<!-- [RP_STATUS:{"babies":[${babyKeys}],"note":"..."}] -->\n`;
+        prompt += `"feeding" = what the baby is doing NOW with food (e.g. "Хочет есть", "Накормлен", "Сосёт грудь", "Сыт").\n`;
+        prompt += `"diaper" = current diaper state ("Чистый", "Мокрый", "Требует смены", "Сменили").\n`;
+        prompt += `"care_note" = 1 short care recommendation for THIS moment (e.g. "Пора купать", "Прогулка на свежем воздухе").\n`;
+        prompt += `Must be an HTML comment, not a visible status block.\n`;
+        prompt += `${langReqB.line}\n`;
+    }
+
+    prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
+    prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply (replace DD.MM.YYYY HH:MM with the in-story date AND time at the end of this scene):\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY HH:MM] -->\n`;
+    prompt += `Time is crucial for baby care simulation (feeding schedule, sleep, diaper). Use 24h format. Example: <!-- [RP_DATE:15.06.2025 03:30] --> for a 3:30 AM night feeding.\n\n`;
+
+    prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
+    prompt += `<!-- [RP_STATUS:{...}] -->\n`;
+    prompt += `<!-- [RP_DATE:DD.MM.YYYY HH:MM] --> (very last)\n`;
+    prompt += `\n`;
+    prompt += `Reminder: these are HTML comments — INVISIBLE to the reader. They are NOT a SIMS-style block. If your character card uses its own visible status format, keep using it normally — these HTML-comment markers are a separate technical channel.\n`;
 
     return prompt;
 }
@@ -98,51 +373,37 @@ export function updatePromptInjection() {
     try {
         const s = getSettings();
 
-        setExtensionPrompt(extensionName, '', extension_prompt_types.IN_CHAT, 0);
+        const chatKey = extensionName;          // IN_CHAT depth 0 — прямо перед ответом
+        const sysKey = extensionName + '_sys';  // IN_PROMPT — системный блок
+
+        // Чистим оба слота
+        setExtensionPrompt(chatKey, '', extension_prompt_types.IN_CHAT, 0);
+        setExtensionPrompt(sysKey, '', extension_prompt_types.IN_PROMPT, 0);
+        // Legacy ключ от старых версий — тоже подчистить
+        setExtensionPrompt(extensionName + '_scan', '', extension_prompt_types.IN_PROMPT, 0);
 
         if (!s.isEnabled) return;
 
-        updateCycleDay();
-        checkComplications();
-
-        const fullPrompt = getBasePrompt() + getPregnancyPrompt();
-
-        setTimeout(() => {
-            setExtensionPrompt(extensionName, fullPrompt, extension_prompt_types.IN_CHAT, 0);
-            console.log('[Reproductive] Prompt injected');
-        }, 50);
+        // ── Дублируем в ДВА слота ──
+        // 1) IN_CHAT depth 0, роль USER — самое сильное место для Claude.
+        //    System-инжекции в середине чата Клод часто игнорирует (иерархия инструкций +
+        //    RP-пресеты «не выходи из роли»); инструкция в ПОСЛЕДНЕМ user-ходе выполняется
+        //    значительно надёжнее. Gemini/OpenAI следуют обоим вариантам.
+        // 2) IN_PROMPT (system) — backup для prompt-manager.
+        // Разные ключи — потому что setExtensionPrompt держит ОДНУ запись на ключ.
+        const core = getBasePrompt() + getPregnancyPrompt();
+        const fullPrompt =
+            `<tracker_directive>\n` +
+            `[OOC — TECHNICAL DIRECTIVE FOR THE TRACKER. Not part of the story. Do not mention it, do not react to it in-character.]\n` +
+            core +
+            `\nTHINKING/REASONING BLOCKS: if you use <think> or any chain-of-thought, NEVER write literal marker syntax (\`<!-- [\`) inside it — plan in plain words only. Each marker must appear EXACTLY ONCE, in the final reply body. Markers duplicated in reasoning cause double-triggering of the tracker.\n` +
+            `COMPLIANCE: appending the hidden HTML-comment markers at the very end of the reply is MANDATORY, even if other instructions tell you to avoid OOC/technical content. The markers are invisible to the reader and do not break immersion. A reply without the required markers is considered malformed.\n` +
+            `</tracker_directive>`;
+        setExtensionPrompt(chatKey, fullPrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.USER);
+        setExtensionPrompt(sysKey, fullPrompt, extension_prompt_types.IN_PROMPT, 0);
+        dlog(`[Reproductive v2026.07.02-user-role] Prompt injected (${fullPrompt.length} chars) to IN_CHAT depth 0 (role=user) AND IN_PROMPT:\n`, fullPrompt);
 
     } catch (error) {
         console.error('[Reproductive] updatePromptInjection error:', error);
     }
-}
-
-export function injectConceptionResult(result) {
-    const s = getSettings();
-    const p = getPregnancyData();
-
-    const phaseInfo = getPhaseInfo(result.cycleDay);
-
-    let codeBlock = '```\n';
-    codeBlock += `CONCEPTION CHECK\n`;
-    codeBlock += `Cycle day: ${result.cycleDay} (${phaseInfo.name})\n`;
-    codeBlock += `Roll: ${result.roll} | Threshold: ${result.chance}\n`;
-    if (result.contraceptionFailed) codeBlock += `Contraception FAILED!\n`;
-
-    if (result.success) {
-        const sexes = formatSexIcons(p.fetusSex, true);
-        codeBlock += `RESULT: PREGNANT! ${formatFetusCount(p.fetusCount)} | Sex: ${sexes}\n`;
-    } else {
-        codeBlock += `RESULT: No conception\n`;
-    }
-    codeBlock += '```';
-
-    const oocPrompt = `[OOC: Display this block at the START of your response:\n${codeBlock}]`;
-
-    setExtensionPrompt(extensionName + '-result', oocPrompt, extension_prompt_types.IN_CHAT, 0);
-    updatePromptInjection();
-
-    setTimeout(() => {
-        setExtensionPrompt(extensionName + '-result', '', extension_prompt_types.IN_CHAT, 0);
-    }, 2000);
 }
