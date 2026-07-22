@@ -171,8 +171,14 @@ export function getPregnancyData() {
     // Если и после миграции пусто — это действительно новый чат, создаём чистый объект.
     // НЕ мигрируем fallback (даже если он модифицирован) — слишком высокий риск утечки.
     if (!s.chatPregnancyData[chatId]) {
-        s.chatPregnancyData[chatId] = structuredClone(defaultPregnancyData);
-        dlog(`[Reproductive] Fresh pregnancy data for new chatId: ${chatId}`);
+        const fresh = structuredClone(defaultPregnancyData);
+        // Рандомный стартовый день цикла: каждый новый чат/героиня начинается в своей
+        // фазе, а не всегда с 1-го дня (менструации). Помечаем как «выставлено юзером»,
+        // чтобы первый же RP_DATE не сдвинул его сразу и не выглядело странно.
+        fresh.cycleDay = 1 + Math.floor(Math.random() * 28);
+        fresh.lastCycleUpdate = Date.now();
+        s.chatPregnancyData[chatId] = fresh;
+        dlog(`[Reproductive] Fresh pregnancy data for new chatId: ${chatId} (random cycle day ${fresh.cycleDay})`);
     }
 
     return s.chatPregnancyData[chatId];

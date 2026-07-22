@@ -59,6 +59,25 @@ export function milestoneDay(baby, m) {
     return m.base + jitter(baby, m.key, m.range);
 }
 
+// ─── Стадии взросления (по RP-возрасту в днях) ───
+export const GROWTH_STAGES = [
+    { key: 'newborn',   label: 'новорождённый', icon: 'fa-baby',            maxDays: 30 },
+    { key: 'infant',    label: 'грудничок',     icon: 'fa-baby-carriage',   maxDays: 365 },
+    { key: 'toddler',   label: 'малыш 1–3',     icon: 'fa-shoe-prints',     maxDays: 1095 },
+    { key: 'preschool', label: 'дошкольник',    icon: 'fa-shapes',          maxDays: 2555 },
+    { key: 'school',    label: 'школьник',      icon: 'fa-book',            maxDays: 4380 },
+    { key: 'teen',      label: 'подросток',     icon: 'fa-headphones',      maxDays: 6570 },
+    { key: 'adult',     label: 'взрослый',      icon: 'fa-user',            maxDays: Infinity },
+];
+
+export function getGrowthStage(ageDays) {
+    if (ageDays === null || ageDays === undefined || isNaN(ageDays)) return null;
+    for (const st of GROWTH_STAGES) {
+        if (ageDays < st.maxDays) return st;
+    }
+    return GROWTH_STAGES[GROWTH_STAGES.length - 1];
+}
+
 // ─── Нормы ухода для возраста (в днях). Возвращает строки на русском ───
 // { feeding, sleep, diaper, teething|null, colic:bool, upcoming|null }
 export function getCareNorms(ageDays, baby) {

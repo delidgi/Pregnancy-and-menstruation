@@ -572,6 +572,33 @@ function applyStatusData(s, p, data) {
                     if (apiB.father_name && apiB.father_name !== baby.fatherName) {
                         baby.fatherName = String(apiB.father_name).slice(0, 80);
                     }
+                    // ── Сюжетное достижение («первое агу», «первый смех в голос»...) ──
+                    // Модель присылает его в "milestone" ТОЛЬКО когда в сцене случилось
+                    // что-то впервые. Дедуп по нормализованному тексту, кап 40 записей.
+                    if (Object.hasOwn(apiB, 'milestone') && apiB.milestone && typeof apiB.milestone === 'string') {
+                        const txt = apiB.milestone.trim().slice(0, 80);
+                        const junk = !txt || txt === '...' || txt === '…' || /^(?:null|none|нет|-)$/i.test(txt);
+                        if (!junk) {
+                            if (!Array.isArray(baby.milestones)) baby.milestones = [];
+                            const norm = txt.toLowerCase();
+                            const dup = baby.milestones.some(x => (x.text || '').toLowerCase() === norm);
+                            if (!dup) {
+                                baby.milestones.push({
+                                    text: txt,
+                                    source: 'story',
+                                    rpDate: p.rpDate,
+                                    date: new Date().toISOString(),
+                                });
+                                if (baby.milestones.length > 40) {
+                                    baby.milestones.splice(0, baby.milestones.length - 40);
+                                }
+                                dlog(`[Reproductive] Story milestone for ${baby.name || 'baby'}: ${txt}`);
+                                if (s.showNotifications) {
+                                    showNotification(`<i class="fa-solid fa-trophy"></i> ${baby.name || 'Малыш'}: ${txt}`, 'success');
+                                }
+                            }
+                        }
+                    }
                 }
             });
         }

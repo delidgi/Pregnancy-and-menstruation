@@ -457,3 +457,313 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 .rb-confirm-btn i {
     font-size: 11px;
 }
+
+/* ═══ Семейное древо — классическая раскладка, glass-стиль ═══ */
+#rp-tree-overlay {
+    position: fixed; inset: 0; z-index: 10002;
+    background: rgba(8, 8, 12, .55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px; box-sizing: border-box;
+}
+.rp-tree-dialog {
+    width: min(720px, 96vw); max-height: 86vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: linear-gradient(165deg, rgba(44, 40, 54, .97), rgba(24, 23, 30, .98));
+    border: 1.5px solid rgba(255, 255, 255, .14);
+    border-radius: 20px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
+    font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
+}
+.rp-tree-head {
+    display: flex; align-items: center; gap: 10px;
+    padding: 14px 18px;
+    border-bottom: 1px solid rgba(255, 255, 255, .08);
+}
+.rp-tree-head-icon {
+    width: 28px; height: 28px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    border: 1.5px solid rgba(130, 200, 255, .4); flex-shrink: 0;
+}
+.rp-tree-head-icon i { font-size: 12px; color: rgba(130, 200, 255, .85); }
+.rp-tree-title { font-size: 14px; font-weight: 600; letter-spacing: .2px; }
+.rp-tree-close {
+    margin-left: auto; width: 28px; height: 28px; border-radius: 50%;
+    background: none; border: 1px solid transparent; cursor: pointer;
+    color: rgba(255, 255, 255, .4); display: flex; align-items: center; justify-content: center;
+    transition: all .15s; padding: 0;
+}
+.rp-tree-close:hover { color: #fff; border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); }
+.rp-tree-body { padding: 18px; overflow-y: auto; }
+
+/* Канва древа — при ширине скроллится горизонтально */
+.rp-tree-canvas { overflow-x: auto; padding-bottom: 4px; }
+
+/* Узлы-карточки */
+.rp-node {
+    display: inline-flex; flex-direction: column; align-items: center; gap: 2px;
+    padding: 10px 12px 9px; border-radius: 14px;
+    background: rgba(255, 255, 255, .03);
+    border: 1px solid rgba(255, 255, 255, .12);
+    min-width: 92px; max-width: 130px; text-align: center;
+}
+.rp-node-ava {
+    position: relative;
+    width: 40px; height: 40px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: rgba(255, 255, 255, .9);
+    background: rgba(255, 255, 255, .05);
+    border: 1.5px solid rgba(255, 255, 255, .25);
+    margin-bottom: 4px;
+}
+.rp-node-sex {
+    position: absolute; right: -3px; bottom: -3px;
+    width: 15px; height: 15px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 8px; background: #23222b;
+    border: 1px solid rgba(255,255,255,.2);
+}
+.rp-node-name {
+    font-size: 12px; font-weight: 600; line-height: 1.2;
+    max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.rp-node-sub { font-size: 10px; color: rgba(255, 255, 255, .55); line-height: 1.3; }
+.rp-node-sub.dim { color: rgba(255, 255, 255, .35); }
+.rp-node-badges { display: flex; gap: 4px; margin-top: 4px; }
+.rp-node-badge {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 9px; font-weight: 600; padding: 1px 7px;
+    border-radius: 50px; border: 1px solid rgba(255, 255, 255, .18);
+    color: rgba(255, 255, 255, .6);
+}
+.rp-node-badge i { font-size: 8px; }
+.rp-node-badge.gold { border-color: rgba(255, 215, 64, .4); color: rgba(255, 215, 100, .95); }
+.rp-node-badge.green { border-color: rgba(0, 200, 130, .4); color: rgba(80, 220, 160, .95); }
+
+/* Мама */
+.rp-node.mom { border-color: rgba(255, 120, 180, .4); }
+.rp-node.mom .rp-node-ava { border-color: rgba(255, 120, 180, .6); color: rgba(255, 158, 180, .95); box-shadow: 0 0 18px rgba(255, 120, 180, .2); }
+.rp-tree-root { display: flex; justify-content: center; position: relative; padding-bottom: 18px; }
+.rp-tree-root::after {
+    content: ''; position: absolute; bottom: 0; left: 50%; transform: translateX(-50%);
+    width: 1.5px; height: 18px;
+    background: linear-gradient(to bottom, rgba(255, 120, 180, .45), rgba(255, 255, 255, .12));
+}
+.rp-tree-root.no-line { padding-bottom: 0; }
+.rp-tree-root.no-line::after { display: none; }
+
+/* Ряд веток (по отцам) */
+.rp-tree-rail { display: flex; justify-content: center; gap: 8px; align-items: flex-start; }
+.rp-tree-branch {
+    display: flex; flex-direction: column; align-items: center;
+    position: relative; padding: 22px 8px 0; min-width: 0;
+}
+/* горизонтальная перекладина между ветками */
+.rp-tree-branch::before, .rp-tree-branch::after {
+    content: ''; position: absolute; top: 0; width: 50%; height: 22px;
+    border-top: 1.5px solid rgba(255, 255, 255, .12);
+}
+.rp-tree-branch::before { left: 0; }
+.rp-tree-branch::after { right: 0; }
+.rp-tree-branch:first-child::before { border-top: none; }
+.rp-tree-branch:last-child::after { border-top: none; }
+.rp-tree-branch:only-child::before, .rp-tree-branch:only-child::after { border-top: none; }
+/* сердечко-связка на спуске к отцу */
+.rp-link-bubble {
+    position: relative; z-index: 1;
+    width: 24px; height: 24px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    background: #2a2733;
+    border: 1.5px solid rgba(255, 120, 180, .45);
+    margin-top: -12px; margin-bottom: 6px;
+}
+.rp-link-bubble::before {
+    content: ''; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    width: 1.5px; height: 11px; background: rgba(255, 255, 255, .12);
+}
+.rp-link-bubble i { font-size: 9px; color: rgba(255, 120, 180, .9); }
+
+/* Отец */
+.rp-node.father .rp-node-ava { border-color: rgba(130, 200, 255, .5); color: rgba(160, 210, 255, .95); }
+.rp-node.father.unknown { opacity: .6; }
+
+/* Ряд детей под отцом */
+.rp-tree-row { display: flex; justify-content: center; }
+.rp-tree-cell { position: relative; padding: 18px 5px 0; }
+.rp-tree-cell::before, .rp-tree-cell::after {
+    content: ''; position: absolute; top: 0; width: 50%; height: 18px;
+    border-top: 1.5px solid rgba(255, 255, 255, .1);
+}
+.rp-tree-cell::before { left: 0; }
+.rp-tree-cell::after { right: 0; }
+.rp-tree-cell:first-child::before { border-top: none; }
+.rp-tree-cell:last-child::after { border-top: none; }
+.rp-tree-cell:only-child::before, .rp-tree-cell:only-child::after { border-top: none; }
+.rp-node.kid { position: relative; }
+.rp-node.kid::before {
+    content: ''; position: absolute; bottom: 100%; left: 50%; transform: translateX(-50%);
+    width: 1.5px; height: 18px; background: rgba(255, 255, 255, .1);
+}
+
+/* Дети: пол и интерактив */
+.rp-node.kid { cursor: pointer; transition: border-color .15s, transform .15s, box-shadow .15s; }
+.rp-node.kid:hover { border-color: rgba(255, 255, 255, .3); transform: translateY(-2px); box-shadow: 0 8px 22px rgba(0, 0, 0, .35); }
+.rp-node.kid.sel { border-color: rgba(130, 200, 255, .55); box-shadow: 0 0 0 1px rgba(130, 200, 255, .3); }
+.rp-node.kid.girl .rp-node-ava { border-color: rgba(255, 120, 180, .5); color: rgba(255, 158, 180, .95); }
+.rp-node.kid.boy .rp-node-ava { border-color: rgba(130, 200, 255, .5); color: rgba(160, 210, 255, .95); }
+.rp-node.kid.girl .rp-node-sex { color: rgba(255, 120, 180, .9); }
+.rp-node.kid.boy .rp-node-sex { color: rgba(130, 200, 255, .9); }
+.rp-node.kid.expecting { border-style: dashed; border-color: rgba(255, 120, 180, .4); }
+.rp-node.kid.expecting .rp-node-ava { border-style: dashed; border-color: rgba(255, 120, 180, .5); }
+.rp-node.kid.expecting .rp-node-ava i { font-size: 13px; color: rgba(255, 120, 180, .85); }
+
+/* Панель деталей под древом */
+.rp-tree-details {
+    margin-top: 14px; padding: 12px 14px;
+    border: 1px solid rgba(255, 255, 255, .1); border-radius: 14px;
+    background: rgba(255, 255, 255, .02);
+}
+.rp-tree-det-head { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.rp-tree-ava {
+    width: 34px; height: 34px; border-radius: 50%; flex-shrink: 0;
+    display: inline-flex; align-items: center; justify-content: center;
+    font-size: 14px; font-weight: 700;
+    background: rgba(255, 255, 255, .05);
+    border: 1.5px solid rgba(255, 255, 255, .25);
+}
+.rp-tree-ava.girl { border-color: rgba(255, 120, 180, .5); color: rgba(255, 158, 180, .95); }
+.rp-tree-ava.boy { border-color: rgba(130, 200, 255, .5); color: rgba(160, 210, 255, .95); }
+.rp-tree-det-name { font-size: 13px; font-weight: 700; }
+.rp-tree-det-sub { font-size: 10.5px; color: rgba(255, 255, 255, .45); }
+.rp-tree-trait {
+    display: flex; align-items: baseline; gap: 7px;
+    font-size: 11px; color: rgba(255, 255, 255, .6);
+    line-height: 1.5; padding: 2px 0;
+}
+.rp-tree-trait i { font-size: 10px; opacity: .55; width: 12px; text-align: center; flex-shrink: 0; }
+.rp-tree-trait.gold { color: rgba(255, 215, 100, .85); }
+.rp-tree-trait.gold i { color: #ffd740; opacity: .9; }
+.rp-tree-ms-title {
+    display: flex; align-items: center; gap: 6px;
+    font-size: 9px; font-weight: 700; letter-spacing: 1.2px; text-transform: uppercase;
+    color: rgba(255, 255, 255, .35); margin: 10px 0 4px;
+}
+.rp-tree-ms-title i { font-size: 10px; color: rgba(255, 215, 64, .6); }
+.rp-tree-ms-list { display: flex; flex-direction: column; }
+.rp-tree-ms {
+    display: flex; align-items: baseline; gap: 8px;
+    font-size: 11px; padding: 4px 0; line-height: 1.4;
+    border-bottom: 1px solid rgba(255, 255, 255, .04);
+}
+.rp-tree-ms:last-child { border-bottom: none; }
+.rp-tree-ms i { font-size: 10px; width: 12px; text-align: center; flex-shrink: 0; }
+.rp-tree-ms-story { color: #ffd740; }
+.rp-tree-ms-auto { color: rgba(130, 200, 255, .55); }
+.rp-tree-ms-text { flex: 1; }
+.rp-tree-ms-date { font-size: 9px; color: rgba(255, 255, 255, .28); flex-shrink: 0; }
+.rp-tree-ms-empty { font-size: 11px; opacity: .35; font-style: italic; padding: 4px 0; }
+
+/* Пустое древо */
+.rp-tree-empty {
+    display: flex; flex-direction: column; align-items: center; gap: 8px;
+    padding: 20px 12px; color: rgba(255, 255, 255, .35); font-size: 12px;
+}
+.rp-tree-empty i { font-size: 20px; color: rgba(0, 200, 130, .4); }
+
+/* Телефон */
+@media (max-width: 540px) {
+    .rp-tree-dialog { max-height: calc(100dvh - 28px); }
+    .rp-tree-rail { justify-content: flex-start; }
+    .rp-node { min-width: 84px; padding: 8px 9px 8px; }
+}
+
+
+/* ═══ Семейное древо v2 — пары (мама ♥ папа) бок о бок ═══ */
+.rp-tree-rail { flex-wrap: wrap; gap: 28px 34px; align-items: flex-start; }
+.rp-tree-union { display: flex; flex-direction: column; align-items: center; }
+
+/* Пара: мама + сердечко + папа в одну строку */
+.rp-couple { display: flex; align-items: center; gap: 7px; }
+.rp-couple-link {
+    width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center;
+    background: #2a2733;
+    border: 1.5px solid rgba(255, 120, 180, .45);
+}
+.rp-couple-link i { font-size: 9px; color: rgba(255, 120, 180, .9); }
+
+/* Спуск от центра пары к ряду детей */
+.rp-tree-kids-wrap { position: relative; padding-top: 20px; }
+.rp-tree-kids-wrap::before {
+    content: ''; position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+    width: 1.5px; height: 20px; background: rgba(255, 255, 255, .16);
+}
+
+/* Убираем старые «ветковые» линии (couple-раскладка их не использует) */
+.rp-tree-branch::before, .rp-tree-branch::after { display: none; }
+
+
+/* ═══ Быстрая панель (волшебная палочка) ═══ */
+#rp-quick-overlay {
+    position: fixed; inset: 0; z-index: 10001;
+    background: rgba(8, 8, 12, .55);
+    backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+    display: flex; align-items: center; justify-content: center;
+    padding: 14px; box-sizing: border-box;
+}
+.rp-quick-dialog {
+    width: min(360px, 94vw);
+    display: flex; flex-direction: column; overflow: hidden;
+    background: linear-gradient(165deg, rgba(44, 40, 54, .98), rgba(24, 23, 30, .99));
+    border: 1.5px solid rgba(255, 255, 255, .14);
+    border-radius: 18px;
+    box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
+    font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
+}
+.rp-quick-dialog .rp-tree-head-icon { border-color: rgba(180, 120, 255, .45); }
+.rp-quick-dialog .rp-tree-head-icon i { color: rgba(190, 140, 255, .9); }
+.rp-quick-body { padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+.rp-quick-status {
+    font-size: 12px; padding: 9px 12px; border-radius: 11px;
+    background: rgba(255, 255, 255, .04);
+    border: 1px solid rgba(255, 255, 255, .1);
+}
+.rp-quick-status i { margin-right: 6px; }
+
+/* Строка смены цикла */
+.rp-quick-cycle { display: flex; align-items: center; gap: 6px; }
+.rp-quick-lbl { font-size: 11px; opacity: .6; margin-right: 2px; }
+.rp-quick-step {
+    width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
+    background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .14);
+    color: rgba(255, 255, 255, .8); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; padding: 0;
+    transition: all .15s;
+}
+.rp-quick-step:hover { background: rgba(255, 255, 255, .1); }
+.rp-quick-step i { font-size: 10px; }
+#rp-quick-cycleday {
+    width: 52px; text-align: center; padding: 5px 4px;
+    background: #171a26; border: 1px solid rgba(255, 255, 255, .12);
+    border-radius: 8px; color: #fff; font-size: 13px; font-weight: 600;
+}
+.rp-quick-set {
+    flex: 1; height: 30px; border-radius: 9px; cursor: pointer;
+    background: linear-gradient(135deg, rgba(180, 120, 255, .35), rgba(130, 160, 255, .35));
+    border: 1px solid rgba(180, 140, 255, .4); color: #fff; font-size: 12px; font-weight: 600;
+    transition: filter .15s;
+}
+.rp-quick-set:hover { filter: brightness(1.2); }
+
+/* Кнопки действий */
+.rp-quick-actions { display: flex; flex-direction: column; gap: 7px; }
+.rp-quick-btn {
+    display: flex; align-items: center; gap: 9px;
+    padding: 10px 13px; border-radius: 11px; cursor: pointer;
+    background: rgba(255, 255, 255, .04); border: 1px solid rgba(255, 255, 255, .12);
+    color: rgba(255, 255, 255, .88); font-size: 12.5px; font-weight: 500;
+    transition: all .15s; text-align: left;
+}
+.rp-quick-btn:hover { background: rgba(255, 255, 255, .09); border-color: rgba(255, 255, 255, .22); transform: translateY(-1px); }
+.rp-quick-btn i { font-size: 13px; width: 16px; text-align: center; color: rgba(130, 200, 255, .8); }
+#rp-quick-birth i { color: rgba(255, 120, 180, .85); }

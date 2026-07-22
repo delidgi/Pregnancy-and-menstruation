@@ -893,6 +893,7 @@ export function graduateBabies(graduatedBabies) {
             birthRpDate: baby.birthRpDate || null,
             graduatedRpDate: p.rpDate || null,
             special: baby.special || null,
+            milestones: Array.isArray(baby.milestones) ? [...baby.milestones] : [],
         });
     }
 

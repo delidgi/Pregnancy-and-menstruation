@@ -7,7 +7,7 @@ import { extensionName } from './config.js';
 import { getSettings, getPregnancyData, getCycleDay, dlog } from './state.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
-import { babyAgeDays, getCareNorms, getCareNeeds } from './baby-care.js';
+import { babyAgeDays, getCareNorms, getCareNeeds, getGrowthStage } from './baby-care.js';
 
 // Требование языка для значений в тегах: детектим язык чата, чтобы модель
 // не писала "High"/"Anxious" в русской истории.
@@ -267,7 +267,8 @@ function getBabyPrompt(p) {
         p.babies.forEach((baby, i) => {
             const sexT = baby.sex === 'M' ? 'boy' : baby.sex === 'F' ? 'girl' : 'unknown';
             const age = ageOf(baby);
-            prompt += `Child ${i + 1}: ${baby.name || 'unnamed'} (${sexT}, ${age})`;
+            const stage = getGrowthStage(babyAgeDays(baby, p));
+            prompt += `Child ${i + 1}: ${baby.name || 'unnamed'} (${sexT}, ${age}${stage ? `, стадия: ${stage.label}` : ''})`;
             if (baby.personality?.length > 0) prompt += ` | Personality: ${baby.personality.join(', ')}`;
             if (baby.appearance?.length > 0) prompt += ` | Appearance: ${baby.appearance.join(', ')}`;
             if (baby.fatherName) prompt += ` | Father: ${baby.fatherName}`;
@@ -307,11 +308,14 @@ function getBabyPrompt(p) {
         prompt += `\n[OLDER CHILDREN — grown, no infant tracking but still in the family]\n`;
         p.grownChildren.forEach((c, i) => {
             const sexT = c.sex === 'M' ? 'son' : c.sex === 'F' ? 'daughter' : 'child';
-            prompt += `${i + 1}: ${c.name || 'unnamed'} (${sexT})`;
+            const cAge = ageOf(c);
+            const cStage = getGrowthStage(babyAgeDays(c, p));
+            prompt += `${i + 1}: ${c.name || 'unnamed'} (${sexT}${cAge !== 'newborn' ? `, ${cAge}` : ''}${cStage ? `, стадия: ${cStage.label}` : ''})`;
             if (c.personality?.length > 0) prompt += ` | ${c.personality.join(', ')}`;
             if (c.fatherName) prompt += ` | Father: ${c.fatherName}`;
             prompt += `\n`;
         });
+        prompt += `Play older children ACCORDING TO their growth stage: тоддлер лепечет и везде лезет, дошкольник задаёт бесконечные «почему», школьник имеет своих друзей и секреты, подросток — своё мнение и бунт.\n`;
     }
 
     // Состояние младшего (для совместимости с RP_STATUS)
@@ -339,10 +343,10 @@ function getBabyPrompt(p) {
             babyKeys = p.babies.map((baby, i) => {
                 // Идентифицируем малыша по имени/индексу для модели, но НЕ просим её возвращать имя
                 const label = baby.name || `Baby${i+1}`;
-                return `{"label":"${label}","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
+                return `{"label":"${label}","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"...","milestone":null}`;
             }).join(',');
         } else {
-            babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"..."}`;
+            babyKeys = `{"label":"Baby","mood":"...","sleep":"...","feeding":"...","diaper":"...","care_note":"...","milestone":null}`;
         }
         const langReqB = langRequirement();
         prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
@@ -351,6 +355,19 @@ function getBabyPrompt(p) {
         prompt += `"feeding" = what the baby is doing NOW with food (e.g. "Хочет есть", "Накормлен", "Сосёт грудь", "Сыт").\n`;
         prompt += `"diaper" = current diaper state ("Чистый", "Мокрый", "Требует смены", "Сменили").\n`;
         prompt += `"care_note" = 1 short care recommendation for THIS moment (e.g. "Пора купать", "Прогулка на свежем воздухе").\n`;
+        prompt += `"milestone" = a STORY ACHIEVEMENT: fill ONLY if in THIS scene the baby did something remarkable for the FIRST time (первое «агу», первый смех в голос, первое слово, первый раз схватил игрушку, впервые узнал папу, смешной/трогательный первый случай) — 2-6 words. Otherwise ALWAYS null. Be creative but realistic for the age; do NOT invent one every reply (most replies = null).\n`;
+        // Список уже записанных достижений — чтобы модель не повторялась
+        {
+            const achieved = [];
+            for (const b of (p.babies || [])) {
+                for (const m of (b.milestones || []).slice(-10)) {
+                    if (m.text) achieved.push(m.text);
+                }
+            }
+            if (achieved.length > 0) {
+                prompt += `Already recorded milestones (NEVER repeat these): ${[...new Set(achieved)].join('; ')}.\n`;
+            }
+        }
         prompt += `Must be an HTML comment, not a visible status block.\n`;
         prompt += `${langReqB.line}\n`;
     }

@@ -2,7 +2,7 @@
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
-import { babyAgeDays, getCareNeeds } from './baby-care.js';
+import { babyAgeDays, getCareNeeds, getGrowthStage } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
 import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
@@ -261,7 +261,7 @@ export function buildInfoblockHtml() {
                 <summary><div class="repro-header">
                     <div class="repro-icon baby">${ic('fa-baby')}</div>
                     <span class="repro-title repro-baby-name" data-baby-idx="${i}" title="Клик для переименования" style="cursor:pointer">${label}</span>
-                    <span class="repro-badge baby" style="color:var(--rp-${sexColor})">${sexIcon} · ${ageStr}</span>
+                    <span class="repro-badge baby" style="color:var(--rp-${sexColor})">${sexIcon} · ${ageStr}${(() => { const st = getGrowthStage(ageDays); return st ? ' · ' + st.label : ''; })()}</span>
                     <div class="repro-chev">${ic('fa-chevron-down')}</div>
                 </div></summary>
                 <div class="repro-c"><div class="repro-grid">
@@ -366,6 +366,311 @@ export function buildInfoblockHtml() {
             </div>
         </div>
     </details>`;
+}
+
+// ── Семейное древо: классическая раскладка (мама → пары → дети) ──
+function formatAgeStr(days) {
+    if (days === null || days === undefined || isNaN(days)) return '—';
+    if (days < 30) return days <= 7 ? 'новорожд.' : `${days} дн.`;
+    const months = Math.floor(days / 30);
+    if (months < 12) return `${months} мес.`;
+    const years = Math.floor(months / 12);
+    const rem = months % 12;
+    return rem > 0 ? `${years} г. ${rem} мес.` : `${years} ${years === 1 ? 'год' : years < 5 ? 'года' : 'лет'}`;
+}
+
+function fmtRpDate(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+export function showFamilyTree() {
+    $('#rp-tree-overlay').remove();
+
+    const p = getPregnancyData();
+    let momName = 'Ты';
+    try {
+        const ctx = SillyTavern.getContext();
+        if (ctx?.name1) momName = ctx.name1;
+    } catch (e) { /* ignore */ }
+
+    const initialOf = (name) => (name || '?').trim().charAt(0).toUpperCase() || '?';
+
+    // Собираем всех детей: активные малыши + выросшие (архив)
+    const kids = [];
+    (p.babies || []).forEach(b => kids.push({ ...b, _grown: false }));
+    (p.grownChildren || []).forEach(c => kids.push({ ...c, _grown: true }));
+
+    // Группировка по отцу
+    const groups = new Map();
+    for (const k of kids) {
+        const f = (k.fatherName || '').trim() || '—';
+        if (!groups.has(f)) groups.set(f, []);
+        groups.get(f).push(k);
+    }
+    if (p.isPregnant) {
+        const f = (p.fatherName || '').trim() || '—';
+        if (!groups.has(f)) groups.set(f, []);
+    }
+
+    // Детальные панели детей (по клику на карточку)
+    const detailPanels = [];
+
+    const kidCard = (k) => {
+        const days = babyAgeDays(k, p);
+        const stage = getGrowthStage(days);
+        const sexCls = k.sex === 'F' ? 'girl' : 'boy';
+        const sexIcon = k.sex === 'F' ? 'fa-venus' : 'fa-mars';
+        const ageStr = k._grown && days === null ? 'вырос(ла)' : formatAgeStr(days);
+        const stageStr = stage ? stage.label : (k._grown ? 'взрослый' : '');
+        const msCount = (k.milestones || []).length;
+
+        // Панель деталей: дата рождения, черты, все достижения
+        const ms = [...(k.milestones || [])].reverse();
+        let msHtml = '';
+        if (ms.length > 0) {
+            msHtml = `<div class="rp-tree-ms-title"><i class="fa-solid fa-award"></i>Достижения · ${ms.length}</div>`;
+            msHtml += `<div class="rp-tree-ms-list">` + ms.map(m => {
+                const icon = m.source === 'story'
+                    ? '<i class="fa-solid fa-trophy rp-tree-ms-story"></i>'
+                    : '<i class="fa-solid fa-star rp-tree-ms-auto"></i>';
+                const dateStr = fmtRpDate(m.rpDate);
+                return `<div class="rp-tree-ms">${icon}<span class="rp-tree-ms-text">${m.text}</span>${dateStr ? `<span class="rp-tree-ms-date">${dateStr}</span>` : ''}</div>`;
+            }).join('') + `</div>`;
+        } else {
+            msHtml = `<div class="rp-tree-ms-empty">достижений пока нет</div>`;
+        }
+        const traits = [];
+        const birthStr = fmtRpDate(k.birthRpDate);
+        if (birthStr) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-cake-candles"></i>Родился(ась) ${birthStr}</div>`);
+        if (k.personality?.length) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-brain"></i>${k.personality.join(', ')}</div>`);
+        if (k.appearance?.length) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-eye"></i>${k.appearance.join(', ')}</div>`);
+        if (k.special) traits.push(`<div class="rp-tree-trait gold"><i class="fa-solid fa-wand-magic-sparkles"></i>${k.special.name || k.special}</div>`);
+
+        const idx = detailPanels.length;
+        detailPanels.push(`
+            <div class="rp-tree-det-head">
+                <span class="rp-tree-ava ${sexCls}">${initialOf(k.name)}</span>
+                <div>
+                    <div class="rp-tree-det-name">${k.name || 'без имени'}</div>
+                    <div class="rp-tree-det-sub">${ageStr}${stageStr ? ' · ' + stageStr : ''}${k._grown ? ' · вырос(ла)' : ''}</div>
+                </div>
+            </div>
+            ${traits.join('')}
+            ${msHtml}`);
+
+        return `<div class="rp-tree-cell">
+            <div class="rp-node kid ${sexCls}" data-det="${idx}" title="Нажми — профиль и достижения">
+                <span class="rp-node-ava">${initialOf(k.name)}<i class="fa-solid ${sexIcon} rp-node-sex"></i></span>
+                <span class="rp-node-name">${k.name || 'без имени'}</span>
+                <span class="rp-node-sub">${ageStr}</span>
+                <span class="rp-node-sub dim">${stageStr}</span>
+                <span class="rp-node-badges">
+                    ${msCount ? `<span class="rp-node-badge gold" title="Достижения"><i class="fa-solid fa-trophy"></i>${msCount}</span>` : ''}
+                    ${k._grown ? `<span class="rp-node-badge green" title="Вырос(ла)"><i class="fa-solid fa-check"></i></span>` : ''}
+                </span>
+            </div>
+        </div>`;
+    };
+
+    // Узел мамы (повторяется в каждой паре — как в генеалогических древах,
+    // когда у одного родителя дети от разных партнёров).
+    const momNode = `<div class="rp-node mom">
+            <span class="rp-node-ava">${initialOf(momName)}</span>
+            <span class="rp-node-name">${momName}</span>
+            <span class="rp-node-sub dim">мама</span>
+        </div>`;
+
+    let branchesHtml = '';
+    for (const [father, children] of groups) {
+        // Старшие слева
+        children.sort((a, b) => {
+            const am = a.birthRpDate ? new Date(a.birthRpDate).getTime() : 0;
+            const bm = b.birthRpDate ? new Date(b.birthRpDate).getTime() : 0;
+            return am - bm;
+        });
+        let cells = children.map(kidCard).join('');
+
+        if (p.isPregnant && ((p.fatherName || '').trim() || '—') === father) {
+            const w = p.pregnancyWeeks || 0;
+            const cnt = p.fetusCount || 1;
+            const sexStr = p.fetusSexRevealed && p.fetusSex?.length
+                ? p.fetusSex.map(s => s === 'M' ? 'мальчик' : 'девочка').join(', ')
+                : 'сюрприз';
+            cells += `<div class="rp-tree-cell">
+                <div class="rp-node kid expecting">
+                    <span class="rp-node-ava"><i class="fa-solid fa-heart"></i></span>
+                    <span class="rp-node-name">Ожидается</span>
+                    <span class="rp-node-sub">${cnt > 1 ? cnt + ' малыша' : sexStr}</span>
+                    <span class="rp-node-sub dim">${w} нед.</span>
+                </div>
+            </div>`;
+        }
+
+        const isUnknown = father === '—';
+        const fatherNode = `<div class="rp-node father${isUnknown ? ' unknown' : ''}">
+                <span class="rp-node-ava">${isUnknown ? '?' : initialOf(father)}</span>
+                <span class="rp-node-name">${isUnknown ? 'неизвестен' : father}</span>
+                <span class="rp-node-sub dim">папа</span>
+            </div>`;
+
+        // Пара: мама ♥ папа бок о бок, дети — под ними
+        branchesHtml += `<div class="rp-tree-union">
+            <div class="rp-couple">
+                ${momNode}
+                <span class="rp-couple-link" title="${isUnknown ? 'отец неизвестен' : 'пара'}"><i class="fa-solid ${isUnknown ? 'fa-question' : 'fa-heart'}"></i></span>
+                ${fatherNode}
+            </div>
+            ${cells ? `<div class="rp-tree-kids-wrap"><div class="rp-tree-row">${cells}</div></div>` : ''}
+        </div>`;
+    }
+
+    const canvasHtml = branchesHtml
+        ? `<div class="rp-tree-canvas">
+              <div class="rp-tree-rail">${branchesHtml}</div>
+           </div>
+           <div class="rp-tree-details" style="display:none"></div>`
+        : `<div class="rp-tree-canvas">
+              <div class="rp-tree-root no-line">${momNode}</div>
+           </div>
+           <div class="rp-tree-empty"><i class="fa-solid fa-seedling"></i>Детей пока нет — древо ждёт свою историю</div>`;
+
+    const overlay = $(`
+    <div id="rp-tree-overlay">
+        <div class="rp-tree-dialog">
+            <div class="rp-tree-head">
+                <span class="rp-tree-head-icon"><i class="fa-solid fa-people-roof"></i></span>
+                <span class="rp-tree-title">Семейное древо</span>
+                <button class="rp-tree-close" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rp-tree-body">${canvasHtml}</div>
+        </div>
+    </div>`);
+
+    $('body').append(overlay);
+    // Клики не должны «протекать» в документ — иначе ST сворачивает свои панели
+    overlay.on('mousedown mouseup click touchstart touchend', (e) => e.stopPropagation());
+    overlay.on('click', function(e) { if (e.target === this) overlay.remove(); });
+    overlay.find('.rp-tree-close').on('click', () => overlay.remove());
+
+    // Клик по карточке ребёнка → панель деталей под древом
+    overlay.find('.rp-node.kid[data-det]').on('click', function() {
+        const idx = parseInt($(this).attr('data-det'));
+        const panel = overlay.find('.rp-tree-details');
+        const wasSel = $(this).hasClass('sel');
+        overlay.find('.rp-node.kid').removeClass('sel');
+        if (wasSel) {
+            panel.slideUp(150);
+        } else {
+            $(this).addClass('sel');
+            panel.html(detailPanels[idx] || '').slideDown(150);
+        }
+    });
+}
+
+// ── Быстрая панель («волшебная палочка»): смена цикла, древо, роды в один тап ──
+export function showQuickBar() {
+    $('#rp-quick-overlay').remove();
+    const s = getSettings();
+    const p = getPregnancyData();
+
+    // Текущий статус одной строкой
+    let statusHtml;
+    if (p.hasBaby) {
+        const n = (p.babies?.length || p.babyCount || 1);
+        statusHtml = `<i class="fa-solid fa-baby" style="color:rgba(130,200,255,.85)"></i> ${n > 1 ? n + ' малыша' : 'Малыш'} в семье`;
+    } else if (p.isPregnant) {
+        statusHtml = `<i class="fa-solid fa-heart" style="color:rgba(255,120,180,.85)"></i> Беременность — ${p.pregnancyWeeks || 0} нед.`;
+    } else {
+        const d = getCycleDay();
+        const ph = getPhaseInfo(d);
+        statusHtml = `<i class="fa-solid fa-clock" style="color:rgba(180,120,255,.85)"></i> Цикл: день ${d}/28 · <span style="color:${ph.color}">${ph.name}</span>`;
+    }
+
+    const day = getCycleDay();
+    const overlay = $(`
+    <div id="rp-quick-overlay">
+        <div class="rp-quick-dialog">
+            <div class="rp-tree-head">
+                <span class="rp-tree-head-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
+                <span class="rp-tree-title">Репродукция</span>
+                <button class="rp-tree-close" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rp-quick-body">
+                <div class="rp-quick-status">${statusHtml}</div>
+                <div class="rp-quick-cycle">
+                    <span class="rp-quick-lbl">День цикла</span>
+                    <button class="rp-quick-step" data-d="-1"><i class="fa-solid fa-minus"></i></button>
+                    <input type="number" id="rp-quick-cycleday" min="1" max="28" value="${day}" class="text_pole">
+                    <button class="rp-quick-step" data-d="1"><i class="fa-solid fa-plus"></i></button>
+                    <button class="rp-quick-set" id="rp-quick-setcycle">Установить</button>
+                </div>
+                <div class="rp-quick-actions">
+                    <button class="rp-quick-btn" id="rp-quick-tree"><i class="fa-solid fa-people-roof"></i>Семейное древо</button>
+                    ${p.isPregnant ? `<button class="rp-quick-btn" id="rp-quick-birth"><i class="fa-solid fa-baby"></i>Принять роды</button>` : ''}
+                    <button class="rp-quick-btn" id="rp-quick-settings"><i class="fa-solid fa-sliders"></i>Все настройки</button>
+                </div>
+            </div>
+        </div>
+    </div>`);
+
+    $('body').append(overlay);
+    overlay.on('mousedown mouseup click touchstart touchend', (e) => e.stopPropagation());
+    const close = () => overlay.remove();
+    overlay.on('click', function(e) { if (e.target === this) close(); });
+    overlay.find('.rp-tree-close').on('click', close);
+
+    const applyCycle = (v) => {
+        v = Math.max(1, Math.min(28, parseInt(v) || 1));
+        overlay.find('#rp-quick-cycleday').val(v);
+        setCycleDay(v, true, true);
+        import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+        saveSettingsDebounced();
+        setTimeout(() => { updatePromptInjection(); syncUI(); }, 30);
+        // Обновляем строку статуса
+        const ph = getPhaseInfo(v);
+        overlay.find('.rp-quick-status').html(`<i class="fa-solid fa-clock" style="color:rgba(180,120,255,.85)"></i> Цикл: день ${v}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
+        showNotification(`День цикла: ${v}`, 'success');
+    };
+    overlay.find('.rp-quick-step').on('click', function() {
+        const cur = parseInt(overlay.find('#rp-quick-cycleday').val()) || 1;
+        let nv = cur + parseInt($(this).attr('data-d'));
+        if (nv < 1) nv = 28; if (nv > 28) nv = 1;
+        overlay.find('#rp-quick-cycleday').val(nv);
+    });
+    overlay.find('#rp-quick-setcycle').on('click', () => applyCycle(overlay.find('#rp-quick-cycleday').val()));
+    overlay.find('#rp-quick-cycleday').on('keydown', function(e) { if (e.key === 'Enter') applyCycle($(this).val()); });
+
+    // Древо открывается ПОВЕРХ быстрой панели (z-index выше). Панель не закрываем —
+    // закрыл древо → снова видишь быструю панель.
+    overlay.find('#rp-quick-tree').on('click', () => { showFamilyTree(); });
+    overlay.find('#rp-quick-birth').on('click', () => {
+        close();
+        if (!confirm('Принять роды прямо сейчас? Это запустит диалог именования малыша(ей).')) return;
+        applyScanResult({ vaginal_ejaculation_occurred: false, birth_occurred: true, sex_revealed: false, revealed_sexes: null, baby_traits: null, cycle_day: null, _source: 'manual' });
+    });
+    overlay.find('#rp-quick-settings').on('click', () => {
+        close();
+        // Панель расширений — это ВНЕШНИЙ drawer ST (#extensions-settings-button).
+        // Сначала открываем его, потом разворачиваем наш inline-drawer и скроллим.
+        setTimeout(() => {
+            const block = document.querySelector('#rm_extensions_block');
+            if (block && block.classList.contains('closedDrawer')) {
+                document.querySelector('#extensions-settings-button .drawer-toggle')?.click();
+            }
+            setTimeout(() => {
+                const our = document.querySelector('#extensions_settings2 .reproductive-system-settings');
+                const drawer = our?.closest('.inline-drawer');
+                if (!drawer) return;
+                const content = drawer.querySelector('.inline-drawer-content');
+                const closed = content && (content.style.display === 'none' || getComputedStyle(content).display === 'none');
+                if (closed) drawer.querySelector('.inline-drawer-toggle')?.click();
+                drawer.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 280);
+        }, 60);
+    });
 }
 
 // ── syncUI ──
@@ -641,7 +946,8 @@ export function setupUI() {
             <div style="font-size:10px;opacity:0.7">Статус: <span id="repro-status"></span></div>
             <div id="repro-preg-mon" class="rp-m" style="display:none"></div>
             <div id="repro-baby-mon" class="rp-m" style="display:none"></div>
-            <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none">🍼 Принять роды сейчас</button>
+            <button id="repro-family-tree-btn" class="menu_button" style="width:100%"><i class="fa-solid fa-people-roof" style="margin-right:6px;color:rgba(130,200,255,.8)"></i>Семейное древо</button>
+            <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none"><i class="fa-solid fa-baby" style="margin-right:6px;color:rgba(255,120,180,.8)"></i>Принять роды сейчас</button>
             <hr>
             <div id="repro-manual-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">Ручная беременность / малыш ▼</div>
             <div id="repro-manual-panel" style="display:none;gap:4px;flex-direction:column">
@@ -705,6 +1011,27 @@ export function setupUI() {
 
         $('#extensions_settings2').append(html);
 
+        // ── Пункт в «волшебной палочке» ST (меню расширений у поля ввода) ──
+        // Открывает быструю панель: смена цикла, древо, роды — не лазая в настройки.
+        // Меню #extensionsMenu создаётся асинхронно из шаблона wandMenu, поэтому
+        // регистрируемся с ретраем, пока контейнер не появится.
+        const registerWandItem = (attempt = 0) => {
+            if ($('#repro_wand_open').length > 0) return;
+            const menu = $('#extensionsMenu');
+            if (menu.length === 0) {
+                if (attempt < 30) setTimeout(() => registerWandItem(attempt + 1), 400);
+                return;
+            }
+            const wandItem = $(`
+                <div id="repro_wand_open" class="list-group-item flex-container flexGap5 interactable" tabindex="0" title="Репродукция — быстрая панель">
+                    <div class="fa-solid fa-dna extensionsMenuExtensionButton"></div>
+                    <span>Репродукция</span>
+                </div>`);
+            menu.append(wandItem);
+            wandItem.on('click', () => { menu.hide(); showQuickBar(); });
+        };
+        registerWandItem();
+
         // Events
         $('#repro-enabled').on('change', function() { getSettings().isEnabled = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
         $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
@@ -717,6 +1044,10 @@ export function setupUI() {
         });
 
         // Принудительно вызвать роды СЕЙЧАС — если модель описала роды но не поставила тег
+        $('#repro-family-tree-btn').on('click', function() {
+            showFamilyTree();
+        });
+
         $('#repro-force-birth-btn').on('click', function() {
             const p = getPregnancyData();
             if (!p.isPregnant) {
