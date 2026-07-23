@@ -302,19 +302,27 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
    BIRTH DIALOG — matches infoblock outline style
    ═══════════════════════════════════════ */
 #repro-birth-overlay {
-    position: fixed;
-    top: 0; left: 0; right: 0; bottom: 0;
+    position: fixed !important;
+    top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
     width: 100vw; height: 100vh;
     z-index: 999999;
     background: rgba(0, 0, 0, 0.65);
     backdrop-filter: blur(6px);
-    display: flex;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
     padding: 16px;
     box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
     animation: rbFadeIn 0.25s ease;
     font: 12px system-ui, sans-serif;
     color: rgba(255,255,255,.85);
+}
+#repro-birth-overlay::before,
+#repro-birth-overlay::after {
+    content: '';
+    flex: 1 0 0px;
 }
 @keyframes rbFadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rbFadeOut { from { opacity: 1; } to { opacity: 0; } }
@@ -332,7 +340,6 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     max-height: 85dvh;
     overflow-y: auto;
     box-sizing: border-box;
-    margin: auto;
     flex-shrink: 0;
     animation: rbSlideIn 0.25s ease;
 }
@@ -463,12 +470,20 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* ═══ Семейное древо — классическая раскладка, glass-стиль ═══ */
 #rp-tree-overlay {
-    position: fixed; inset: 0; z-index: 10002;
+    position: fixed !important; inset: 0 !important; z-index: 10002;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    display: flex;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
     padding: 14px; box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+#rp-tree-overlay::before,
+#rp-tree-overlay::after {
+    content: '';
+    flex: 1 0 0px;
 }
 .rp-tree-dialog {
     width: min(720px, 96vw); max-height: 86vh; max-height: 86dvh;
@@ -478,7 +493,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     border-radius: 20px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
     font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
-    margin: auto; flex-shrink: 0;
+    flex-shrink: 0;
 }
 .rp-tree-head {
     display: flex; align-items: center; gap: 10px;
@@ -677,18 +692,15 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* Телефон */
 @media (max-width: 540px) {
-    /* Оверлеи: центрирование через margin:auto на диалогах */
+    /* Оверлеи: padding на мобилке */
     #rp-tree-overlay,
     #rp-quick-overlay,
     #repro-birth-overlay {
-        overflow-y: auto;
-        -webkit-overflow-scrolling: touch;
         padding: 12px 8px;
     }
     .rp-tree-dialog,
     .rp-quick-dialog,
     .rb-dialog {
-        margin: auto;
         flex-shrink: 0;
     }
 
@@ -736,12 +748,20 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* ═══ Быстрая панель (волшебная палочка) ═══ */
 #rp-quick-overlay {
-    position: fixed; inset: 0; z-index: 10001;
+    position: fixed !important; inset: 0 !important; z-index: 10001;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    display: flex;
+    display: flex !important;
+    flex-direction: column !important;
+    align-items: center !important;
     padding: 14px; box-sizing: border-box;
-    overflow-y: auto;
+    overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch;
+}
+#rp-quick-overlay::before,
+#rp-quick-overlay::after {
+    content: '';
+    flex: 1 0 0px;
 }
 .rp-quick-dialog {
     width: min(360px, 94vw);
@@ -751,7 +771,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     border-radius: 18px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
     font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
-    margin: auto; flex-shrink: 0;
+    flex-shrink: 0;
 }
 .rp-quick-dialog .rp-tree-head-icon { border-color: rgba(180, 120, 255, .45); }
 .rp-quick-dialog .rp-tree-head-icon i { color: rgba(190, 140, 255, .9); }
