@@ -308,7 +308,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     z-index: 999999;
     background: rgba(0, 0, 0, 0.65);
     backdrop-filter: blur(6px);
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
     padding: 16px;
     box-sizing: border-box;
     overflow-y: auto;
@@ -466,7 +466,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     position: fixed; inset: 0; z-index: 10002;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
     padding: 14px; box-sizing: border-box;
     overflow-y: auto;
 }
@@ -677,12 +677,10 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* Телефон */
 @media (max-width: 540px) {
-    /* Оверлеи: центрирование на маленьких экранах */
+    /* Оверлеи: центрирование через margin:auto на диалогах */
     #rp-tree-overlay,
     #rp-quick-overlay,
     #repro-birth-overlay {
-        align-items: center;
-        justify-content: center;
         overflow-y: auto;
         -webkit-overflow-scrolling: touch;
         padding: 12px 8px;
@@ -741,7 +739,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     position: fixed; inset: 0; z-index: 10001;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
-    display: flex; align-items: center; justify-content: center;
+    display: flex;
     padding: 14px; box-sizing: border-box;
     overflow-y: auto;
 }
