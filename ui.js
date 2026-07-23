@@ -629,11 +629,11 @@ export function showQuickBar() {
 
     const day = getCycleDay();
     const overlay = $(`
-    <div id="rp-quick-overlay">
+    <dialog id="rp-quick-overlay" aria-modal="true" aria-labelledby="rp-quick-title">
         <div class="rp-quick-dialog">
             <div class="rp-tree-head">
                 <span class="rp-tree-head-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
-                <span class="rp-tree-title">Репродукция</span>
+                <span class="rp-tree-title" id="rp-quick-title">Репродукция</span>
                 <button class="rp-tree-close" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
             </div>
             <div class="rp-quick-body">
@@ -652,11 +652,18 @@ export function showQuickBar() {
                 </div>
             </div>
         </div>
-    </div>`);
+    </dialog>`);
 
     $('body').append(overlay);
+    const dialog = overlay[0];
+    if (typeof dialog.showModal === 'function') dialog.showModal();
+    else overlay.attr('open', '');
     overlay.on('mousedown mouseup click touchstart touchend', (e) => e.stopPropagation());
-    const close = () => overlay.remove();
+    const close = () => {
+        if (typeof dialog.close === 'function' && dialog.open) dialog.close();
+        overlay.remove();
+    };
+    overlay.on('cancel', (e) => { e.preventDefault(); close(); });
     overlay.on('click', function(e) { if (e.target === this) close(); });
     overlay.find('.rp-tree-close').on('click', close);
 
@@ -681,9 +688,8 @@ export function showQuickBar() {
     overlay.find('#rp-quick-setcycle').on('click', () => applyCycle(overlay.find('#rp-quick-cycleday').val()));
     overlay.find('#rp-quick-cycleday').on('keydown', function(e) { if (e.key === 'Enter') applyCycle($(this).val()); });
 
-    // Древо открывается ПОВЕРХ быстрой панели (z-index выше). Панель не закрываем —
-    // закрыл древо → снова видишь быструю панель.
-    overlay.find('#rp-quick-tree').on('click', () => { showFamilyTree(); });
+    // Нативный modal находится в top layer, поэтому перед открытием древа закрываем его.
+    overlay.find('#rp-quick-tree').on('click', () => { close(); showFamilyTree(); });
     overlay.find('#rp-quick-birth').on('click', () => {
         close();
         if (!confirm('Принять роды прямо сейчас? Это запустит диалог именования малыша(ей).')) return;

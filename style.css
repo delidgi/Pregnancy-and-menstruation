@@ -759,23 +759,28 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* ═══ Быстрая панель (волшебная палочка) ═══ */
 #rp-quick-overlay {
-    position: fixed !important; inset: 0 !important; z-index: 10001;
+    position: fixed !important; inset: 0 !important; z-index: 2147483647 !important;
+    width: 100vw !important; max-width: none !important;
+    height: 100vh !important; height: 100dvh !important; max-height: none !important;
+    margin: 0 !important; border: 0 !important;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
+    justify-content: center !important;
     padding: 14px; box-sizing: border-box;
-    overflow-y: auto !important;
+    overflow: hidden !important;
     -webkit-overflow-scrolling: touch;
 }
+#rp-quick-overlay::backdrop { background: transparent; }
 #rp-quick-overlay::before,
 #rp-quick-overlay::after {
-    content: '';
-    flex: 1 0 0px;
+    display: none !important;
 }
 .rp-quick-dialog {
     width: min(360px, 94vw);
+    max-height: calc(100vh - 28px); max-height: calc(100dvh - 28px);
     display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(165deg, rgba(44, 40, 54, .98), rgba(24, 23, 30, .99));
     border: 1.5px solid rgba(255, 255, 255, .14);
@@ -844,8 +849,18 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* Телефон — быстрая панель */
 @media (max-width: 540px) {
-    #rp-quick-overlay { padding: 8px; }
-    .rp-quick-dialog { width: min(360px, 100vw - 16px); border-radius: 14px; }
+    #rp-quick-overlay {
+        padding-top: max(8px, env(safe-area-inset-top));
+        padding-right: max(8px, env(safe-area-inset-right));
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+        padding-left: max(8px, env(safe-area-inset-left));
+    }
+    .rp-quick-dialog {
+        width: min(360px, calc(100vw - 16px));
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
+        border-radius: 14px;
+    }
     .rp-quick-body { padding: 12px; gap: 10px; }
     .rp-quick-cycle { flex-wrap: wrap; gap: 5px; }
     .rp-quick-set { min-width: 80px; }
