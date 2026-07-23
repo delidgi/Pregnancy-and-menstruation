@@ -311,6 +311,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     display: flex; align-items: center; justify-content: center;
     padding: 16px;
     box-sizing: border-box;
+    overflow-y: auto;
     animation: rbFadeIn 0.25s ease;
     font: 12px system-ui, sans-serif;
     color: rgba(255,255,255,.85);
@@ -328,9 +329,11 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     max-width: 420px;
     width: 100%;
     max-height: 85vh;
+    max-height: 85dvh;
     overflow-y: auto;
     box-sizing: border-box;
     margin: auto;
+    flex-shrink: 0;
     animation: rbSlideIn 0.25s ease;
 }
 
@@ -465,15 +468,17 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     display: flex; align-items: center; justify-content: center;
     padding: 14px; box-sizing: border-box;
+    overflow-y: auto;
 }
 .rp-tree-dialog {
-    width: min(720px, 96vw); max-height: 86vh;
+    width: min(720px, 96vw); max-height: 86vh; max-height: 86dvh;
     display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(165deg, rgba(44, 40, 54, .97), rgba(24, 23, 30, .98));
     border: 1.5px solid rgba(255, 255, 255, .14);
     border-radius: 20px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
     font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
+    margin: auto; flex-shrink: 0;
 }
 .rp-tree-head {
     display: flex; align-items: center; gap: 10px;
@@ -672,7 +677,24 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* Телефон */
 @media (max-width: 540px) {
-    .rp-tree-dialog { max-height: calc(100dvh - 28px); width: min(720px, 100vw - 16px); border-radius: 16px; }
+    /* Оверлеи: центрирование на маленьких экранах */
+    #rp-tree-overlay,
+    #rp-quick-overlay,
+    #repro-birth-overlay {
+        align-items: center;
+        justify-content: center;
+        overflow-y: auto;
+        -webkit-overflow-scrolling: touch;
+        padding: 12px 8px;
+    }
+    .rp-tree-dialog,
+    .rp-quick-dialog,
+    .rb-dialog {
+        margin: auto;
+        flex-shrink: 0;
+    }
+
+    .rp-tree-dialog { max-height: none; width: min(720px, 100vw - 16px); border-radius: 16px; }
     .rp-tree-body { padding: 10px; }
     .rp-tree-rail { justify-content: center; flex-direction: column; align-items: center; gap: 20px; }
     .rp-tree-union { width: 100%; max-width: 100%; }
@@ -721,6 +743,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     display: flex; align-items: center; justify-content: center;
     padding: 14px; box-sizing: border-box;
+    overflow-y: auto;
 }
 .rp-quick-dialog {
     width: min(360px, 94vw);
@@ -730,6 +753,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     border-radius: 18px;
     box-shadow: 0 24px 80px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(255, 255, 255, .06);
     font: 12px system-ui, sans-serif; color: rgba(255, 255, 255, .85);
+    margin: auto; flex-shrink: 0;
 }
 .rp-quick-dialog .rp-tree-head-icon { border-color: rgba(180, 120, 255, .45); }
 .rp-quick-dialog .rp-tree-head-icon i { color: rgba(190, 140, 255, .9); }
