@@ -261,7 +261,7 @@ export function buildInfoblockHtml() {
                 <summary><div class="repro-header">
                     <div class="repro-icon baby">${ic('fa-baby')}</div>
                     <span class="repro-title repro-baby-name" data-baby-idx="${i}" title="Клик для переименования" style="cursor:pointer">${label}</span>
-                    <span class="repro-badge baby" style="color:var(--rp-${sexColor})">${sexIcon} · ${ageStr}${(() => { const st = getGrowthStage(ageDays); return st ? ' · ' + st.label : ''; })()}</span>
+                    <span class="repro-badge baby" style="color:var(--rp-${sexColor})">${sexIcon} · ${ageStr}${(() => { const st = getGrowthStage(ageDays); return (st && st.key !== 'newborn') ? ' · ' + st.label : ''; })()}</span>
                     <div class="repro-chev">${ic('fa-chevron-down')}</div>
                 </div></summary>
                 <div class="repro-c"><div class="repro-grid">
@@ -417,6 +417,7 @@ export function showFamilyTree() {
 
     // Детальные панели детей (по клику на карточку)
     const detailPanels = [];
+    const detailKids = []; // параллельно detailPanels — объект ребёнка для удаления
 
     const kidCard = (k) => {
         const days = babyAgeDays(k, p);
@@ -424,7 +425,8 @@ export function showFamilyTree() {
         const sexCls = k.sex === 'F' ? 'girl' : 'boy';
         const sexIcon = k.sex === 'F' ? 'fa-venus' : 'fa-mars';
         const ageStr = k._grown && days === null ? 'вырос(ла)' : formatAgeStr(days);
-        const stageStr = stage ? stage.label : (k._grown ? 'взрослый' : '');
+        // Для новорождённого возраст уже говорит «новорожд.» — стадию не дублируем.
+        const stageStr = stage ? (stage.key === 'newborn' ? '' : stage.label) : (k._grown ? 'взрослый' : '');
         const msCount = (k.milestones || []).length;
 
         // Панель деталей: дата рождения, черты, все достижения
@@ -450,6 +452,7 @@ export function showFamilyTree() {
         if (k.special) traits.push(`<div class="rp-tree-trait gold"><i class="fa-solid fa-wand-magic-sparkles"></i>${k.special.name || k.special}</div>`);
 
         const idx = detailPanels.length;
+        detailKids.push(k);
         detailPanels.push(`
             <div class="rp-tree-det-head">
                 <span class="rp-tree-ava ${sexCls}">${initialOf(k.name)}</span>
@@ -459,7 +462,8 @@ export function showFamilyTree() {
                 </div>
             </div>
             ${traits.join('')}
-            ${msHtml}`);
+            ${msHtml}
+            <button class="rp-tree-del" data-del="${idx}"><i class="fa-solid fa-trash"></i> Удалить из семьи</button>`);
 
         return `<div class="rp-tree-cell">
             <div class="rp-node kid ${sexCls}" data-det="${idx}" title="Нажми — профиль и достижения">
@@ -567,6 +571,40 @@ export function showFamilyTree() {
             $(this).addClass('sel');
             panel.html(detailPanels[idx] || '').slideDown(150);
         }
+    });
+
+    // Удаление одного ребёнка из семьи (например, ошибочно созданного дубля)
+    overlay.on('click', '.rp-tree-del', function(e) {
+        e.stopPropagation();
+        const idx = parseInt($(this).attr('data-del'));
+        const k = detailKids[idx];
+        if (!k) return;
+        if (!confirm(`Удалить ${k.name || 'этого ребёнка'} из семьи? Остальные дети останутся. Отменить нельзя.`)) return;
+        const pd = getPregnancyData();
+        const same = (b) => (b.name || '') === (k.name || '')
+            && String(b.birthRpDate || '') === String(k.birthRpDate || '')
+            && (b.sex || '') === (k.sex || '');
+        if (k._grown) {
+            pd.grownChildren = (pd.grownChildren || []).filter(b => !same(b));
+        } else {
+            pd.babies = (pd.babies || []).filter(b => !same(b));
+            pd.babyCount = pd.babies.length;
+            if (pd.babies.length === 0) {
+                pd.hasBaby = false;
+                pd.babyName = '';
+                pd.babySex = [];
+            } else {
+                pd.babyName = pd.babies[0].name || '';
+                pd.babySex = pd.babies.map(b => b.sex);
+            }
+        }
+        saveSettingsDebounced();
+        showNotification(`${k.name || 'Ребёнок'} удалён(а) из семьи`, 'info');
+        import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+        overlay.remove();
+        syncUI();
+        updatePromptInjection();
+        setTimeout(() => { import('./message-handler.js').then(m => m.renderInfoblock()); showFamilyTree(); }, 100);
     });
 }
 

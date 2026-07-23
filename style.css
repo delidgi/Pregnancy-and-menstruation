@@ -494,10 +494,10 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     transition: all .15s; padding: 0;
 }
 .rp-tree-close:hover { color: #fff; border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); }
-.rp-tree-body { padding: 18px; overflow-y: auto; }
+.rp-tree-body { padding: 18px; overflow-y: auto; overflow-x: hidden; }
 
 /* Канва древа — при ширине скроллится горизонтально */
-.rp-tree-canvas { overflow-x: auto; padding-bottom: 4px; }
+.rp-tree-canvas { overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
 
 /* Узлы-карточки */
 .rp-node {
@@ -672,9 +672,20 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* Телефон */
 @media (max-width: 540px) {
-    .rp-tree-dialog { max-height: calc(100dvh - 28px); }
-    .rp-tree-rail { justify-content: flex-start; }
-    .rp-node { min-width: 84px; padding: 8px 9px 8px; }
+    .rp-tree-dialog { max-height: calc(100dvh - 28px); width: min(720px, 100vw - 16px); border-radius: 16px; }
+    .rp-tree-body { padding: 10px; }
+    .rp-tree-rail { justify-content: center; flex-direction: column; align-items: center; gap: 20px; }
+    .rp-tree-union { width: 100%; max-width: 100%; }
+    .rp-couple { gap: 5px; justify-content: center; flex-wrap: wrap; }
+    .rp-node { min-width: 74px; max-width: 110px; padding: 7px 7px 6px; font-size: 11px; }
+    .rp-node-ava { width: 34px; height: 34px; font-size: 14px; }
+    .rp-node-name { font-size: 11px; max-width: 80px; }
+    .rp-node-sub { font-size: 9px; }
+    .rp-tree-row { flex-wrap: wrap; justify-content: center; gap: 4px; }
+    .rp-tree-cell { padding: 12px 3px 0; }
+    .rp-tree-kids-wrap { padding-top: 14px; }
+    .rp-couple-link { width: 20px; height: 20px; }
+    .rp-couple-link i { font-size: 8px; }
 }
 
 
@@ -731,8 +742,8 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 .rp-quick-status i { margin-right: 6px; }
 
 /* Строка смены цикла */
-.rp-quick-cycle { display: flex; align-items: center; gap: 6px; }
-.rp-quick-lbl { font-size: 11px; opacity: .6; margin-right: 2px; }
+.rp-quick-cycle { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.rp-quick-lbl { font-size: 11px; opacity: .6; margin-right: 2px; flex-shrink: 0; }
 .rp-quick-step {
     width: 28px; height: 28px; border-radius: 8px; flex-shrink: 0;
     background: rgba(255, 255, 255, .05); border: 1px solid rgba(255, 255, 255, .14);
@@ -767,3 +778,25 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 .rp-quick-btn:hover { background: rgba(255, 255, 255, .09); border-color: rgba(255, 255, 255, .22); transform: translateY(-1px); }
 .rp-quick-btn i { font-size: 13px; width: 16px; text-align: center; color: rgba(130, 200, 255, .8); }
 #rp-quick-birth i { color: rgba(255, 120, 180, .85); }
+
+/* Кнопка удаления ребёнка в панели деталей древа */
+.rp-tree-del {
+    margin-top: 12px; width: 100%; padding: 8px 12px; cursor: pointer;
+    background: rgba(255, 80, 80, .08); border: 1px solid rgba(255, 80, 80, .3);
+    border-radius: 10px; color: rgba(255, 130, 130, .95); font-size: 11px; font-weight: 600;
+    transition: all .15s;
+}
+.rp-tree-del:hover { background: rgba(255, 80, 80, .16); border-color: rgba(255, 80, 80, .5); }
+.rp-tree-del i { margin-right: 6px; font-size: 10px; }
+
+/* Телефон — быстрая панель */
+@media (max-width: 540px) {
+    #rp-quick-overlay { padding: 8px; }
+    .rp-quick-dialog { width: min(360px, 100vw - 16px); border-radius: 14px; }
+    .rp-quick-body { padding: 12px; gap: 10px; }
+    .rp-quick-cycle { flex-wrap: wrap; gap: 5px; }
+    .rp-quick-set { min-width: 80px; }
+    #rp-quick-cycleday { width: 46px; padding: 4px 2px; font-size: 12px; }
+    .rp-quick-step { width: 26px; height: 26px; }
+    .rp-quick-btn { padding: 9px 11px; font-size: 12px; }
+}

@@ -171,6 +171,19 @@ export function applyScanResult(result) {
         p._lastRpDateTag = savedLastRpDateTag;
         p.grownChildren = existingGrown;
 
+        // ── Блок пере-триггера после родов ──
+        // Модель после родов долго описывает послеродовой период («родила», «кормит»,
+        // «X недель»), и это НЕ должно порождать новую беременность/роды. Блокируем
+        // keyword/текст-триггеры на 12 сообщений (явный [CONCEPTION_CHECK] тег их обходит).
+        try {
+            const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
+            const chatLen = ctx?.chat?.length || 0;
+            s._conceptionBlockedUntil = chatLen + 12;
+            s._birthBlockedUntil = chatLen + 12;
+            p._userSetWeeksAt = Date.now(); // глушит scanWeeksFromText на 30 мин
+            dlog(`[Reproductive] Birth done — blocking re-conception/birth until pos ${chatLen + 12}`);
+        } catch (e) {}
+
         p.hasBaby = true;
         // Общее количество детей = старшие + новорождённые
         p.babyCount = existingBabies.length + newBabyCount;
@@ -676,7 +689,10 @@ export function visitDoctor() {
 export function createPregnancyFromWeeks(weeks, { notify = true } = {}) {
     const s = getSettings();
     const p = getPregnancyData();
-    if (p.isPregnant) return false;
+    // НЕ создаём беременность из текста, если уже беременна ИЛИ есть малыш.
+    // Иначе послеродовой текст («родила», «40 недель», «кормит грудью») воссоздаёт
+    // фантомную беременность → авто-роды → лишний второй ребёнок без отца.
+    if (p.isPregnant || p.hasBaby) return false;
     const w = parseInt(weeks);
     if (!(w >= 1 && w <= 42)) return false;
 
@@ -709,7 +725,8 @@ export function createPregnancyFromWeeks(weeks, { notify = true } = {}) {
 export function createPregnancyFromStateTag(pregState, { notify = true } = {}) {
     const s = getSettings();
     const p = getPregnancyData();
-    if (p.isPregnant || !pregState || !pregState.conceptionDate) return false;
+    // Не воссоздаём беременность из тега, если уже беременна или есть малыш (см. выше).
+    if (p.isPregnant || p.hasBaby || !pregState || !pregState.conceptionDate) return false;
 
     const conceptionMs = new Date(pregState.conceptionDate).getTime();
     if (isNaN(conceptionMs)) return false;
