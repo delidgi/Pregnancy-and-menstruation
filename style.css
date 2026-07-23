@@ -470,23 +470,23 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 
 /* ═══ Семейное древо — классическая раскладка, glass-стиль ═══ */
 #rp-tree-overlay {
-    position: fixed !important; inset: 0 !important; z-index: 10002;
+    position: fixed !important; inset: 0 !important; z-index: 2147483647 !important;
+    width: 100% !important; height: 100vh !important; height: 100dvh !important;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     display: flex !important;
     flex-direction: column !important;
     align-items: center !important;
+    justify-content: center !important;
     padding: 14px; box-sizing: border-box;
-    overflow-y: auto !important;
-    -webkit-overflow-scrolling: touch;
+    overflow: hidden !important;
 }
 #rp-tree-overlay::before,
 #rp-tree-overlay::after {
-    content: '';
-    flex: 1 0 0px;
+    display: none !important;
 }
 .rp-tree-dialog {
-    width: min(720px, 96vw); max-height: 86vh; max-height: 86dvh;
+    width: min(720px, 96vw); max-height: calc(100vh - 28px); max-height: calc(100dvh - 28px);
     display: flex; flex-direction: column; overflow: hidden;
     background: linear-gradient(165deg, rgba(44, 40, 54, .97), rgba(24, 23, 30, .98));
     border: 1.5px solid rgba(255, 255, 255, .14);
@@ -514,7 +514,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     transition: all .15s; padding: 0;
 }
 .rp-tree-close:hover { color: #fff; border-color: rgba(255, 255, 255, .2); background: rgba(255, 255, 255, .06); }
-.rp-tree-body { padding: 18px; overflow-y: auto; overflow-x: hidden; }
+.rp-tree-body { min-height: 0; padding: 18px; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; }
 
 /* Канва древа — при ширине скроллится горизонтально */
 .rp-tree-canvas { overflow-x: auto; padding-bottom: 4px; max-width: 100%; }
@@ -704,7 +704,18 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
         flex-shrink: 0;
     }
 
-    .rp-tree-dialog { max-height: none; width: min(720px, 100vw - 16px); border-radius: 16px; }
+    #rp-tree-overlay {
+        padding-top: max(8px, env(safe-area-inset-top));
+        padding-right: max(8px, env(safe-area-inset-right));
+        padding-bottom: max(8px, env(safe-area-inset-bottom));
+        padding-left: max(8px, env(safe-area-inset-left));
+    }
+    .rp-tree-dialog {
+        width: 100%;
+        max-height: calc(100vh - 16px);
+        max-height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
+        border-radius: 16px;
+    }
     .rp-tree-body { padding: 10px; }
     .rp-tree-rail { justify-content: center; flex-direction: column; align-items: center; gap: 20px; }
     .rp-tree-union { width: 100%; max-width: 100%; }
