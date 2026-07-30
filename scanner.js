@@ -28,6 +28,11 @@ const RP_DATE_RE_ISO = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{4})-(\d{1,2})-(\d{1,2}
 // Sex reveal — только в HTML-комментарии
 const SEX_REVEAL_RE_STRICT = /<!--[\s\S]*?\[SEX_REVEAL\][\s\S]*?-->/i;
 
+// ── Теги носителя-ПЕРСОНАЖА (суффикс :CHAR) — беременность {{char}}, не юзера ──
+const CONCEPTION_CHAR_RE = /<!--[\s\S]*?\[CONCEPTION_CHECK:CHAR\][\s\S]*?-->/i;
+const BIRTH_CHAR_RE = /<!--[\s\S]*?\[BIRTH:CHAR\][\s\S]*?-->/i;
+const SEX_REVEAL_CHAR_RE = /<!--[\s\S]*?\[SEX_REVEAL:CHAR\][\s\S]*?-->/i;
+
 function extractRevealedSexes(text) {
     if (!text) return null;
     const found = [];
@@ -98,7 +103,23 @@ export function scanMessage(text) {
         if (day >= 1 && day <= 28) cycleDay = day;
     }
 
-    if (!hasConception && !hasBirth && !hasSexReveal && !hasMiscarriage && !hasAbortion && cycleDay === null) return null;
+    // ── Теги для ПЕРСОНАЖА-носителя (suffix :CHAR) ──
+    // Базовые регекспы их не ловят: после имени идёт ':', а не ']'.
+    let hasCharConception = CONCEPTION_CHAR_RE.test(text);
+    const hasCharBirth = BIRTH_CHAR_RE.test(text);
+    const hasCharSexReveal = SEX_REVEAL_CHAR_RE.test(text);
+    if (hasCharConception) {
+        const textNoTags = text.replace(/<!--[\s\S]*?-->/g, '');
+        const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex|узел|knot)/i;
+        if (!sexIndicators.test(textNoTags)) {
+            dwarn('[Reproductive] CONCEPTION_CHECK:CHAR tag without sex context — IGNORED.');
+            hasCharConception = false;
+        }
+    }
+
+    const anyTag = hasConception || hasBirth || hasSexReveal || hasMiscarriage || hasAbortion
+                || hasCharConception || hasCharBirth || hasCharSexReveal;
+    if (!anyTag && cycleDay === null) return null;
 
     const result = {
         vaginal_ejaculation_occurred: hasConception,
@@ -106,11 +127,18 @@ export function scanMessage(text) {
         miscarriage_occurred: hasMiscarriage,
         abortion_occurred: hasAbortion,
         sex_revealed: hasSexReveal,
-        revealed_sexes: hasSexReveal ? extractRevealedSexes(text) : null,
-        baby_traits: hasBirth ? scanBabyTraitsTag(text) : null,
+        // Партнёрские события (носитель — {{char}})
+        char_conception: hasCharConception,
+        char_birth: hasCharBirth,
+        char_sex_revealed: hasCharSexReveal,
+        revealed_sexes: (hasSexReveal || hasCharSexReveal) ? extractRevealedSexes(text) : null,
+        baby_traits: (hasBirth || hasCharBirth) ? scanBabyTraitsTag(text) : null,
         cycle_day: cycleDay,
-        _source: (hasConception || hasBirth || hasSexReveal || hasMiscarriage || hasAbortion) ? 'tag' : 'cycle_only',
+        _source: anyTag ? 'tag' : 'cycle_only',
     };
+
+    if (hasCharConception) dlog('[Reproductive] CHAR conception detected via tag');
+    if (hasCharBirth) dlog('[Reproductive] CHAR birth detected via tag');
 
     if (hasConception) dlog('[Reproductive] Conception detected via tag (sex context validated)');
     if (hasBirth) dlog('[Reproductive] Birth detected via tag');
@@ -478,11 +506,11 @@ export function stripHiddenTags(text) {
     text = text.replace(/<!--\s*\[(?!RP_DATE)[\s\S]*?\]\s*-->/g, '');
     text = text.replace(/<repro_scan>[\s\S]*?<\/repro_scan>/gi, '');
     text = text.replace(/<!--\s*repro\b[\s\S]*?-->/gi, '');
-    text = text.replace(/\[?CONCEPTION_CHECK\]?/gi, '');
-    text = text.replace(/\[?BIRTH\]?(?!\w)/gi, '');
+    text = text.replace(/\[?CONCEPTION_CHECK(?::CHAR)?\]?/gi, '');
+    text = text.replace(/\[?BIRTH(?::CHAR)?\]?(?!\w)/gi, '');
     text = text.replace(/\[?MISCARRIAGE\]?/gi, '');
     text = text.replace(/\[?ABORTION\]?(?!\w)/gi, '');
-    text = text.replace(/\[?SEX_REVEAL\]?/gi, '');
+    text = text.replace(/\[?SEX_REVEAL(?::CHAR)?\]?/gi, '');
     text = text.replace(/\[?CYCLE_DAY[:\s]*\d+\]?/gi, '');
     text = text.replace(/\[?RP_STATUS:\s*\{[\s\S]*?\}\s*\]?/gi, '');
     text = text.replace(/\[?BABY_TRAITS:\s*\{[\s\S]*?\}\s*\]?/gi, '');

@@ -4,7 +4,9 @@
 
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId, dlog, dwarn } from './state.js';
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink } from './scanner.js';
-import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag } from './pregnancy.js';
+import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth } from './pregnancy.js';
+import { getPartnerData, carrierName, isTracked } from './state.js';
+import { isOmegaverse, designationOf, advanceAboCycles, carrierAboStatus, sexOf, hasMenstrualCycle } from './omegaverse.js';
 import { updateBabyCare } from './baby-care.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, buildInfoblockHtml } from './ui.js';
@@ -244,6 +246,53 @@ function runScan() {
             updatePromptInjection();
             setTimeout(renderInfoblock, 500);
             // If no conception/birth to process — still continue to Extra API for dynamic data
+        }
+
+        // ── Партнёрские события ({{char}} — носитель) ──
+        // Обрабатываются независимо от юзерских: в одном ответе может быть и то, и то.
+        if (isTracked('char') && (tagResult.char_conception || tagResult.char_birth || tagResult.char_sex_revealed)) {
+            const c = getPartnerData();
+            let charChanged = false;
+            if (tagResult.char_conception && !c.isPregnant) {
+                const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
+                if (blocked) {
+                    dlog('[Reproductive] CHAR conception blocked (reset protection)');
+                } else if (s._lastCharConceptionRollAt === positionId) {
+                    dlog('[Reproductive] CHAR conception already rolled at this position');
+                } else {
+                    s._lastCharConceptionRollAt = positionId;
+                    partnerCheckConception();
+                    charChanged = true;
+                }
+            }
+            if (tagResult.char_sex_revealed && c.isPregnant && !c.fetusSexRevealed) {
+                if (tagResult.revealed_sexes?.length) {
+                    const need = c.fetusCount || 1;
+                    const ns = [];
+                    for (let i = 0; i < need; i++) ns.push(tagResult.revealed_sexes[i] || tagResult.revealed_sexes[tagResult.revealed_sexes.length - 1]);
+                    c.fetusSex = ns;
+                }
+                c.fetusSexRevealed = true;
+                charChanged = true;
+                if (s.showNotifications) {
+                    const icons = c.fetusSex.map(sx => sx === 'M' ? '♂ мальчик' : '♀ девочка').join(', ');
+                    showNotification(`<i class="fa-solid fa-baby"></i> ${carrierName('char')}: пол определён — ${icons}`, 'success');
+                }
+            }
+            if (tagResult.char_birth) {
+                const blocked = s._birthBlockedUntil && positionId <= s._birthBlockedUntil;
+                if (blocked) dlog('[Reproductive] CHAR birth blocked (reset protection)');
+                else if (partnerBirth(tagResult.baby_traits)) charChanged = true;
+            }
+            if (charChanged) {
+                _preRegenSnapshot = snapshotOf(getPregnancyData());
+                _snapshotChatId = chatIdNow;
+                saveSettingsDebounced();
+                syncUI();
+                updatePromptInjection();
+                setTimeout(renderInfoblock, 500);
+                pushStateHistory(positionId);
+            }
         }
 
         // Only proceed if there's actually something to process
@@ -632,6 +681,9 @@ function applyStatusData(s, p, data) {
             swelling: data.swelling || null,
             braxton_hicks: data.braxton_hicks || null,
             fetal_position: data.fetal_position || null,
+            // Размер плода описывает МОДЕЛЬ (живее статичной таблицы). Если не прислала —
+            // инфоблок сам подставит расчётный размер по сроку.
+            fetusSize: data.fetus_size || null,
             note: data.note || null,
         };
 
@@ -645,6 +697,31 @@ function applyStatusData(s, p, data) {
             note: data.note || null,
         };
     }
+
+    // ── Данные носителя-ПЕРСОНАЖА из блока "partner" в RP_STATUS ──
+    if (data.partner && typeof data.partner === 'object' && isTracked('char')) {
+        const c = getPartnerData();
+        const d2 = data.partner;
+        if (d2.mood) c.mood = d2.mood;
+        if (d2.libido) c.libido = d2.libido;
+        if (d2.weight_gain) c.weightGain = d2.weight_gain;
+        if (d2.baby_activity) c.babyActivity = d2.baby_activity;
+        if (d2.father_name) c.fatherName = String(d2.father_name).slice(0, 80);
+        if (d2.sex_revealed === true && c.isPregnant && !c.fetusSexRevealed) c.fetusSexRevealed = true;
+        c._dynamic = c.isPregnant ? {
+            symptoms: d2.symptoms || null,
+            recommendations: d2.recommendations || null,
+            movements: d2.movements || null,
+            fetusSize: d2.fetus_size || null,
+            note: d2.note || null,
+        } : {
+            fertility: d2.fertility || null,
+            libido: d2.libido || null,
+            mood: d2.mood || null,
+            physical: d2.physical || null,
+            note: d2.note || null,
+        };
+    }
 }
 
 
@@ -654,8 +731,64 @@ function advanceTime(s, p, daysPassed) {
     if (daysPassed <= 0) return;
     let changed = false;
 
+    // ── A/B/O циклы (омегаверс): течка омеги / гон альфы у обоих носителей ──
+    if (isOmegaverse(s)) {
+        try {
+            const notifyAbo = (who, evs) => {
+                if (!s.showNotifications || !evs.length) return;
+                const nm = carrierName(who);
+                for (const e of evs) {
+                    if (e === 'heat_start') showNotification(`<i class="fa-solid fa-fire"></i> ${nm}: началась ТЕЧКА — фертильность на пике`, 'warning');
+                    if (e === 'preheat') showNotification(`<i class="fa-solid fa-temperature-arrow-up"></i> ${nm}: предтечка — течка вот-вот`, 'info');
+                    if (e === 'heat_end') showNotification(`<i class="fa-solid fa-snowflake"></i> ${nm}: течка закончилась`, 'info');
+                    if (e === 'rut_start') showNotification(`<i class="fa-solid fa-bolt"></i> ${nm}: начался ГОН`, 'warning');
+                    if (e === 'rut_end') showNotification(`<i class="fa-solid fa-snowflake"></i> ${nm}: гон закончился`, 'info');
+                }
+            };
+            if (isTracked('user') && !p.isPregnant) {
+                notifyAbo('user', advanceAboCycles(p, designationOf(s, 'user'), s, daysPassed));
+                changed = true;
+            }
+            if (isTracked('char')) {
+                const c = getPartnerData();
+                if (!c.isPregnant) {
+                    notifyAbo('char', advanceAboCycles(c, designationOf(s, 'char'), s, daysPassed));
+                    changed = true;
+                }
+            }
+        } catch (e) { dwarn('[Reproductive] ABO advance failed:', e); }
+    }
+
+    // ── Носитель-персонаж: свой цикл и недели беременности ──
+    if (isTracked('char')) {
+        try {
+            const c = getPartnerData();
+            // Месячные партнёра: только если носитель ЖЕНСКОГО пола (роль A/B/O не важна)
+            if (!c.isPregnant && hasMenstrualCycle(s, 'char')) {
+                const setMs = c._userSetCycleAt || 0;
+                if (!(setMs > 0 && (Date.now() - setMs) / 60000 < 30)) {
+                    c.cycleDay = ((c.cycleDay || 1) - 1 + daysPassed) % 28 + 1;
+                    changed = true;
+                }
+            }
+            if (c.isPregnant && c.conceptionDate && p.rpDate) {
+                const w = Math.floor((new Date(p.rpDate).getTime() - new Date(c.conceptionDate).getTime()) / (7 * 86400000));
+                if (w >= 0 && w !== c.pregnancyWeeks) {
+                    c.pregnancyWeeks = w;
+                    changed = true;
+                    const dur = s.pregnancyDuration || 40;
+                    if (s.showNotifications && w >= dur) {
+                        showNotification(`<i class="fa-solid fa-hospital"></i> ${carrierName('char')}: ПДР достигнута — роды в любой момент!`, 'warning');
+                    }
+                }
+            }
+        } catch (e) { dwarn('[Reproductive] partner advance failed:', e); }
+    }
+
     // ── Advance cycle day (28-day cycle, wraps around) ──
-    if (!p.isPregnant) {
+    // В омегаверсе обычный цикл идёт ПАРАЛЛЕЛЬНО с течкой (у омег и бет он есть).
+    // Не тикает только у альф — у них вместо цикла гон.
+    if (!p.isPregnant && isTracked('user') && hasMenstrualCycle(s, 'user')) {
         // Если юзер только что вручную выставил день цикла — не двигаем его автоматически 30 минут.
         // Иначе следующий же бот-ответ с новым RP_DATE сдвинет цикл и выглядит как "сброс".
         const userSetMs = p._userSetCycleAt || 0;

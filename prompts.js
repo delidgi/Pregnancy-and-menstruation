@@ -4,7 +4,8 @@
 
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData, getCycleDay, dlog } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName, isTracked, dlog } from './state.js';
+import { isOmegaverse, designationOf, carrierAboStatus, getCfg } from './omegaverse.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
 import { babyAgeDays, getCareNorms, getCareNeeds, getGrowthStage } from './baby-care.js';
@@ -22,6 +23,84 @@ function langRequirement() {
 function sexToText(arr) {
     if (!arr || arr.length === 0) return '';
     return arr.map(s => s === 'M' ? 'boy' : 'girl').join(', ');
+}
+
+// ─── Блок правил вселенной A/B/O + текущие статусы носителей ───
+// Компактно: 4 строки правил + по строке на носителя.
+function buildUniverseBlock(s) {
+    if (!isOmegaverse(s)) return '';
+    let b = `[UNIVERSE: OMEGAVERSE]\n`;
+    b += `Alphas: dominant instincts, go into RUT, knot during sex, sire offspring, CANNOT get pregnant. Omegas: go into HEAT, produce slick, CAN conceive regardless of gender. Betas: baseline humans, regular cycle.\n`;
+    b += `Heat/rut drive behaviour: scent, instinct, possessiveness. Play them physically, not as a label.\n`;
+
+    const line = (who) => {
+        const desig = designationOf(s, who);
+        const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
+        const st = carrierAboStatus(carrier, desig, s);
+        const nm = who === 'char' ? '{{char}}' : '{{user}}';
+        const role = desig === 'alpha' ? 'ALPHA' : desig === 'omega' ? 'OMEGA' : 'BETA';
+        let t = `${nm} is ${role} — ${st.labelEn}.`;
+        if (st.phase === 'heat') t += ` Portray the heat: feverish arousal, slick, craving to be knotted; fertility EXTREMELY high.`;
+        else if (st.phase === 'preheat') t += ` Restless, rising warmth, scent thickening.`;
+        else if (st.inRut) t += ` Portray the rut: aggression, scent-marking, relentless drive to breed and knot.`;
+        return t + `\n`;
+    };
+    if (isTracked('user')) b += line('user');
+    // Роль {{char}} важна даже если он не отслеживается как носитель (альфа в гоне влияет на сцену)
+    b += line('char');
+    return b + `\n`;
+}
+
+// ─── Строка статуса цикла носителя (обычный мир или омегаверс) ───
+function carrierCycleLine(who, s) {
+    const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
+    const nm = who === 'char' ? '{{char}}' : '{{user}}';
+    if (isOmegaverse(s)) {
+        const st = carrierAboStatus(carrier, designationOf(s, who), s);
+        return `${nm}: ${st.labelEn}`;
+    }
+    const day = who === 'char' ? (carrier.cycleDay || 1) : getCycleDay();
+    const phase = day <= 5 ? 'Menstruation' : day <= 11 ? 'Follicular' : day <= 16 ? 'Ovulation' : 'Luteal';
+    return `${nm}: cycle day ${day}/28 (${phase})`;
+}
+
+// ─── Блок беременности партнёра ({{char}}) для промпта ───
+function partnerPregnancyBlock(s) {
+    if (!isTracked('char')) return '';
+    const c = getPartnerData();
+    const p = getPregnancyData();
+    const langReq = langRequirement();
+    let b = '';
+
+    if (c.isPregnant) {
+        const dur = s.pregnancyDuration || 40;
+        const { weeks } = calculateWeeksFromDates(c.conceptionDate, p.rpDate, c.pregnancyWeeks);
+        const pct = (weeks / dur) * 100;
+        b += `\n[{{char}} IS PREGNANT — carrier: {{char}}]\n`;
+        b += `Term: ${weeks}/${dur} weeks | Fetus: ${formatFetusCount(c.fetusCount, 'full', 'en')}`;
+        if (c.fetusSexRevealed && c.fetusSex?.length) b += ` | Sex: ${sexToText(c.fetusSex)}`;
+        else b += ` | Sex: unknown yet`;
+        if (c.fatherName) b += ` | Father: ${c.fatherName}`;
+        b += `\nSymptoms now: ${getSymptomsForProgress(pct, weeks, 'en')}\n`;
+        b += `[BIRTH:CHAR TAG] If {{char}} ACTUALLY GIVES BIRTH in this reply (baby is out, first cry — not just labor), add at the END:\n`;
+        b += `<!-- [BIRTH:CHAR] -->\n`;
+        b += `plus <!-- [BABY_TRAITS:{"babies":[{"name":"...","fatherName":"...","personality":["..."],"appearance":["..."]}]}] -->\n`;
+        if (!c.fetusSexRevealed) {
+            b += `[SEX_REVEAL:CHAR] If the baby's sex is medically revealed this reply: <!-- [SEX_REVEAL:CHAR] -->\n`;
+        }
+    } else {
+        b += `\n[{{char}} IS A CARRIER — can get pregnant]\n`;
+        b += `[CONCEPTION:CHAR TAG] If in THIS reply someone finishes INSIDE {{char}} (internal release / creampie${isOmegaverse(s) ? ' / knotting' : ''}), add at the END:\n`;
+        b += `<!-- [CONCEPTION_CHECK:CHAR] -->\n`;
+        b += `Same rules as the {{user}} conception tag: HTML comment, verbatim, never paraphrased. Do NOT add it for {{user}}'s scenes — this tag is ONLY about {{char}} being the one who conceives.\n`;
+    }
+
+    // Динамика партнёра — вложенный объект "partner" в RP_STATUS
+    b += `[PARTNER STATUS] Add a "partner" object inside the RP_STATUS tag describing {{char}} (${langReq.langName}, 2-4 words per field):\n`;
+    b += c.isPregnant
+        ? `"partner":{"mood":"...","symptoms":"...","movements":"...","fetus_size":"...","note":"..."}\n`
+        : `"partner":{"mood":"...","libido":"...","physical":"...","note":"..."}\n`;
+    return b;
 }
 
 export function getBasePrompt() {
@@ -42,8 +121,16 @@ export function getBasePrompt() {
         s.contraception === 'pill' ? 'Birth control pill' :
         s.contraception === 'iud' ? 'IUD' : 'No protection';
 
-    let prompt = `[REPRO TRACKER] Cycle day ${day}/28 (${phase}) | ${contraLabel}\n`;
-    prompt += `You are running a fertility/cycle simulation for {{user}}. Each reply must END with hidden HTML-comment markers that update the tracker. These markers ARE INVISIBLE to the reader (HTML comments don't render) — they are a technical channel, not narration. Never paraphrase them into visible text.\n\n`;
+    // Заголовок трекера: строка статуса на каждого отслеживаемого носителя
+    const carrierLines = [];
+    if (isTracked('user')) carrierLines.push(carrierCycleLine('user', s));
+    if (isTracked('char')) carrierLines.push(carrierCycleLine('char', s));
+
+    let prompt = buildUniverseBlock(s);
+    prompt += `[REPRO TRACKER] ${carrierLines.join(' | ')} | ${contraLabel}\n`;
+    const who = isTracked('char') && isTracked('user') ? '{{user}} and {{char}}'
+              : isTracked('char') ? '{{char}}' : '{{user}}';
+    prompt += `You are running a fertility/cycle simulation for ${who}. Each reply must END with hidden HTML-comment markers that update the tracker. These markers ARE INVISIBLE to the reader (HTML comments don't render) — they are a technical channel, not narration. Never paraphrase them into visible text.\n\n`;
 
     // ── TAG 1 — DATE (always) ──
     prompt += `[DATE TAG — REQUIRED every reply]\n`;
@@ -55,14 +142,24 @@ export function getBasePrompt() {
         prompt += `Condom is in use (~15% failure chance — still possible to fail).\n\n`;
     }
 
-    // If pregnant — forbid conception tag, return early
+    // If pregnant — forbid conception tag, return early (но партнёрский блок всё равно нужен)
     if (p.isPregnant) {
         prompt += `{{user}} IS PREGNANT — never add CONCEPTION_CHECK tag.\n`;
+        prompt += partnerPregnancyBlock(s);
         return prompt;
     }
 
     if (p.hasBaby) {
         prompt += `{{user}} has a baby (postpartum — fertility may still apply, follow tag rules below).\n\n`;
+    }
+
+    // Юзер не отслеживается как носитель → его теги зачатия не нужны
+    if (!isTracked('user')) {
+        prompt += partnerPregnancyBlock(s);
+        const lr = langRequirement();
+        prompt += `\n[STATUS TAG — REQUIRED every reply]\n<!-- [RP_STATUS:{"note":"..."}] -->\n${lr.line}\n`;
+        prompt += `\n[DATE TAG — REQUIRED every reply, very last line]\n<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
+        return prompt;
     }
 
     // ── TAG 2 — CONCEPTION (conditional) ──
@@ -91,8 +188,11 @@ export function getBasePrompt() {
     prompt += `"note" = 1 short sentence about {{user}}'s sensations from THIS scene. Must be an HTML comment; do NOT replace with a visible status block.\n`;
     prompt += `${langReq.line}\n\n`;
 
+    prompt += partnerPregnancyBlock(s);
+
     prompt += `[ORDER OF TAGS — at the END of your reply, after all the prose, each on its own line]\n`;
     prompt += `Line N-2 (only if creampie this reply): <!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
+    if (isTracked('char')) prompt += `(+ <!-- [CONCEPTION_CHECK:CHAR] --> or <!-- [BIRTH:CHAR] --> when the event happens to {{char}})\n`;
     prompt += `Line N-1: <!-- [RP_STATUS:{...}] -->\n`;
     prompt += `Line N (very last): <!-- [RP_DATE:DD.MM.YYYY] -->\n`;
     prompt += `\n`;
@@ -211,6 +311,7 @@ export function getPregnancyPrompt() {
         optFields.push('"father_name" (or null)');
         optFields.push('"symptoms"');
         optFields.push('"recommendations"');
+        optFields.push('"fetus_size"');
         if (weeks >= 16) optFields.push('"movements"');
         if (weeks >= 20) optFields.push('"swelling" (or null)');
         if (weeks >= 28) optFields.push('"braxton_hicks" (or null)');
@@ -221,8 +322,12 @@ export function getPregnancyPrompt() {
         prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqP.langName} 2-5 words/field, null if irrelevant, describes {{user}}):\n`;
         prompt += `<!-- [RP_STATUS:{${optFields.join(',')}}] -->\n`;
         prompt += `"note" = 1 short sentence about {{user}}'s state from THIS scene. Must be HTML comment, not a visible status block.\n`;
+        prompt += `"fetus_size" = how big the baby is NOW, in YOUR words — a vivid comparison plus rough length/weight (e.g. «с гранат, ~25 см, 300 г»). Base it on the term above; it replaces the tracker's built-in table.\n`;
         prompt += `${langReqP.line}\n`;
     }
+
+    // Партнёр-носитель (когда отслеживаются оба)
+    prompt += partnerPregnancyBlock(s);
 
     prompt += `\n[DATE TAG — REQUIRED every reply]\n`;
     prompt += `COPY THIS LINE VERBATIM as the LAST line of your reply:\n`;

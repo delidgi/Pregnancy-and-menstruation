@@ -471,7 +471,9 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
 /* ═══ Семейное древо — классическая раскладка, glass-стиль ═══ */
 #rp-tree-overlay {
     position: fixed !important; inset: 0 !important; z-index: 2147483647 !important;
-    width: 100% !important; height: 100vh !important; height: 100dvh !important;
+    width: 100vw !important; max-width: none !important;
+    height: 100vh !important; height: 100dvh !important; max-height: none !important;
+    margin: 0 !important; border: 0 !important;
     background: rgba(8, 8, 12, .55);
     backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
     display: flex !important;
@@ -481,6 +483,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     padding: 14px; box-sizing: border-box;
     overflow: hidden !important;
 }
+#rp-tree-overlay::backdrop { background: transparent; }
 #rp-tree-overlay::before,
 #rp-tree-overlay::after {
     display: none !important;
@@ -711,7 +714,7 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
         padding-left: max(8px, env(safe-area-inset-left));
     }
     .rp-tree-dialog {
-        width: 100%;
+        width: min(720px, calc(100vw - 16px));
         max-height: calc(100vh - 16px);
         max-height: calc(100dvh - max(8px, env(safe-area-inset-top)) - max(8px, env(safe-area-inset-bottom)));
         border-radius: 16px;
@@ -868,3 +871,12 @@ details.repro .repro-health.critical { border: 1px solid rgba(255,60,60,.3);  co
     .rp-quick-step { width: 26px; height: 26px; }
     .rp-quick-btn { padding: 9px 11px; font-size: 12px; }
 }
+
+/* ═══ Объединённая карточка носителей (fallback вне кастомного CSS) ═══ */
+details.repro.repro-multi .repro-multi-body { padding: 8px 10px 10px; display: flex; flex-direction: column; gap: 6px; }
+details.repro.repro-multi details.repro { margin: 0; max-width: none; }
+details.repro.repro-multi details.repro .repro-header { border: none; border-radius: 10px; padding: 6px 10px; background: rgba(255,255,255,.03); }
+details.repro.repro-multi details.repro[open] .repro-header { border-radius: 10px 10px 0 0; }
+details.repro.repro-multi details.repro .repro-c { border: none; padding: 8px 4px 4px; }
+details.repro.repro-multi .repro-badge { font-size: 9px; }
+details.repro .rp-sub { opacity: .5; font-weight: 400; font-size: 10px; }

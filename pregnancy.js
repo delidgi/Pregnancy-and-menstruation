@@ -4,7 +4,8 @@
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES, defaultPregnancyData } from './config.js';
-import { getSettings, getPregnancyData, getCycleDay, setCycleDay, L, dlog, dwarn } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, carrierName, L, dlog, dwarn } from './state.js';
+import { isOmegaverse, designationOf, carrierAboStatus, getCfg } from './omegaverse.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
 import { calculateConceptionDate } from './date-parser.js';
 import { showNotification, showBirthDialog } from './notifications.js';
@@ -968,4 +969,203 @@ export function checkBabyGraduation() {
         }
     }
     return graduates;
+}
+
+// ═══════════════════════════════════════════
+// НОСИТЕЛЬ-ПЕРСОНАЖ ({{char}}) — своя беременность, общая семья
+// Дети от партнёрских родов попадают в ОБЩИЙ p.babies (семья одна).
+// ═══════════════════════════════════════════
+
+// Бросок зачатия для партнёра. Возвращает {success, roll, chance} или null.
+export function partnerCheckConception() {
+    const s = getSettings();
+    const c = getPartnerData();
+    if (!s.isEnabled || c.isPregnant) return null;
+    const p = getPregnancyData();
+
+    s.totalChecks++;
+    let chance;
+    if (isOmegaverse(s)) {
+        // Омегаверс: шанс зависит от фазы течки носителя
+        const st = carrierAboStatus(c, designationOf(s, 'char'), s);
+        chance = Math.round(CHANCES.base * (st.fertility ?? 1));
+    } else {
+        chance = Math.round(CHANCES.base * getCycleModifier(c.cycleDay || 1));
+    }
+    const contraEff = CHANCES.contraception[s.contraception] || 0;
+    if (s.contraception !== 'none' && roll(100) <= contraEff) {
+        chance = Math.round(chance * (1 - contraEff / 100));
+    }
+
+    const r = roll(100);
+    const success = r <= chance;
+    dlog(`[Reproductive] CHAR conception: roll=${r}, need<=${chance} -> ${success ? 'PREGNANT' : 'no'}`);
+
+    if (success) {
+        c.isPregnant = true;
+        c.conceptionDate = p.rpDate || null;
+        c._conceptionAnchored = !!p.rpDate;
+        c.pregnancyWeeks = 0;
+        c._plannedComplications = rollPlannedComplications();
+        c.healthStatus = 'normal';
+        s.totalConceptions++;
+        const mult = roll(1000) / 10;
+        c.fetusCount = mult <= (s.tripletsChance || 0.1) ? 3 : mult <= (s.twinsChance || 3) ? 2 : 1;
+        c.fetusSex = [];
+        for (let i = 0; i < c.fetusCount; i++) c.fetusSex.push(roll(2) === 1 ? 'M' : 'F');
+        c.fetusSexRevealed = false;
+        if (!c.fatherName) c.fatherName = carrierName('user');
+        if (s.showNotifications) {
+            showNotification(`<i class="fa-solid fa-check"></i> ${carrierName('char')} беременна! ${formatFetusCount(c.fetusCount)}`, 'success');
+        }
+    } else if (s.showNotifications) {
+        showNotification(`<i class="fa-solid fa-xmark"></i> ${carrierName('char')} — зачатия не произошло (${r}/${chance})`, 'info');
+    }
+
+    saveSettingsDebounced();
+    refreshSnap();
+    _syncUI();
+    _updatePromptInjection();
+    return { success, roll: r, chance };
+}
+
+// Роды у партнёра: дети уходят в ОБЩИЙ p.babies, беременность партнёра сбрасывается.
+export function partnerBirth(babyTraits) {
+    const s = getSettings();
+    const p = getPregnancyData();
+    const c = getPartnerData();
+    if (!c.isPregnant) { dwarn('[Reproductive] CHAR birth ignored — not pregnant'); return false; }
+    const weeks = c.pregnancyWeeks || 0;
+    if (weeks > 0 && weeks < 20) { dwarn(`[Reproductive] CHAR birth ignored — too early (${weeks}w)`); return false; }
+
+    const count = c.fetusCount || 1;
+    const sexes = c.fetusSex?.length ? [...c.fetusSex] : ['M'];
+    const birthRpDate = p.rpDate || new Date().toISOString();
+    const motherName = carrierName('char');
+    const fatherName = c.fatherName || carrierName('user');
+
+    // Сброс беременности партнёра
+    c.isPregnant = false;
+    c.conceptionDate = null;
+    c.pregnancyWeeks = 0;
+    c.fetusCount = 1;
+    c.fetusSex = [];
+    c.fetusSexRevealed = false;
+    c.complications = [];
+    c._plannedComplications = [];
+    c._dynamic = {};
+
+    // Дети — в общую семью
+    if (!Array.isArray(p.babies)) p.babies = [];
+    const startIdx = p.babies.length;
+    for (let i = 0; i < count; i++) {
+        p.babies.push({
+            name: '', sex: sexes[i] || 'M', health: 'normal', mood: 'спокойный', sleep: 'спит',
+            diaperClean: true, teething: false, colicky: false, feedingType: '',
+            milestones: [], personality: [], appearance: [],
+            fatherName, motherName, bornBy: 'char',
+            birthRpDate, age: 'новорождённый',
+        });
+    }
+    p.hasBaby = true;
+    p.babyCount = p.babies.length;
+    p.babySex = p.babies.map(b => b.sex);
+    p.babyBirthRpDate = birthRpDate;
+
+    // Блок пере-триггера (как при родах юзера)
+    try {
+        const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
+        const chatLen = ctx?.chat?.length || 0;
+        s._conceptionBlockedUntil = chatLen + 12;
+        s._birthBlockedUntil = chatLen + 12;
+    } catch (e) {}
+
+    saveSettingsDebounced();
+    _syncUI();
+    _updatePromptInjection();
+
+    // Диалог именования (переиспользуем общий)
+    const modelTraits = babyTraits?.babies && Array.isArray(babyTraits.babies) ? babyTraits.babies : [];
+    const dialogBabies = [];
+    for (let i = 0; i < count; i++) {
+        const mt = modelTraits[i] || {};
+        dialogBabies.push({
+            sex: sexes[i] || 'M',
+            name: mt.name || mt.имя || '',
+            fatherName: mt.fatherName || mt.father || fatherName,
+            personality: Array.isArray(mt.personality) ? mt.personality : null,
+            appearance: Array.isArray(mt.appearance) ? mt.appearance : null,
+            special: mt.special !== undefined ? mt.special : undefined,
+        });
+    }
+    showBirthDialog(dialogBabies, (names, traitsData) => {
+        for (let i = 0; i < count; i++) {
+            const baby = p.babies[startIdx + i];
+            if (!baby) continue;
+            if (names[i]) baby.name = names[i];
+            const tr = traitsData[i] || { personality: [], appearance: [] };
+            baby.personality = tr.personality;
+            baby.appearance = tr.appearance;
+            if (tr.special) baby.special = tr.special;
+            if (tr.fatherName) baby.fatherName = tr.fatherName;
+        }
+        if (p.babies[0]?.name) p.babyName = p.babies[0].name;
+        saveSettingsDebounced();
+        _syncUI();
+        _updatePromptInjection();
+        _renderInfoblock();
+    });
+
+    if (s.showNotifications) showNotification(`<i class="fa-solid fa-baby"></i> ${motherName} родила!`, 'success');
+    return true;
+}
+
+// Ручная беременность партнёра (из панели настроек)
+export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = null) {
+    const c = getPartnerData();
+    const p = getPregnancyData();
+    const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
+    c.isPregnant = true;
+    c.conceptionDate = conceptionDateISO;
+    c._conceptionAnchored = true;
+    c._userSetWeeksAt = Date.now();
+    c.fetusCount = count;
+    c.healthStatus = 'normal';
+    c.complications = [];
+    c._plannedComplications = [];
+    c.fetusSex = (Array.isArray(fetusSex) && fetusSex.length === count)
+        ? [...fetusSex]
+        : Array.from({ length: count }, () => (roll(2) === 1 ? 'M' : 'F'));
+    c.fetusSexRevealed = false;
+    if (!c.fatherName) c.fatherName = carrierName('user');
+    c.pregnancyWeeks = p.rpDate ? calculateWeeksFromDates(c.conceptionDate, p.rpDate, 0).weeks : 0;
+
+    refreshSnap();
+    saveSettingsDebounced();
+    _syncUI();
+    _updatePromptInjection();
+    if (getSettings().showNotifications) {
+        showNotification(`<i class="fa-solid fa-check"></i> ${carrierName('char')}: беременность ${c.pregnancyWeeks} нед.`, 'success');
+    }
+    return c;
+}
+
+// Сброс беременности партнёра
+export function resetPartnerPregnancy() {
+    const c = getPartnerData();
+    c.isPregnant = false;
+    c.conceptionDate = null;
+    c.pregnancyWeeks = 0;
+    c.fetusCount = 1;
+    c.fetusSex = [];
+    c.fetusSexRevealed = false;
+    c.complications = [];
+    c._plannedComplications = [];
+    c.healthStatus = 'normal';
+    c._dynamic = {};
+    c._userSetWeeksAt = Date.now();
+    refreshSnap();
+    saveSettingsDebounced();
+    _syncUI();
+    _updatePromptInjection();
 }

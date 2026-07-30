@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 import { extension_settings } from '../../../extensions.js';
-import { extensionName, defaultPregnancyData, LANG } from './config.js';
+import { extensionName, defaultPregnancyData, defaultPartnerData, LANG } from './config.js';
 
 export function getSettings() {
     return extension_settings[extensionName];
@@ -182,6 +182,54 @@ export function getPregnancyData() {
     }
 
     return s.chatPregnancyData[chatId];
+}
+
+// ──────────────────────────────────────────────────────────────────────
+// Носители: кого отслеживаем (s.trackFor = user | char | both).
+// Данные юзера живут в корне p, данные персонажа — в p.partner.
+// Дети (babies/grownChildren) ОБЩИЕ и всегда лежат в корне — семья одна.
+// ──────────────────────────────────────────────────────────────────────
+export function getPartnerData() {
+    const p = getPregnancyData();
+    if (!p.partner) p.partner = structuredClone(defaultPartnerData);
+    // Досыпаем новые поля в старые сейвы
+    for (const k in defaultPartnerData) {
+        if (p.partner[k] === undefined) p.partner[k] = defaultPartnerData[k];
+    }
+    return p.partner;
+}
+
+// Данные носителя по ключу: 'user' → p, 'char' → p.partner
+export function getCarrier(who) {
+    return who === 'char' ? getPartnerData() : getPregnancyData();
+}
+
+// Список активных носителей: [{ who, data }]
+export function getCarriers() {
+    const s = getSettings();
+    const mode = s?.trackFor || 'user';
+    const list = [];
+    if (mode === 'user' || mode === 'both') list.push({ who: 'user', data: getPregnancyData() });
+    if (mode === 'char' || mode === 'both') list.push({ who: 'char', data: getPartnerData() });
+    if (list.length === 0) list.push({ who: 'user', data: getPregnancyData() });
+    return list;
+}
+
+// Имя носителя для UI/промпта
+export function carrierName(who) {
+    try {
+        const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : null;
+        if (who === 'char') return ctx?.name2 || 'Персонаж';
+        return ctx?.name1 || 'Ты';
+    } catch (e) {
+        return who === 'char' ? 'Персонаж' : 'Ты';
+    }
+}
+
+// Отслеживается ли носитель
+export function isTracked(who) {
+    const mode = getSettings()?.trackFor || 'user';
+    return mode === 'both' || mode === who;
 }
 
 export function L(key) {
