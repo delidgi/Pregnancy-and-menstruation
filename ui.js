@@ -3,10 +3,10 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
 import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesTotal } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
-import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, setLactating, setTrying, monthsTrying } from './pregnancy.js';
+import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, daysSinceConception, setLactating, setTrying, monthsTrying } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { showNotification } from './notifications.js';
 
@@ -467,16 +467,19 @@ function carriersHtml(tr) {
     const s = getSettings();
     const cards = [];
     for (const { who, data } of getCarriers()) {
+        // Пока о беременности не знают (нет теста, срок не очевиден), инфоблок
+        // показывает обычный цикл — иначе смысл скрытой беременности теряется.
+        const showPreg = data.isPregnant && pregnancyIsKnown(data, s);
         // Нечего показывать (мужчина-бета в обычном мире и не беременный) — карточку пропускаем
-        if (!data.isPregnant && !hasAnyTracking(s, who)) continue;
-        cards.push(data.isPregnant ? pregnancyCardHtml(who, data, tr) : cycleCardHtml(who, data, tr));
+        if (!showPreg && !hasAnyTracking(s, who)) continue;
+        cards.push(showPreg ? pregnancyCardHtml(who, data, tr) : cycleCardHtml(who, data, tr));
     }
     if (cards.length <= 1) return cards[0] || '';
 
     // Сводка в шапке объединённой карточки: коротко о каждом
     const brief = getCarriers().map(({ who, data }) => {
         const nm = carrierName(who);
-        if (data.isPregnant) return `${nm} · ${data.pregnancyWeeks || 0} нед.`;
+        if (data.isPregnant && pregnancyIsKnown(data, s)) return `${nm} · ${data.pregnancyWeeks || 0} нед.`;
         if (isOmegaverse(s)) {
             const st = carrierAboStatus(data, designationOf(s, who), s);
             return `${nm} · ${st.label}`;
@@ -485,7 +488,7 @@ function carriersHtml(tr) {
         return `${nm} · ${d}/28`;
     }).join('  ·  ');
 
-    return `<details class="repro repro-multi" open>
+    return `<details class="repro repro-multi">
         <summary><div class="repro-header">
             <div class="repro-icon cycle">${ic('fa-venus-mars')}</div>
             <span class="repro-title">Репродукция</span>
@@ -512,12 +515,13 @@ function buildPregnancyCard(who, p, root, s, tr) {
         // RP-дата всегда в корне (одна на чат), у партнёра своего rpDate нет
         const { weeks } = calculateWeeksFromDates(p.conceptionDate, root.rpDate, p.pregnancyWeeks);
         const pct = Math.min(100, Math.round((weeks / dur) * 100));
-        const trimester = weeks <= 12 ? 1 : weeks <= 27 ? 2 : 3;
+        // Триместр — по доле срока: беременность может длиться не 40 недель
+        const trimester = pct <= 33 ? 1 : pct <= 67 ? 2 : 3;
         const sexRevealed = !!p.fetusSexRevealed;
         const sexStr = sexRevealed && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? '<i class="fa-solid fa-mars"></i> мальчик' : '<i class="fa-solid fa-venus"></i> девочка').join(', ') : 'неизвестно';
-        // Размер плода: приоритет — живое описание от МОДЕЛИ (fetus_size в RP_STATUS),
-        // фолбэк — расчётная таблица по сроку.
-        const fetusSize = tr((p._dynamic || {}).fetusSize) || getFetusSizeForProgress(pct, false);
+        // Размер плода целиком за моделью (fetus_size в RP_STATUS): своей таблицы
+        // у трекера нет — она всё равно врала при нестандартном сроке.
+        const fetusSize = tr((p._dynamic || {}).fetusSize) || '';
         const symptoms = getSymptomsForProgress(pct, weeks);
         const recs = getRecommendationsForProgress(pct);
         let dueStr = '—';
@@ -548,7 +552,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
                     ${stat('fa-calendar', 'purple', 'ПДР', dueStr)}
                     ${stat('fa-baby', 'pink', 'Плод', `${formatFetusCount(p.fetusCount)} (${sexStr})`)}
                     ${p.fatherName ? stat('fa-user', 'blue', 'Отец', p.fatherName) : ''}
-                    ${stat('fa-ruler', 'blue', 'Размер', fetusSize)}
+                    ${fetusSize ? stat('fa-ruler', 'blue', 'Размер', fetusSize) : ''}
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(p.healthStatus))}
                     ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', tr(p.mood)) : ''}
                     ${p.weightGain ? stat('fa-weight-scale', 'orange', 'Вес', tr(p.weightGain)) : ''}
@@ -634,14 +638,19 @@ function cycleCardHtml(who, c, tr) {
     }
 
     // ── ОБЫЧНЫЙ 28-ДНЕВНЫЙ ЦИКЛ ──
-    const day = who === 'char' ? Math.max(1, Math.min(28, c.cycleDay || 1)) : getCycleDay();
-    const phase = getPhaseInfo(day);
-    const cyclePct = Math.round(day / 28 * 100);
-    const cd = getCycleDetails(day);
     const p0 = getPregnancyData();
+    // При беременности цикл заморожен на дне зачатия. Пока о ней не знают,
+    // карточка показывает цикл — и день должен идти дальше, превращаясь в задержку.
+    const hidden = c.isPregnant && !pregnancyIsKnown(c, s);
+    const frozenDay = who === 'char' ? Math.max(1, c.cycleDay || 1) : getCycleDay();
+    const rawDay = hidden ? frozenDay + daysSinceConception(c, p0) : frozenDay;
+    const day = Math.max(1, Math.min(28, rawDay));
+    const phase = getPhaseInfo(day);
+    const cyclePct = Math.min(100, Math.round(rawDay / 28 * 100));
+    const cd = getCycleDetails(day);
 
     // Задержка / скрытая беременность: героиня не знает, но задержку видит
-    const delay = missedDays(day, 28);
+    const delay = missedDays(rawDay, 28);
     const pp = getPostpartum(c, p0);
     const win = s.tryingToConceive ? fertileWindow(day, 28) : null;
     const testRes = c.lastTestResult;
@@ -667,7 +676,9 @@ function cycleCardHtml(who, c, tr) {
 
     const badge = pp && !pp.cycleReturned
         ? `После родов · ${pp.days} дн.`
-        : `День ${day}/28 · ${phase.name}${delay > 0 ? ` · задержка ${delay}` : ''}`;
+        : delay > 0
+            ? `Задержка ${delay} дн.`
+            : `День ${day}/28 · ${phase.name}`;
 
     return `<details class="repro">
         <summary><div class="repro-header">
@@ -1242,7 +1253,7 @@ export function syncUI() {
             const dur = s.pregnancyDuration || 40;
             const { weeks, days } = calculateWeeksFromDates(p.conceptionDate, p.rpDate, p.pregnancyWeeks);
             const pct = Math.min(100, Math.round((weeks / dur) * 100));
-            const sexVis = weeks >= 20;
+            const sexVis = (weeks / dur) * 100 >= 50;
             const sexStr = sexVis && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? 'М' : 'Д').join(', ') : '—';
             const health = getHealthInfo(p.healthStatus);
             const hCls = p.healthStatus === 'critical' ? 'crit' : p.healthStatus === 'warning' ? 'warn' : 'ok';
@@ -1259,7 +1270,7 @@ export function syncUI() {
 
             const symptoms = getSymptomsForProgress(pct, weeks);
             const recs = getRecommendationsForProgress(pct);
-            const fetusSize = getFetusSizeForProgress(pct, false);
+            const fetusSize = (p._dynamic || {}).fetusSize || '';
 
             let compsHtml = '';
             if (p.complications?.length > 0) {
@@ -1277,7 +1288,7 @@ export function syncUI() {
                     <div class="rp-m-cell"><span class="rp-m-lbl">Зачатие</span><span class="rp-m-val">${conceptionStr}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">ПДР</span><span class="rp-m-val">${dueStr}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(p.fetusCount)} (${sexStr})</span></div>
-                    <div class="rp-m-cell"><span class="rp-m-lbl">Размер</span><span class="rp-m-val">${fetusSize}</span></div>
+                    ${fetusSize ? `<div class="rp-m-cell"><span class="rp-m-lbl">Размер</span><span class="rp-m-val">${fetusSize}</span></div>` : ''}
                     <div class="rp-m-cell"><span class="rp-m-lbl">Здоровье</span><span class="rp-m-val rp-m-hp-${hCls}">${health.text}</span></div>
                     ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${p.fatherName}</span></div>` : ''}
                 </div>

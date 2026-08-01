@@ -8,7 +8,7 @@ import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { pregnancyIsKnown, daysSinceConception, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, missedDays, conceptionStruggle } from './fertility.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
+import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
 import { babyAgeDays, getCareNorms, getCareNeeds, getGrowthStage } from './baby-care.js';
 
@@ -74,16 +74,33 @@ function carrierCycleLine(who, s) {
     return `${nm}: cycle day ${day}/28 (${phase})`;
 }
 
+// ─── Шкала срока ───
+// Беременность может длиться не 40 недель (короткий сеттинг, нечеловеческий вид).
+// Без явного пересчёта модель описывает плод по реальным неделям: «4 недели —
+// маковое зёрнышко», хотя 4 из 24 — это уже треть пути.
+function termScaleBlock(duration, weeks, progressPercent) {
+    if (!duration || duration === 40) return '';
+    const humanEq = Math.max(1, Math.round((progressPercent / 100) * 40));
+    let b = `[TERM SCALE — READ BEFORE DESCRIBING THE PREGNANCY]\n`;
+    b += `A full pregnancy in this setting lasts ${duration} weeks, NOT the real-life 40. `;
+    b += `Week ${weeks} of ${duration} is ${Math.round(progressPercent)}% of the way — developmentally that matches about week ${humanEq} of a real 40-week pregnancy.\n`;
+    b += `Scale EVERYTHING to this timeline: fetal size and development, belly, symptoms, what doctors say, how far along she looks. `;
+    b += `Never describe the fetus as if it were at real-life week ${weeks}.\n`;
+    return b;
+}
+
 // ─── Блок беременности партнёра ({{char}}) для промпта ───
 function partnerPregnancyBlock(s) {
     if (!isTracked('char')) return '';
-    if (!canCarry(s, 'char')) return '';
+    // Носителем {{char}} может и не быть (мужчина, альфа) — но статус для него
+    // всё равно нужен, иначе инфоблок бота остаётся с зашитыми заглушками.
+    const carries = canCarry(s, 'char');
     const c = getPartnerData();
     const p = getPregnancyData();
     const langReq = langRequirement();
     let b = '';
 
-    if (c.isPregnant) {
+    if (c.isPregnant && carries) {
         const dur = s.pregnancyDuration || 40;
         const { weeks } = calculateWeeksFromDates(c.conceptionDate, p.rpDate, c.pregnancyWeeks);
         const pct = (weeks / dur) * 100;
@@ -92,25 +109,33 @@ function partnerPregnancyBlock(s) {
         if (c.fetusSexRevealed && c.fetusSex?.length) b += ` | Sex: ${sexToText(c.fetusSex)}`;
         else b += ` | Sex: unknown yet`;
         if (c.fatherName) b += ` | Father: ${c.fatherName}`;
-        b += `\nSymptoms now: ${getSymptomsForProgress(pct, weeks, 'en')}\n`;
+        b += `\n${termScaleBlock(dur, weeks, pct)}`;
+        b += `Symptoms now: ${getSymptomsForProgress(pct, weeks, 'en')}\n`;
         b += `[BIRTH:CHAR TAG] If {{char}} ACTUALLY GIVES BIRTH in this reply (baby is out, first cry — not just labor), add at the END:\n`;
         b += `<!-- [BIRTH:CHAR] -->\n`;
         b += `plus <!-- [BABY_TRAITS:{"babies":[{"name":"...","fatherName":"...","personality":["..."],"appearance":["..."]}]}] -->\n`;
         if (!c.fetusSexRevealed) {
             b += `[SEX_REVEAL:CHAR] If the baby's sex is medically revealed this reply: <!-- [SEX_REVEAL:CHAR] -->\n`;
         }
-    } else {
+    } else if (carries) {
         b += `\n[{{char}} IS A CARRIER — can get pregnant]\n`;
         b += `[CONCEPTION:CHAR TAG] If in THIS reply someone finishes INSIDE {{char}} (internal release / creampie${isOmegaverse(s) ? ' / knotting' : ''}), add at the END:\n`;
         b += `<!-- [CONCEPTION_CHECK:CHAR] -->\n`;
         b += `Same rules as the {{user}} conception tag: HTML comment, verbatim, never paraphrased. Do NOT add it for {{user}}'s scenes — this tag is ONLY about {{char}} being the one who conceives.\n`;
     }
 
-    // Динамика партнёра — вложенный объект "partner" в RP_STATUS
-    b += `[PARTNER STATUS] Add a "partner" object inside the RP_STATUS tag describing {{char}} (${langReq.langName}, 2-4 words per field):\n`;
-    b += c.isPregnant
+    // Динамика партнёра — вложенный объект "partner" в RP_STATUS.
+    // Просим ВСЕГДА, когда {{char}} отслеживается: даже если он не носитель,
+    // инфоблок показывает его настроение, либидо и состояние.
+    b += `\n[PARTNER STATUS — REQUIRED] {{char}} is tracked by the infoblock. Add a "partner" object inside the RP_STATUS tag describing {{char}} RIGHT NOW (${langReq.langName}, 2-4 words per field). Base it on what actually happens in THIS reply — never generic filler, never the previous values repeated unchanged:\n`;
+    b += (c.isPregnant && carries)
         ? `"partner":{"mood":"...","symptoms":"...","movements":"...","fetus_size":"...","note":"..."}\n`
         : `"partner":{"mood":"...","libido":"...","physical":"...","note":"..."}\n`;
+    if (isOmegaverse(s)) {
+        const d = designationOf(s, 'char');
+        if (d === 'alpha') b += `{{char}} is an ALPHA — "physical" must reflect his actual rut state in the scene (in rut / pre-rut / calm), not a fixed phrase.\n`;
+        else if (d === 'omega') b += `{{char}} is an OMEGA — "physical" must reflect the actual heat state in the scene (in heat / pre-heat / calm), not a fixed phrase.\n`;
+    }
     return b;
 }
 
@@ -239,7 +264,6 @@ export function getPregnancyPrompt() {
 
     const symptoms = getSymptomsForProgress(progressPercent, weeks, 'en');
     const recommendations = getRecommendationsForProgress(progressPercent, 'en');
-    const fetusSize = getFetusSizeForProgress(progressPercent, false, 'en');
     const sexText = sexToText(p.fetusSex);
     const fetusCountText = formatFetusCount(p.fetusCount, 'full', 'en');
     const healthInfo = getHealthInfo(p.healthStatus, 'en');
@@ -259,11 +283,11 @@ export function getPregnancyPrompt() {
 
     let prompt = `\n[PREGNANCY]\n`;
     prompt += `Term: ${weeks}/${duration} weeks (${Math.round(progressPercent)}%)\n`;
+    prompt += termScaleBlock(duration, weeks, progressPercent);
     prompt += `Due date: ${dueDateStr}\n`;
     prompt += `Fetus: ${fetusCountText}`;
     if (p.fetusSexRevealed && sexText) prompt += ` | Sex: ${sexText}`;
     else prompt += ` | Sex: unknown yet`;
-    prompt += `\nSize: ${fetusSize}\n`;
     prompt += `Health: ${healthInfo.text}${healthDetails}\n`;
     prompt += `Symptoms: ${symptoms}\n`;
     prompt += `Recommendations: ${recommendations}\n`;
@@ -333,17 +357,19 @@ export function getPregnancyPrompt() {
         optFields.push('"symptoms"');
         optFields.push('"recommendations"');
         optFields.push('"fetus_size"');
-        if (weeks >= 16) optFields.push('"movements"');
-        if (weeks >= 20) optFields.push('"swelling" (or null)');
-        if (weeks >= 28) optFields.push('"braxton_hicks" (or null)');
-        if (weeks >= 32) optFields.push('"fetal_position"');
+        // Пороги — по ДОЛЕ срока, а не по абсолютной неделе: при короткой
+        // беременности 20-я неделя может быть уже финишем, а не серединой.
+        if (progressPercent >= 40) optFields.push('"movements"');
+        if (progressPercent >= 50) optFields.push('"swelling" (or null)');
+        if (progressPercent >= 70) optFields.push('"braxton_hicks" (or null)');
+        if (progressPercent >= 80) optFields.push('"fetal_position"');
         optFields.push('"note"');
         const langReqP = langRequirement();
         prompt += `\n[STATUS TAG — REQUIRED every reply]\n`;
         prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, ${langReqP.langName} 2-5 words/field, null if irrelevant, describes {{user}}):\n`;
         prompt += `<!-- [RP_STATUS:{${optFields.join(',')}}] -->\n`;
         prompt += `"note" = 1 short sentence about {{user}}'s state from THIS scene. Must be HTML comment, not a visible status block.\n`;
-        prompt += `"fetus_size" = how big the baby is NOW, in YOUR words — a vivid comparison plus rough length/weight (e.g. «с гранат, ~25 см, 300 г»). Base it on the term above; it replaces the tracker's built-in table.\n`;
+        prompt += `"fetus_size" = how big the baby is NOW — your call, with a rough length and weight. Pick whatever comparison fits this story and this character: a fruit if you like, but just as easily a coin, a kitten, a clenched fist, a paperback, a tool from her trade, something from the setting. Vary it between replies instead of walking down the same produce aisle. Fit it to the ${duration}-week term above (${Math.round(progressPercent)}% of the way), NOT to real-life week ${weeks}. The tracker has no size table — this field is the only source.\n`;
         prompt += `${langReqP.line}\n`;
     }
 
@@ -550,29 +576,32 @@ export function updatePromptInjection() {
 // ─── Скрытая беременность: модель знает только симптомы, не факт ───
 function hiddenPregnancyPrompt(p, s) {
     const days = daysSinceConception(p, p);
-    const delay = missedDays(getCycleDay(), 28);
     const lang = langRequirement();
+    // Задержка есть только у носителей с месячными (не у мужчины-омеги) и
+    // наступает не раньше, чем цикл дошёл бы до конца: цикл на время
+    // беременности заморожен, поэтому день считаем от зачатия.
+    const delay = hasMenstrualCycle(s, 'user') ? missedDays(getCycleDay() + days, 28) : 0;
 
-    let b = `\n[EARLY SIGNS — {{user}} does NOT know she is pregnant]\n`;
-    b += `CRITICAL: {{user}} has NOT taken a test and does NOT know. NEVER state or imply that she is pregnant, never mention a due date, term or the baby's sex. Do not have characters "sense" it.\n`;
+    let b = `\n[EARLY SIGNS — {{user}} does NOT know about the pregnancy]\n`;
+    b += `CRITICAL: {{user}} has NOT taken a test and does NOT know. NEVER state or imply pregnancy, never mention a due date, term or the baby's sex. Do not have characters "sense" it.\n`;
 
     if (days < 7) {
         b += `Nothing is noticeable yet — no symptoms at all this early.\n`;
     } else if (days < 14) {
-        b += `Possible subtle signs she would NOT connect to pregnancy: mild fatigue, slight tenderness, mood swings. Keep them ambiguous — could be anything.\n`;
+        b += `Possible subtle signs {{user}} would NOT connect to pregnancy: mild fatigue, slight tenderness, mood swings. Keep them ambiguous — could be anything.\n`;
     } else {
-        b += `Signs she might start noticing: morning nausea, sore breasts, exhaustion, food aversions, heightened smell.`;
-        if (delay > 0) b += ` Her period is ${delay} day(s) late — she may or may not have noticed.`;
-        b += `\nShe MAY suspect and wonder aloud, buy a test, or dismiss it. Let her (the player) decide — do not confirm anything.\n`;
+        b += `Signs {{user}} might start noticing: morning nausea, tenderness, exhaustion, food aversions, heightened smell.`;
+        if (delay > 0) b += ` The period is ${delay} day(s) late — may or may not have been noticed.`;
+        b += `\n{{user}} MAY suspect and wonder aloud, buy a test, or dismiss it. Let the player decide — do not confirm anything.\n`;
     }
 
     if (p.lastTestResult === 'negative') {
-        b += `She recently took a test: it came back NEGATIVE (too early to detect). She believes she is not pregnant.\n`;
+        b += `A test was taken recently and came back NEGATIVE (too early to detect). {{user}} believes there is no pregnancy.\n`;
     }
 
     b += `\n[STATUS TAG — REQUIRED every reply]\n`;
     b += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
-    b += `Describe only what she actually feels. ${lang.line}\n`;
+    b += `Describe only what {{user}} actually feels. ${lang.line}\n`;
     b += `\n[DATE TAG — REQUIRED every reply, very last line]\n<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
     return b;
 }

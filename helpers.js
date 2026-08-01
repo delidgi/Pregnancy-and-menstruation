@@ -125,9 +125,12 @@ export function getSymptomsForProgress(progressPercent, weeks, lang = 'ru') {
     const L = lang === 'en';
     let pool, count;
     if (progressPercent <= 10) {
+        // Задержки здесь нет намеренно: она наступает не раньше чем через
+        // неделю-две после зачатия, есть не у всех носителей (мужчина-омега),
+        // и считается отдельно — карточка цикла показывает её живой цифрой.
         pool = L
-            ? ['missed period', 'mild morning nausea', 'increased fatigue', 'mood swings', 'heightened sense of smell', 'tingling in breasts', 'daytime drowsiness', 'mild lower abdominal cramps']
-            : ['задержка менструации', 'лёгкая тошнота по утрам', 'повышенная усталость', 'перепады настроения', 'обострение обоняния', 'покалывание в груди', 'сонливость днём', 'лёгкие спазмы внизу живота'];
+            ? ['mild morning nausea', 'increased fatigue', 'mood swings', 'heightened sense of smell', 'tingling in breasts', 'daytime drowsiness', 'mild lower abdominal cramps', 'appetite changes']
+            : ['лёгкая тошнота по утрам', 'повышенная усталость', 'перепады настроения', 'обострение обоняния', 'покалывание в груди', 'сонливость днём', 'лёгкие спазмы внизу живота', 'изменения аппетита'];
         count = 3;
     } else if (progressPercent <= 20) {
         pool = L
@@ -183,45 +186,6 @@ export function getRecommendationsForProgress(progressPercent, lang = 'ru') {
     return L ? 'URGENT — labor induction may be needed' : 'СРОЧНО — возможна стимуляция родов';
 }
 
-export function getFetusSizeForProgress(progressPercent, withIcon = false, lang = 'ru') {
-    const L = lang === 'en';
-    const sizes = L ? [
-        [5,  'poppy seed (~1-2 mm)',         'fa-seedling'],
-        [10, 'grain of rice (~5-10 mm)',     'fa-seedling'],
-        [15, 'grape (~2-3 cm)',              'fa-lemon'],
-        [20, 'lime (~5-6 cm)',               'fa-lemon'],
-        [25, 'lemon (~7-8 cm)',              'fa-lemon'],
-        [30, 'avocado (~10-12 cm)',          'fa-apple-whole'],
-        [35, 'mango (~14-16 cm)',            'fa-apple-whole'],
-        [40, 'banana (~18-20 cm)',           'fa-carrot'],
-        [50, 'ear of corn (~25-28 cm)',      'fa-wheat-awn'],
-        [60, 'eggplant (~30-35 cm)',         'fa-pepper-hot'],
-        [70, 'zucchini (~38-40 cm)',         'fa-pepper-hot'],
-        [80, 'honeydew melon (~42-45 cm)',   'fa-circle'],
-        [90, 'watermelon (~45-48 cm)',       'fa-circle'],
-    ] : [
-        [5,  'маковое зёрнышко (~1-2 мм)',     'fa-seedling'],
-        [10, 'рисовое зерно (~5-10 мм)',        'fa-seedling'],
-        [15, 'виноградинка (~2-3 см)',           'fa-lemon'],
-        [20, 'лайм (~5-6 см)',                   'fa-lemon'],
-        [25, 'лимон (~7-8 см)',                  'fa-lemon'],
-        [30, 'авокадо (~10-12 см)',              'fa-apple-whole'],
-        [35, 'манго (~14-16 см)',                'fa-apple-whole'],
-        [40, 'банан (~18-20 см)',                'fa-carrot'],
-        [50, 'кукурузный початок (~25-28 см)',   'fa-wheat-awn'],
-        [60, 'баклажан (~30-35 см)',             'fa-pepper-hot'],
-        [70, 'кабачок (~38-40 см)',              'fa-pepper-hot'],
-        [80, 'дыня (~42-45 см)',                 'fa-circle'],
-        [90, 'арбуз (~45-48 см)',                'fa-circle'],
-    ];
-    for (const [threshold, text, icon] of sizes) {
-        if (progressPercent <= threshold) {
-            return withIcon ? `<i class="fa-solid ${icon}" style="opacity:0.5;font-size:9px"></i> ${text}` : text;
-        }
-    }
-    const finalText = L ? 'full-term (~48-52 cm, 2.5-4 kg)' : 'доношенный (~48-52 см, 2.5-4 кг)';
-    return withIcon ? `<i class="fa-solid fa-baby" style="opacity:0.5;font-size:9px"></i> ${finalText}` : finalText;
-}
 
 export function formatSexIcons(fetusSex, withText = false) {
     if (!fetusSex || fetusSex.length === 0) return '';
