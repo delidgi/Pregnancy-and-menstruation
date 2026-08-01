@@ -50,6 +50,24 @@ function extractRevealedSexes(text) {
     return found.length > 0 ? found : null;
 }
 
+// Похоже ли на реальное семяизвержение ВНУТРЬ. Модель вешает CONCEPTION_CHECK
+// по инерции — на сцену с игрушкой, на чужой секс, просто потому что тег мелькал
+// в контексте. Слов «секс», «член», «трах» недостаточно: они есть в любой сцене.
+function looksLikeInternalRelease(text) {
+    const releaseInside = /(?:сперм|семен|семя|creampie|cum(?:s|ming|med)?\s+(?:in|inside|into)|(?:came|come|coming)\s+(?:in|inside|into)|fill(?:s|ed|ing)?\s+(?:her|you|me)\b|конч(?:ил|ила|ает|аю|аешь|ая)\s+(?:в|внутр)|изли(?:в|л)[а-яё]*\s+(?:в|внутр)|залива(?:л|ла|ет)\s+(?:в|внутр)|заполн(?:ил|ила|яет)\s+(?:её|ее|тебя|меня|лоно|матк)|внутри\s+(?:неё|нее|тебя|меня))/i;
+    // Омегаверс: сцепка узлом — тоже зачатие, но только если сказано «внутрь»
+    const knotting = /(?:узл[аоеы]м?|узел|knot(?:s|ted|ting)?)\b/i.test(text)
+        && /(?:внутр|inside|изли|сперм|семен|cum)/i.test(text);
+    if (!releaseInside.test(text) && !knotting) return false;
+
+    // Игрушка упомянута, а спермы в тексте нет — тег ложный
+    const toys = /(?:секс[- ]?игрушк|игрушк[иауео]?\s|дилдо|dildo|вибратор|vibrator|strap[- ]?on|страпон|фаллоимитатор|plug\b|пробк[ауи])/i;
+    const semen = /(?:сперм|семен|семя|creampie|cum|конч(?:ил|ила|ает)\s+(?:в|внутр))/i;
+    if (toys.test(text) && !semen.test(text)) return false;
+
+    return true;
+}
+
 // Сканер: ловит ТОЛЬКО теги внутри HTML-комментариев. Никаких keyword fallback —
 // если модель не поставила тег, расширка ничего не делает (это безопаснее для РП).
 export function scanMessage(text) {
@@ -76,19 +94,8 @@ export function scanMessage(text) {
         }
     }
 
-    // Sanity check: если модель поставила CONCEPTION_CHECK, но в тексте нет ВООБЩЕ
-    // никаких намёков на сексуальное окончание внутрь — это галлюцинация модели
-    // (ставит тег по инерции, потому что инструкция мелькала в её контексте).
-    // Грубый, но эффективный фильтр: проверяем минимальный набор слов которые ДОЛЖНЫ
-    // присутствовать в сцене реального creampie. Если ни одного — отбрасываем тег.
-    if (hasConception) {
-        // Очищаем текст от тегов в комментариях (иначе сам тег пройдёт регексп проверки)
-        const textWithoutTags = text.replace(/<!--[\s\S]*?-->/g, '');
-        // Минимальные индикаторы сексуального окончания/спермы/проникновения
-        const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри\s+(?:неё|нее|тебя|меня)|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex)/i;
-        if (!sexIndicators.test(textWithoutTags)) {
-            hasConception = false;
-        }
+    if (hasConception && !looksLikeInternalRelease(text.replace(/<!--[\s\S]*?-->/g, ''))) {
+        hasConception = false;
     }
 
     let cycleDay = null;
@@ -102,12 +109,8 @@ export function scanMessage(text) {
     let hasCharConception = CONCEPTION_CHAR_RE.test(text);
     const hasCharBirth = BIRTH_CHAR_RE.test(text);
     const hasCharSexReveal = SEX_REVEAL_CHAR_RE.test(text);
-    if (hasCharConception) {
-        const textNoTags = text.replace(/<!--[\s\S]*?-->/g, '');
-        const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex|узел|knot)/i;
-        if (!sexIndicators.test(textNoTags)) {
-            hasCharConception = false;
-        }
+    if (hasCharConception && !looksLikeInternalRelease(text.replace(/<!--[\s\S]*?-->/g, ''))) {
+        hasCharConception = false;
     }
 
     const anyTag = hasConception || hasBirth || hasSexReveal || hasMiscarriage || hasAbortion

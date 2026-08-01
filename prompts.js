@@ -206,7 +206,11 @@ export function getBasePrompt() {
 
     // ── TAG 2 — CONCEPTION (conditional) ──
     prompt += `[CONCEPTION TAG — conditional]\n`;
-    prompt += `Trigger: in this reply's narrative, a male partner finishes inside {{user}}'s vagina (internal release / creampie / cum-inside / condom failure with release inside). Add the tag whenever the trigger is true.\n`;
+    prompt += `Trigger — ALL of these must be true in THIS reply's narrative:\n`;
+    prompt += `  1. Semen is actually released INSIDE {{user}} — internal release / creampie / condom failing with release inside. Real semen from a body.\n`;
+    prompt += `  2. The receiving person is {{user}}, nobody else. If the scene is between {{char}} and some other character (an NPC, a memory, a story someone tells), do NOT add the tag${isTracked('char') ? ' — that is what the :CHAR tag is for, and only when {{char}} is the one receiving' : ''}.\n`;
+    prompt += `  3. It happens NOW, in this reply — not remembered, planned, imagined, feared or talked about.\n`;
+    prompt += `NEVER add the tag for: toys of any kind (dildo, vibrator, plug, strap-on), fingers, oral, anal without internal release, dry humping, an orgasm with no semen inside, a condom that held, or a scene that merely mentions sex. When unsure — leave the tag out. A missed tag costs nothing; a false one starts a pregnancy that did not happen.\n`;
     prompt += `\n`;
     prompt += `When triggered, COPY THIS LINE VERBATIM at the END of your reply (after all the prose, on its own line):\n`;
     prompt += `<!-- [CYCLE_DAY:${day}][CONCEPTION_CHECK] -->\n`;
