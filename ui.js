@@ -1643,6 +1643,7 @@ export function setupUI() {
                 <input type="checkbox" id="repro-light-mode">
                 <span>Светлая тема</span>
             </label>
+            <button id="repro-purge-tags" class="menu_button" style="width:100%;font-size:10px" title="Убрать технические теги из текста сообщений этого чата — модель перестанет их видеть">Вычистить теги из чата</button>
             <div id="repro-css-panel" style="display:none;flex-direction:column;gap:4px">
                 <textarea id="repro-custom-css" class="text_pole" rows="10" style="font-family:monospace;font-size:10px;resize:vertical;min-height:80px;white-space:pre;tab-size:2" placeholder="/* Свой CSS для инфоблока */\ndetails.repro { ... }"></textarea>
                 <div style="display:flex;gap:4px">
@@ -1681,7 +1682,21 @@ export function setupUI() {
         registerWandItem();
 
         // Events
-        $('#repro-enabled').on('change', function() { getSettings().isEnabled = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
+        $('#repro-enabled').on('change', function() {
+            getSettings().isEnabled = this.checked;
+            saveSettingsDebounced();
+            updatePromptInjection();
+            // Выключили — теги из прошлых сообщений всё ещё в контексте и тянут сюжет.
+            // Расширение их больше не обслуживает, так что предлагаем убрать.
+            if (!this.checked) {
+                import('./message-handler.js').then(m => {
+                    if (!m.chatHasTags()) return;
+                    if (!confirm('Расширение выключено, но в сообщениях остались его технические теги — модель их видит и продолжает по ним сюжет. Убрать теги из этого чата?')) return;
+                    const n = m.purgeChatTags();
+                    showNotification(`Теги убраны из ${n} сообщ.`, 'success');
+                });
+            }
+        });
         $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
         $('#repro-baby-max-age').on('change', function() {
             const v = parseInt(this.value) || 730;
@@ -1913,6 +1928,16 @@ export function setupUI() {
 
         // Infoblock
         $('#repro-infoblock').on('change', function() { getSettings().infoblockPosition = this.value; saveSettingsDebounced(); });
+
+        // Чистка тегов из истории чата
+        $('#repro-purge-tags').on('click', function() {
+            if (!confirm('Убрать технические теги из текста сообщений этого чата? Они переедут в служебное поле: расширение их по-прежнему читает, а модель — больше нет. Видимый текст не меняется.')) return;
+            // Динамический импорт: message-handler сам тянет ui.js, статический импорт замкнул бы круг
+            import('./message-handler.js').then(m => {
+                const n = m.purgeChatTags();
+                showNotification(n ? `Теги убраны из ${n} сообщ.` : 'Тегов в этом чате нет', n ? 'success' : 'info');
+            });
+        });
 
         // Светлая тема таверны
         $('#repro-light-mode').prop('checked', !!s.lightMode).on('change', function() {

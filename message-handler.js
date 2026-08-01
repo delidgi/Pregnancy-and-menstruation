@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
-import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink } from './scanner.js';
+import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth } from './pregnancy.js';
 import { getPartnerData, carrierName, isTracked } from './state.js';
 import { isOmegaverse, designationOf, advanceAboCycles, carrierAboStatus, sexOf, hasMenstrualCycle } from './omegaverse.js';
@@ -29,6 +29,54 @@ function getRecentMessages(count = 3) {
         }
     }
     return msgs;
+}
+
+
+// ─── Технические теги не должны попадать в контекст модели ───
+// Раньше они оставались в msg.mes «для повторного скана» — и уходили в промпт
+// при каждой генерации. Модель их копировала и тянула старый сюжет (омегаверс
+// из прежних полей), даже когда расширение выключено. Теперь после скана текст
+// сообщения чистится, а исходник живёт в msg.extra.reproRaw.
+
+// Текст для скана: сначала сохранённый исходник, иначе видимый текст
+export function rawTextOf(msg) {
+    if (!msg) return '';
+    return (msg.extra && msg.extra.reproRaw) || msg.mes || '';
+}
+
+// Вырезать теги из сообщения, сохранив исходник. true — если что-то изменилось
+export function detachTags(msg) {
+    if (!msg || !msg.mes || !hasReproTags(msg.mes)) return false;
+    const raw = msg.mes;
+    const clean = stripReproTags(raw);
+    if (!clean || clean === raw) return false;
+    msg.extra = msg.extra || {};
+    msg.extra.reproRaw = raw;
+    msg.mes = clean;
+    // Свайпы хранят свои версии текста — чистим и активный вариант
+    if (Array.isArray(msg.swipes) && typeof msg.swipe_id === 'number' && msg.swipes[msg.swipe_id] === raw) {
+        msg.swipes[msg.swipe_id] = clean;
+    }
+    return true;
+}
+
+// Есть ли в текущем чате наши теги в тексте сообщений
+export function chatHasTags() {
+    const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : null;
+    const chat = ctx?.chat || window.chat;
+    if (!Array.isArray(chat)) return false;
+    return chat.some(m => m && hasReproTags(m.mes));
+}
+
+// Разовая чистка всей истории чата (кнопка в настройках). Возвращает число сообщений.
+export function purgeChatTags() {
+    const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : null;
+    const chat = ctx?.chat || window.chat;
+    if (!Array.isArray(chat)) return 0;
+    let n = 0;
+    for (const msg of chat) if (detachTags(msg)) n++;
+    if (n && ctx?.saveChat) { try { ctx.saveChat(); } catch (e) { /* ignore */ } }
+    return n;
 }
 
 // ─── Main scan logic ───
@@ -137,7 +185,7 @@ function runScan() {
 
     // Теги внутри CoT-блоков не считаются (закрытый think = мысли; незакрытый
     // с тегами = префилл, содержимое сканируется)
-    const text = stripThink(lastMessage.mes || '');
+    const text = stripThink(rawTextOf(lastMessage));
     const textHash = simpleHash(text);
 
     // Дедуп: та же позиция И тот же текст (или его версия с уже вырезанными тегами) → скип.
@@ -1018,7 +1066,7 @@ export function processDateTag(text) {
             for (let i = chat.length - 2; i >= 0; i--) {
                 const msg = chat[i];
                 if (msg && msg.mes && !msg.is_system) {
-                    const prev = scanDateTag(stripThink(msg.mes));
+                    const prev = scanDateTag(stripThink(rawTextOf(msg)));
                     if (prev) {
                         prevRaw = prev.toISOString();
                         break;

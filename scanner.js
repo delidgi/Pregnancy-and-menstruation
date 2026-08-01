@@ -469,6 +469,33 @@ export function stripThink(text) {
     return res;
 }
 
+// Исходник сообщения: теги живут в extra, если их уже отцепили от текста
+export function messageRaw(msg) {
+    if (!msg) return '';
+    return (msg.extra && msg.extra.reproRaw) || msg.mes || '';
+}
+
+// Наши технические комментарии — перечисляем поимённо, чтобы не задеть
+// теги других расширений (телефон и т.п.) в таких же HTML-комментариях.
+export const REPRO_TAG_RE = /<!--\s*\[(?:RP_STATUS|RP_DATE|CONCEPTION_CHECK|BIRTH|MISCARRIAGE|ABORTION|SEX_REVEAL|CYCLE_DAY|PREGNANCY_STATE|BABY_TRAITS)(?::CHAR)?[\s\S]*?-->/gi;
+
+export function hasReproTags(text) {
+    REPRO_TAG_RE.lastIndex = 0;
+    return !!text && REPRO_TAG_RE.test(text);
+}
+
+// Полный вырез технических комментариев из ТЕКСТА сообщения.
+// Нужен, чтобы теги не уходили в контекст модели: она их копирует,
+// а старые поля (течка/гон и т.п.) тянут сюжет за собой.
+export function stripReproTags(text) {
+    if (!text) return text;
+    return String(text)
+        .replace(REPRO_TAG_RE, '')
+        .replace(/\n{3,}/g, '\n\n')
+        .replace(/[ \t]+$/gm, '')
+        .trim();
+}
+
 export function stripHiddenTags(text) {
     if (!text) return text;
     text = text.replace(/<!--\s*\[(?!RP_DATE)[\s\S]*?\]\s*-->/g, '');
@@ -495,7 +522,7 @@ export async function scanChat() {
     if (!chat || chat.length === 0) return null;
     const lastMessage = chat[chat.length - 1];
     if (!lastMessage || lastMessage.is_user) return null;
-    return scanMessage(lastMessage.mes);
+    return scanMessage(messageRaw(lastMessage));
 }
 
 // ─── Сканер всей истории чата: ВОССТАНАВЛИВАЕТ состояние с нуля ───
@@ -564,7 +591,7 @@ export async function scanFullHistory() {
         for (let i = 0; i < chat.length; i++) {
             const msg = chat[i];
             if (!msg || !msg.mes || msg.is_system) continue;
-            const text = stripThink(msg.mes);
+            const text = stripThink(messageRaw(msg));
             stats.processed++;
 
             // 1) RP_DATE — обновляем дату и продвигаем время/цикл/недели
