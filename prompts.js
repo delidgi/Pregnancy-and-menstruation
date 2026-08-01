@@ -4,8 +4,10 @@
 
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName, isTracked, dlog } from './state.js';
-import { isOmegaverse, designationOf, carrierAboStatus, getCfg } from './omegaverse.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName, isTracked } from './state.js';
+import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
+import { pregnancyIsKnown, daysSinceConception, getPostpartum, monthsTrying } from './pregnancy.js';
+import { fertileWindow, missedDays, conceptionStruggle } from './fertility.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
 import { babyAgeDays, getCareNorms, getCareNeeds, getGrowthStage } from './baby-care.js';
@@ -53,11 +55,19 @@ function buildUniverseBlock(s) {
 
 // ─── Строка статуса цикла носителя (обычный мир или омегаверс) ───
 function carrierCycleLine(who, s) {
+    if (!hasAnyTracking(s, who)) return '';
     const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
     const nm = who === 'char' ? '{{char}}' : '{{user}}';
     if (isOmegaverse(s)) {
         const st = carrierAboStatus(carrier, designationOf(s, who), s);
-        return `${nm}: ${st.labelEn}`;
+        const parts = [st.labelEn];
+        // У женщин в омегаверсе месячные тоже идут — добавляем вторым пунктом
+        if (hasMenstrualCycle(s, who)) {
+            const d = who === 'char' ? (carrier.cycleDay || 1) : getCycleDay();
+            const ph = d <= 5 ? 'Menstruation' : d <= 11 ? 'Follicular' : d <= 16 ? 'Ovulation' : 'Luteal';
+            parts.push(`cycle day ${d}/28 (${ph})`);
+        }
+        return `${nm}: ${parts.join(', ')}`;
     }
     const day = who === 'char' ? (carrier.cycleDay || 1) : getCycleDay();
     const phase = day <= 5 ? 'Menstruation' : day <= 11 ? 'Follicular' : day <= 16 ? 'Ovulation' : 'Luteal';
@@ -67,6 +77,7 @@ function carrierCycleLine(who, s) {
 // ─── Блок беременности партнёра ({{char}}) для промпта ───
 function partnerPregnancyBlock(s) {
     if (!isTracked('char')) return '';
+    if (!canCarry(s, 'char')) return '';
     const c = getPartnerData();
     const p = getPregnancyData();
     const langReq = langRequirement();
@@ -121,13 +132,14 @@ export function getBasePrompt() {
         s.contraception === 'pill' ? 'Birth control pill' :
         s.contraception === 'iud' ? 'IUD' : 'No protection';
 
-    // Заголовок трекера: строка статуса на каждого отслеживаемого носителя
+    // Строка статуса на каждого отслеживаемого носителя
     const carrierLines = [];
     if (isTracked('user')) carrierLines.push(carrierCycleLine('user', s));
     if (isTracked('char')) carrierLines.push(carrierCycleLine('char', s));
+    const carrierLinesFiltered = carrierLines.filter(Boolean);
 
     let prompt = buildUniverseBlock(s);
-    prompt += `[REPRO TRACKER] ${carrierLines.join(' | ')} | ${contraLabel}\n`;
+    prompt += `[REPRO TRACKER] ${carrierLinesFiltered.join(' | ')}${carrierLinesFiltered.length ? ' | ' : ''}${contraLabel}\n`;
     const who = isTracked('char') && isTracked('user') ? '{{user}} and {{char}}'
               : isTracked('char') ? '{{char}}' : '{{user}}';
     prompt += `You are running a fertility/cycle simulation for ${who}. Each reply must END with hidden HTML-comment markers that update the tracker. These markers ARE INVISIBLE to the reader (HTML comments don't render) — they are a technical channel, not narration. Never paraphrase them into visible text.\n\n`;
@@ -144,7 +156,10 @@ export function getBasePrompt() {
 
     // If pregnant — forbid conception tag, return early (но партнёрский блок всё равно нужен)
     if (p.isPregnant) {
-        prompt += `{{user}} IS PREGNANT — never add CONCEPTION_CHECK tag.\n`;
+        // Пока героиня не знает — не говорим модели, что она беременна
+        prompt += pregnancyIsKnown(p, s)
+            ? `{{user}} IS PREGNANT — never add CONCEPTION_CHECK tag.\n`
+            : `Do NOT add the CONCEPTION_CHECK tag in this reply.\n`;
         prompt += partnerPregnancyBlock(s);
         return prompt;
     }
@@ -152,6 +167,8 @@ export function getBasePrompt() {
     if (p.hasBaby) {
         prompt += `{{user}} has a baby (postpartum — fertility may still apply, follow tag rules below).\n\n`;
     }
+    prompt += postpartumBlock(p);
+    prompt += tryingBlock(s, p);
 
     // Юзер не отслеживается как носитель → его теги зачатия не нужны
     if (!isTracked('user')) {
@@ -163,8 +180,6 @@ export function getBasePrompt() {
     }
 
     // ── TAG 2 — CONCEPTION (conditional) ──
-    // ВАЖНО: модели парафразят инструкцию ("Output this tag" → "{Pregnancy Check: TRIGGERED}" в видимом тексте).
-    // Нужно ЯВНО подчеркнуть: COPY VERBATIM, это HTML-комментарий, СКРЫТЫЙ ОТ ЧИТАТЕЛЯ.
     prompt += `[CONCEPTION TAG — conditional]\n`;
     prompt += `Trigger: in this reply's narrative, a male partner finishes inside {{user}}'s vagina (internal release / creampie / cum-inside / condom failure with release inside). Add the tag whenever the trigger is true.\n`;
     prompt += `\n`;
@@ -209,7 +224,13 @@ export function getPregnancyPrompt() {
 
     // Baby prompt
     if (p.hasBaby) {
-        return getBabyPrompt(p);
+        return postpartumBlock(p) + birthdayBlock(p) + getBabyPrompt(p);
+    }
+
+    // ── СКРЫТАЯ БЕРЕМЕННОСТЬ ──
+    // Героиня ещё не знает: модель НЕ должна знать срок, пол и ПДР — только симптомы.
+    if (!pregnancyIsKnown(p, s)) {
+        return hiddenPregnancyPrompt(p, s);
     }
 
     const duration = s.pregnancyDuration || 40;
@@ -437,11 +458,8 @@ function getBabyPrompt(p) {
         prompt += `Milestones: ${recent.map(m => m.text).join(', ')}\n`;
     }
 
-    // RP_STATUS — dynamic scene data for baby mode — always injected
-    // ВАЖНО: не включаем поле "name" в шаблон. Имя малыша задаётся ОДИН РАЗ через диалог
-    // именования или через BABY_TRAITS при родах. Если бы name был в шаблоне RP_STATUS,
-    // модель могла бы либо вернуть плейсхолдер ("..."), либо самовольно поменять имя
-    // в каждом сообщении. RP_STATUS — это только динамические состояния (настроение, сон, кормление).
+    // RP_STATUS для baby mode: только динамика (настроение/сон/кормление).
+    // Поле "name" НЕ включаем — имя задаётся через диалог именования или BABY_TRAITS.
     {
         let babyKeys = '';
         if (p.babies && p.babies.length > 0) {
@@ -523,9 +541,101 @@ export function updatePromptInjection() {
             `</tracker_directive>`;
         setExtensionPrompt(chatKey, fullPrompt, extension_prompt_types.IN_CHAT, 0, false, extension_prompt_roles.USER);
         setExtensionPrompt(sysKey, fullPrompt, extension_prompt_types.IN_PROMPT, 0);
-        dlog(`[Reproductive v2026.07.02-user-role] Prompt injected (${fullPrompt.length} chars) to IN_CHAT depth 0 (role=user) AND IN_PROMPT:\n`, fullPrompt);
 
     } catch (error) {
         console.error('[Reproductive] updatePromptInjection error:', error);
     }
+}
+
+// ─── Скрытая беременность: модель знает только симптомы, не факт ───
+function hiddenPregnancyPrompt(p, s) {
+    const days = daysSinceConception(p, p);
+    const delay = missedDays(getCycleDay(), 28);
+    const lang = langRequirement();
+
+    let b = `\n[EARLY SIGNS — {{user}} does NOT know she is pregnant]\n`;
+    b += `CRITICAL: {{user}} has NOT taken a test and does NOT know. NEVER state or imply that she is pregnant, never mention a due date, term or the baby's sex. Do not have characters "sense" it.\n`;
+
+    if (days < 7) {
+        b += `Nothing is noticeable yet — no symptoms at all this early.\n`;
+    } else if (days < 14) {
+        b += `Possible subtle signs she would NOT connect to pregnancy: mild fatigue, slight tenderness, mood swings. Keep them ambiguous — could be anything.\n`;
+    } else {
+        b += `Signs she might start noticing: morning nausea, sore breasts, exhaustion, food aversions, heightened smell.`;
+        if (delay > 0) b += ` Her period is ${delay} day(s) late — she may or may not have noticed.`;
+        b += `\nShe MAY suspect and wonder aloud, buy a test, or dismiss it. Let her (the player) decide — do not confirm anything.\n`;
+    }
+
+    if (p.lastTestResult === 'negative') {
+        b += `She recently took a test: it came back NEGATIVE (too early to detect). She believes she is not pregnant.\n`;
+    }
+
+    b += `\n[STATUS TAG — REQUIRED every reply]\n`;
+    b += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
+    b += `Describe only what she actually feels. ${lang.line}\n`;
+    b += `\n[DATE TAG — REQUIRED every reply, very last line]\n<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
+    return b;
+}
+
+// ─── Режим «планируем» + сложности с зачатием ───
+function tryingBlock(s, p) {
+    if (!s.tryingToConceive || p.isPregnant) return '';
+    const w = fertileWindow(getCycleDay(), 28);
+    const months = monthsTrying(p);
+    const struggle = conceptionStruggle(months, s.fertilityFactor);
+
+    let b = `\n[TRYING TO CONCEIVE]\n`;
+    b += `{{user}} and her partner are actively trying for a baby. `;
+    b += w.fertile
+        ? `RIGHT NOW is her fertile window${w.peak ? ' — ovulation peak, the best possible timing' : ''}. She knows it and may initiate.\n`
+        : `Not a fertile day — her next fertile window is in about ${w.daysToPeak} day(s).\n`;
+    if (months > 0) b += `They have been trying for ${months} month(s).\n`;
+    if (struggle) {
+        b += `${struggle.label}. This weighs on her — play the quiet strain: hope each cycle, disappointment when her period comes, tension between the partners, thoughts about seeing a doctor.\n`;
+    }
+    return b;
+}
+
+// ─── Послеродовое восстановление ───
+function postpartumBlock(p) {
+    const pp = getPostpartum(p, p);
+    if (!pp) return '';
+    let b = `\n[POSTPARTUM — ${pp.days} days since birth]\n`;
+    if (pp.healing) b += `Recovery: ${pp.healing}. `;
+    if (pp.lochia) b += `Bleeding (lochia) still present. `;
+    b += pp.lactating ? `She is breastfeeding: engorgement, leaking, night feeds, milk letdown when the baby cries.` : `She is not breastfeeding.`;
+    b += `\n`;
+    b += pp.cycleReturned
+        ? `Her cycle has returned — she can conceive again.\n`
+        : `Her cycle has NOT returned yet${pp.lactating ? ' (lactational amenorrhea)' : ''} — conception is very unlikely for now.\n`;
+    if (pp.days < 42) b += `Sex is still physically uncomfortable or off the table; she tires fast and may feel touched-out.\n`;
+    return b;
+}
+
+// ─── Дни рождения детей по RP-дате ───
+function birthdayBlock(p) {
+    if (!p.rpDate || !Array.isArray(p.babies)) return '';
+    const now = new Date(p.rpDate);
+    if (isNaN(now.getTime())) return '';
+    const lines = [];
+    const all = [...(p.babies || []), ...(p.grownChildren || [])];
+    for (const k of all) {
+        if (!k.birthRpDate) continue;
+        const b = new Date(k.birthRpDate);
+        if (isNaN(b.getTime())) continue;
+        const years = now.getFullYear() - b.getFullYear();
+        if (years < 1) continue;
+        const sameDay = now.getDate() === b.getDate() && now.getMonth() === b.getMonth();
+        if (sameDay) {
+            lines.push(`TODAY is ${k.name || 'the child'}'s birthday — turning ${years}. The family would celebrate.`);
+            continue;
+        }
+        const next = new Date(now.getFullYear(), b.getMonth(), b.getDate());
+        if (next < now) next.setFullYear(now.getFullYear() + 1);
+        const days = Math.round((next - now) / 86400000);
+        if (days > 0 && days <= 3) {
+            lines.push(`${k.name || 'A child'}'s birthday is in ${days} day(s) — turning ${years + (next.getFullYear() > now.getFullYear() ? 1 : 0)}.`);
+        }
+    }
+    return lines.length ? `\n[BIRTHDAYS]\n${lines.join('\n')}\n` : '';
 }

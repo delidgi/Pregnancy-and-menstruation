@@ -2,7 +2,6 @@
 // SCANNER — парсинг тегов (RP_DATE, RP_STATUS, CONCEPTION, BIRTH, SEX_REVEAL, BABY_TRAITS)
 // ═══════════════════════════════════════════
 
-import { dlog, dwarn } from './state.js';
 // ─── Tag parsing — СТРОГО: теги распознаются ТОЛЬКО внутри HTML-комментариев <!-- ... -->
 // Это предотвращает ложные срабатывания на случаи, когда модель цитирует/повторяет
 // название тега в своём prose-ответе. Расширка инжектит инструкции вида
@@ -67,14 +66,12 @@ export function scanMessage(text) {
     if (hasMiscarriage) {
         const textNoTags = text.replace(/<!--[\s\S]*?-->/g, '');
         if (!/(выкидыш|miscarr|кровотеч|кров(?:ь|и|ью)|потер(?:я|ял|яла|яли)|схватк|спазм|боль|скорая|больниц|врач|плод|срыв|тянущ|замерш)/i.test(textNoTags)) {
-            dwarn('[Reproductive] MISCARRIAGE tag present but no loss context in text — IGNORED as hallucination.');
             hasMiscarriage = false;
         }
     }
     if (hasAbortion) {
         const textNoTags = text.replace(/<!--[\s\S]*?-->/g, '');
         if (!/(аборт|abortion|прерыв|клиник|процедур|вакуум|таблетк|гинеколог|операц)/i.test(textNoTags)) {
-            dwarn('[Reproductive] ABORTION tag present but no procedure context in text — IGNORED as hallucination.');
             hasAbortion = false;
         }
     }
@@ -90,8 +87,6 @@ export function scanMessage(text) {
         // Минимальные индикаторы сексуального окончания/спермы/проникновения
         const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри\s+(?:неё|нее|тебя|меня)|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex)/i;
         if (!sexIndicators.test(textWithoutTags)) {
-            dwarn('[Reproductive] CONCEPTION_CHECK tag present but text has NO sex/ejaculation context — IGNORED as model hallucination.');
-            dwarn('[Reproductive] Text snippet (no tags):', textWithoutTags.slice(0, 200));
             hasConception = false;
         }
     }
@@ -103,8 +98,7 @@ export function scanMessage(text) {
         if (day >= 1 && day <= 28) cycleDay = day;
     }
 
-    // ── Теги для ПЕРСОНАЖА-носителя (suffix :CHAR) ──
-    // Базовые регекспы их не ловят: после имени идёт ':', а не ']'.
+    // ── Теги носителя-персонажа (suffix :CHAR) ──
     let hasCharConception = CONCEPTION_CHAR_RE.test(text);
     const hasCharBirth = BIRTH_CHAR_RE.test(text);
     const hasCharSexReveal = SEX_REVEAL_CHAR_RE.test(text);
@@ -112,7 +106,6 @@ export function scanMessage(text) {
         const textNoTags = text.replace(/<!--[\s\S]*?-->/g, '');
         const sexIndicators = /(?:сперм|семен|семя|конч(?:ил|ила|ает|аю)|изли(?:л|ла|лся|лась|вшись|ть)|cum|creampie|semen|sperm|orgasm|оргазм|внутри|кончать|conce(?:ption|ived)|залива(?:л|ть|ет)|заполн(?:ил|ила)|член|пенис|penis|cock|пизд|вагин|vagina|трах|fuck|секс|sex|узел|knot)/i;
         if (!sexIndicators.test(textNoTags)) {
-            dwarn('[Reproductive] CONCEPTION_CHECK:CHAR tag without sex context — IGNORED.');
             hasCharConception = false;
         }
     }
@@ -137,14 +130,7 @@ export function scanMessage(text) {
         _source: anyTag ? 'tag' : 'cycle_only',
     };
 
-    if (hasCharConception) dlog('[Reproductive] CHAR conception detected via tag');
-    if (hasCharBirth) dlog('[Reproductive] CHAR birth detected via tag');
 
-    if (hasConception) dlog('[Reproductive] Conception detected via tag (sex context validated)');
-    if (hasBirth) dlog('[Reproductive] Birth detected via tag');
-    if (hasSexReveal) dlog('[Reproductive] Sex reveal detected via tag');
-    if (hasMiscarriage) dlog('[Reproductive] Miscarriage detected via tag (context validated)');
-    if (hasAbortion) dlog('[Reproductive] Abortion detected via tag (context validated)');
 
     return result;
 }
@@ -179,10 +165,8 @@ export function scanBabyTraitsTag(text) {
     if (!m) return null;
     const json = _safeParseJson(m[1]);
     if (!json) {
-        dwarn('[Reproductive] Failed to parse BABY_TRAITS JSON:', m[1]);
         return null;
     }
-    dlog('[Reproductive] BABY_TRAITS tag parsed:', json);
     if (Array.isArray(json.babies)) return json;
     if (Array.isArray(json)) return { babies: json };
     return { babies: [json] };
@@ -197,7 +181,6 @@ export function scanPregnancyStateTag(text) {
     if (!m) return null;
     const json = _safeParseJson(m[1]);
     if (!json || typeof json !== 'object') {
-        dwarn('[Reproductive] Failed to parse PREGNANCY_STATE JSON:', m[1]);
         return null;
     }
 
@@ -223,7 +206,6 @@ export function scanPregnancyStateTag(text) {
     }
 
     if (!conceptionIso) {
-        dwarn('[Reproductive] PREGNANCY_STATE tag missing or invalid conception_date:', cdRaw);
         return null;
     }
 
@@ -250,7 +232,6 @@ export function scanPregnancyStateTag(text) {
         fetusSex: fetusSex,
         fatherName: father,
     };
-    dlog('[Reproductive] PREGNANCY_STATE tag parsed:', result);
     return result;
 }
 
@@ -328,19 +309,16 @@ export function scanWeeksFromText(text) {
 
         // Проверка на «обсуждение/гипотезу/будущее»
         if (futureContextRe.test(context)) {
-            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — future/hypothetical context: "${context.slice(0, 80)}..."`);
             continue;
         }
 
         // Проверка на «вывод другого трекера / X/Y форматы»
         if (progressContextRe.test(context)) {
-            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — progress/tracker output (X/Y format detected): "${context.slice(0, 80)}..."`);
             continue;
         }
 
         // Проверка на OOC/мета
         if (oocContextRe.test(context)) {
-            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — OOC/meta comment: "${context.slice(0, 80)}..."`);
             continue;
         }
 
@@ -348,7 +326,6 @@ export function scanWeeksFromText(text) {
         // знаменатель/числитель прогресс-бара
         const localChars = text.slice(Math.max(0, c.index - 5), Math.min(text.length, c.index + 10));
         if (/\d\s*\/\s*\d/.test(localChars)) {
-            dlog(`[Reproductive] Weeks "${c.value} ${c.unit}(s)" SKIPPED — looks like a fraction (X/Y): "${localChars}"`);
             continue;
         }
 
@@ -362,7 +339,6 @@ export function scanWeeksFromText(text) {
         // Sanity check: беременность от 1 до 42 недель
         if (weeks < 1 || weeks > 42) continue;
 
-        dlog(`[Reproductive] Pregnancy duration parsed from text: ${c.value} ${c.unit}(s) → ${weeks} weeks (${c.lang}, idx=${c.index})`);
         return { weeks, source: c.unit, sourceLang: c.lang };
     }
 
@@ -372,12 +348,8 @@ export function scanWeeksFromText(text) {
 export function scanStatusTag(text) {
     if (!text) return null;
 
-    // В одном ответе модель может прислать несколько RP_STATUS (например сначала
-    // цикл, затем малыша). Раньше читался только первый тег, поэтому объект
-    // `babies` из второго тега никогда не доходил до инфоблока.
-    //
-    // Каждый JSON извлекаем балансировкой скобок: режим малыша содержит вложенные
-    // объекты, а обычный ленивый regexp остановился бы на первой `}`.
+    // В одном ответе может быть несколько RP_STATUS — читаем все и мёржим.
+    // JSON извлекаем балансировкой скобок (ленивый regexp сломался бы на вложенных).
     const markerRe = /\[\s*RP_STATUS\s*:\s*/ig;
     const statuses = [];
     let marker;
@@ -423,7 +395,6 @@ export function scanStatusTag(text) {
         if (!raw) continue;
         const json = _safeParseJson(raw);
         if (!json || typeof json !== 'object' || Array.isArray(json)) {
-            dwarn('[Reproductive] Failed to parse RP_STATUS JSON:', raw);
         } else {
             statuses.push(json);
         }
@@ -437,7 +408,6 @@ export function scanStatusTag(text) {
     // Сохраняем поля всех тегов; более поздний RP_STATUS считается актуальнее.
     // Так второй baby-status добавляет `babies`, даже если перед ним был cycle-status.
     const merged = Object.assign({}, ...statuses);
-    dlog(`[Reproductive] RP_STATUS tags parsed: ${statuses.length}`, merged);
     return merged;
 }
 
@@ -477,9 +447,7 @@ function _parseDate(day, month, year, hourStr, minStr) {
 //  • ЗАКРЫТЫЙ <think>...</think> — точно мысли, вырезается целиком;
 //  • НЕЗАКРЫТЫЙ <think> в САМОМ НАЧАЛЕ сообщения С тегами внутри — префилл-обёртка
 //    пресета вокруг всего ответа: маркер убираем, содержимое СКАНИРУЕТСЯ;
-//  • незакрытый <think> В СЕРЕДИНЕ (или без тегов) — настоящий оборванный CoT
-//    (остановленная генерация): режем до конца, даже если внутри отрепетированы теги.
-//    Раньше такой CoT сканировался как «префилл» → ложные срабатывания.
+//  • незакрытый <think> В СЕРЕДИНЕ (или без тегов) — оборванный CoT: режем до конца.
 export function stripThink(text) {
     if (!text) return '';
     let res = String(text);
@@ -717,7 +685,6 @@ export async function scanFullHistory() {
         pNow._plannedComplications = [];
         // Накатываем сохранённое baby-состояние
         Object.assign(pNow, savedBabyState);
-        dlog('[Reproductive] Baby state restored after history scan (no [BIRTH] tags found in history).');
     }
 
     return stats;

@@ -1,7 +1,6 @@
 // ═══════════════════════════════════════════
 // HELPERS — чистые функции без зависимостей
 // ═══════════════════════════════════════════
-import { dlog } from './state.js';
 
 export function esc(str) {
     if (!str) return '';
@@ -295,7 +294,6 @@ export function rollPlannedComplications() {
                 revealWeek: week,
                 revealed: false,
             });
-            dlog(`[Reproductive] Planned complication: ${comp.type} at week ${week}`);
         }
     }
     return planned;

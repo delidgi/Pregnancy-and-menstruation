@@ -10,37 +10,17 @@ export function getSettings() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Debug-логирование. По умолчанию ВЫКЛЮЧЕНО — расширка не пишет в консоль
-// (логи с содержимым тегов/промпта/инфоблоков создавали заметную нагрузку).
-// Включается галочкой «Debug-логи» в настройках (s.debugLogs).
-// ──────────────────────────────────────────────────────────────────────
-export function isDebug() {
-    try { return !!extension_settings[extensionName]?.debugLogs; } catch (e) { return false; }
-}
-export function dlog(...args) {
-    if (isDebug()) console['log'](...args);
-}
-export function dwarn(...args) {
-    if (isDebug()) console['warn'](...args);
-}
-
-// ──────────────────────────────────────────────────────────────────────
 // Управление chatId с кэшем.
 // ──────────────────────────────────────────────────────────────────────
 let _cachedChatId = null;
 
 export function resetChatIdCache() {
-    if (_cachedChatId !== null) {
-        dlog(`[Reproductive] chatId cache reset (was: ${_cachedChatId})`);
-    }
     _cachedChatId = null;
 }
 
-// Все возможные формы id ТЕКУЩЕГО чата, в порядке приоритета:
+// Все формы id текущего чата в порядке приоритета:
 // uuid:<integrity> > file:<file_name> > hash:<chat_id_hash> > нормализованный ctx.chatId.
-// Нужно для миграции: если в разные моменты id резолвился по-разному (например, сначала
-// file:, потом uuid:), данные чата «терялись» под старым ключом. getPregnancyData()
-// теперь ищет данные по ВСЕМ формам и переносит их под каноничный ключ.
+// getPregnancyData() ищет данные по всем формам и переносит под каноничный ключ.
 export function computeChatIdForms() {
     const forms = [];
     try {
@@ -76,9 +56,7 @@ export function computeChatIdForms() {
             s = s.replace(/\s@(\d{4}-\d{2}-\d{2}@\d{2}h\d{2}m\d{2}s)\d*ms$/, ' @$1');
             forms.push(s);
         }
-    } catch (e) {
-        dwarn('[Reproductive] computeChatIdForms error:', e);
-    }
+    } catch (e) { /* ignore */ }
     return forms;
 }
 
@@ -91,13 +69,11 @@ export function getCurrentChatId() {
 
         if (resolved) {
             _cachedChatId = resolved;
-            dlog(`[Reproductive] chatId resolved: ${resolved}`);
             return resolved;
         }
 
         return null;
     } catch (e) {
-        dwarn('[Reproductive] getCurrentChatId error:', e);
         return null;
     }
 }
@@ -114,17 +90,8 @@ export function getChat() {
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Fallback объект (когда chatId === null).
-// Используется ТОЛЬКО когда мы не можем определить чат.
-//
-// ВАЖНО: НИКАКОЙ миграции fallback → постоянное хранилище! Раньше была логика
-// «если fallback модифицирован — переносим в чат когда chatId появится», но это
-// приводило к УТЕЧКЕ данных между чатами: модификации с конца старого чата
-// или промежуточные изменения переезжали в новый чат с новым ботом.
-//
-// Теперь fallback — просто временное хранилище для случаев когда расширка
-// читает данные в момент перехода. Любые модификации в нём ТЕРЯЮТСЯ при
-// следующем CHAT_CHANGED. Это безопаснее.
+// Fallback объект — временное хранилище, когда chatId не определён.
+// В постоянное хранилище НЕ мигрирует: изменения теряются на CHAT_CHANGED.
 // ──────────────────────────────────────────────────────────────────────
 let _fallback = null;
 
@@ -134,7 +101,6 @@ function getFallback() {
 }
 
 export function resetFallback() {
-    if (_fallback) dlog('[Reproductive] Fallback state reset (any unsaved changes lost — this is intentional)');
     _fallback = null;
 }
 
@@ -152,42 +118,41 @@ export function getPregnancyData() {
         return getFallback();
     }
 
-    // chatId известен, но под каноничным ключом данных нет. Прежде чем создавать чистый объект,
-    // ищем данные под АЛЬТЕРНАТИВНЫМИ формами id этого же чата (file:/hash:/plain) и мигрируем.
-    // Это чинит «состояние сбросилось к дефолту»: раньше при смене формы резолва id
-    // (например file: → uuid:) данные оставались под старым ключом и казались потерянными.
+    // Данных под каноничным ключом нет — ищем под альтернативными формами id и мигрируем
     if (!s.chatPregnancyData[chatId]) {
         const aliases = computeChatIdForms();
         for (const alt of aliases) {
             if (alt !== chatId && s.chatPregnancyData[alt]) {
                 s.chatPregnancyData[chatId] = s.chatPregnancyData[alt];
                 delete s.chatPregnancyData[alt];
-                dlog(`[Reproductive] Migrated pregnancy data key: ${alt} → ${chatId}`);
                 break;
             }
         }
     }
 
-    // Если и после миграции пусто — это действительно новый чат, создаём чистый объект.
-    // НЕ мигрируем fallback (даже если он модифицирован) — слишком высокий риск утечки.
+    // Новый чат — создаём чистый объект (fallback не мигрируем)
     if (!s.chatPregnancyData[chatId]) {
         const fresh = structuredClone(defaultPregnancyData);
-        // Рандомный стартовый день цикла: каждый новый чат/героиня начинается в своей
-        // фазе, а не всегда с 1-го дня (менструации). Помечаем как «выставлено юзером»,
-        // чтобы первый же RP_DATE не сдвинул его сразу и не выглядело странно.
+        // Каждый новый чат стартует в случайной фазе цикла, а не всегда с 1-го дня
+        const heatLen = Math.max(7, parseInt(s.heatCycleLength) || 30);
+        const rutLen = Math.max(7, parseInt(s.rutCycleLength) || 30);
         fresh.cycleDay = 1 + Math.floor(Math.random() * 28);
+        fresh.heatCycleDay = 1 + Math.floor(Math.random() * heatLen);
+        fresh.rutCycleDay = 1 + Math.floor(Math.random() * rutLen);
         fresh.lastCycleUpdate = Date.now();
+        fresh.partner = structuredClone(defaultPartnerData);
+        fresh.partner.cycleDay = 1 + Math.floor(Math.random() * 28);
+        fresh.partner.heatCycleDay = 1 + Math.floor(Math.random() * heatLen);
+        fresh.partner.rutCycleDay = 1 + Math.floor(Math.random() * rutLen);
         s.chatPregnancyData[chatId] = fresh;
-        dlog(`[Reproductive] Fresh pregnancy data for new chatId: ${chatId} (random cycle day ${fresh.cycleDay})`);
     }
 
     return s.chatPregnancyData[chatId];
 }
 
 // ──────────────────────────────────────────────────────────────────────
-// Носители: кого отслеживаем (s.trackFor = user | char | both).
-// Данные юзера живут в корне p, данные персонажа — в p.partner.
-// Дети (babies/grownChildren) ОБЩИЕ и всегда лежат в корне — семья одна.
+// Носители (s.trackFor = user | char | both): юзер — в корне p, персонаж — в p.partner.
+// Дети (babies/grownChildren) общие и лежат в корне — семья одна.
 // ──────────────────────────────────────────────────────────────────────
 export function getPartnerData() {
     const p = getPregnancyData();

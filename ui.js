@@ -1,11 +1,12 @@
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
-import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle } from './omegaverse.js';
+import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
+import { missedDays, fertileWindow } from './fertility.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, getFetusSizeForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
-import { babyAgeDays, getCareNeeds, getGrowthStage } from './baby-care.js';
+import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesTotal } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
-import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy } from './pregnancy.js';
+import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, setLactating, setTrying, monthsTrying } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { showNotification } from './notifications.js';
 
@@ -152,14 +153,168 @@ details.repro.repro-multi .repro-badge { font-size: 9px; }
 details.repro .rp-sub { opacity: .5; font-weight: 400; font-size: 10px; }`;
 
 // ── Custom CSS for infoblock ──
-function applyCustomCss(css) {
+// Пользовательский CSS должен побеждать тему, а у темы селекторы вида
+// body[data-rp-theme="..."] — специфичнее обычных. Поэтому каждому правилу
+// юзера дописываем :root:not(#_):not(#_) — специфичность растёт, смысл нет.
+const CSS_BOOST = ':root:not(#_):not(#_) ';
+
+// Комментарии режем до разбора: внутри них могут быть скобки
+function stripCssComments(css) {
+    let out = '', quote = null;
+    for (let i = 0; i < css.length; i++) {
+        const c = css[i];
+        if (quote) {
+            out += c;
+            if (c === '\\') { out += css[++i] || ''; continue; }
+            if (c === quote) quote = null;
+            continue;
+        }
+        if (c === '"' || c === "'") { quote = c; out += c; continue; }
+        if (c === '/' && css[i + 1] === '*') {
+            const end = css.indexOf('*/', i + 2);
+            i = end === -1 ? css.length : end + 1;
+            continue;
+        }
+        out += c;
+    }
+    return out;
+}
+
+function boostCss(css) {
+    const src = stripCssComments(String(css || ''));
+    let out = '', i = 0;
+
+    const readBlock = (start) => {
+        let depth = 0;
+        for (let j = start; j < src.length; j++) {
+            if (src[j] === '{') depth++;
+            else if (src[j] === '}') { depth--; if (depth === 0) return j; }
+        }
+        return src.length - 1;
+    };
+
+    while (i < src.length) {
+        const brace = src.indexOf('{', i);
+        if (brace === -1) { out += src.slice(i); break; }
+
+        const head = src.slice(i, brace);
+        const end = readBlock(brace);
+        const body = src.slice(brace + 1, end);
+        const sel = head.trim();
+
+        if (sel.startsWith('@')) {
+            // @media/@supports — бустим содержимое; @keyframes/@font-face оставляем как есть
+            const nested = /^@(media|supports|layer|container)/i.test(sel);
+            out += head + '{' + (nested ? boostCss(body) : body) + '}';
+        } else if (sel) {
+            const boosted = sel.split(',')
+                .map(s => s.trim())
+                .filter(Boolean)
+                .map(s => CSS_BOOST + s)
+                .join(', ');
+            out += (head.startsWith('\n') ? '\n' : '') + boosted + ' {' + body + '}';
+        } else {
+            out += head + '{' + body + '}';
+        }
+        i = end + 1;
+    }
+    return out;
+}
+
+// Скелет в поле — это не «свой стиль»: если его применили как есть,
+// он перекрывал бы выбранный стиль и инфоблок переставал меняться.
+function isSkeletonCss(css) {
+    const norm = (t) => String(t || '').replace(/\s+/g, ' ').trim();
+    return norm(css) === norm(DEFAULT_INFOBLOCK_CSS);
+}
+
+function applyCustomCss(cssRaw) {
+    const css = isSkeletonCss(cssRaw) ? '' : cssRaw;
     let styleEl = document.getElementById('repro-custom-infoblock-css');
     if (!styleEl) {
         styleEl = document.createElement('style');
         styleEl.id = 'repro-custom-infoblock-css';
         document.head.appendChild(styleEl);
     }
-    styleEl.textContent = css || '';
+    styleEl.textContent = css ? boostCss(css) : '';
+}
+
+// ─── Стиль оформления: стекло или минимализм ───
+export const THEMES = [
+    { id: 'glass',   name: 'Стекло',    icon: 'fa-wand-magic-sparkles' },
+    { id: 'minimal', name: 'Минимализм', icon: 'fa-align-left' },
+];
+
+// Старые id из ранних версий
+const THEME_ALIASES = { aurora: 'glass', editorial: 'minimal', scrapbook: 'glass', pastel: 'glass' };
+
+export function normalizeTheme(id) {
+    const mapped = THEME_ALIASES[id] || id;
+    return THEMES.some(t => t.id === mapped) ? mapped : 'glass';
+}
+
+export function applyTheme(id, light) {
+    document.body.setAttribute('data-rp-theme', normalizeTheme(id));
+    const isLight = light === undefined ? !!getSettings().lightMode : !!light;
+    if (isLight) document.body.setAttribute('data-rp-light', '1');
+    else document.body.removeAttribute('data-rp-light');
+}
+
+// Мини-превью стиля: пара + две карточки детей в миниатюре
+function themePreview(id) {
+    return `<div class="rp-th-prev" data-rp-theme="${id}">
+        <div class="rp-th-couple">
+            <span class="rp-th-pill mom"></span>
+            <span class="rp-th-heart"><i class="fa-solid fa-heart"></i></span>
+            <span class="rp-th-pill dad"></span>
+        </div>
+        <div class="rp-th-kids">
+            <span class="rp-th-kid girl"><span class="rp-th-av"></span><i></i></span>
+            <span class="rp-th-kid boy"><span class="rp-th-av"></span><i></i></span>
+        </div>
+    </div>`;
+}
+
+export function showThemePicker() {
+    const s = getSettings();
+    const cur = normalizeTheme(s.theme);
+
+    const cards = THEMES.map(t => `
+        <button class="rp-th-card${t.id === cur ? ' on' : ''}" data-theme="${t.id}">
+            ${themePreview(t.id)}
+            <span class="rp-th-name"><i class="fa-solid ${t.icon}"></i>${t.name}</span>
+            <span class="rp-th-check"><i class="fa-solid fa-check"></i></span>
+        </button>`).join('');
+
+    const overlay = $(`
+    <dialog id="rp-theme-overlay" aria-modal="true" aria-labelledby="rp-theme-title">
+        <div class="rp-th-dialog">
+            <div class="rp-th-head">
+                <span class="rp-th-head-icon"><i class="fa-solid fa-palette"></i></span>
+                <span id="rp-theme-title" class="rp-th-title">Стиль</span>
+                <button class="rp-th-close" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="rp-th-body">${cards}</div>
+        </div>
+    </dialog>`);
+
+    $('body').append(overlay);
+    const el = overlay[0];
+    if (el.showModal) el.showModal(); else overlay.show();
+
+    const close = () => { try { el.close(); } catch (e) { /* ignore */ } overlay.remove(); };
+    overlay.on('click', function(e) { if (e.target === el) close(); });
+    overlay.find('.rp-th-close').on('click', close);
+
+    overlay.find('.rp-th-card').on('click', function() {
+        const id = $(this).attr('data-theme');
+        getSettings().theme = id;
+        applyTheme(id);
+        saveSettingsDebounced();
+        overlay.find('.rp-th-card').removeClass('on');
+        $(this).addClass('on');
+        setTimeout(close, 180);
+    });
 }
 
 function stat(icon, color, label, value, wide) {
@@ -239,7 +394,7 @@ export function buildInfoblockHtml() {
 
         let html = '';
         babies.forEach((baby, i) => {
-            const sexIcon = baby.sex === 'M' ? '♂' : baby.sex === 'F' ? '♀' : '?';
+            const sexIcon = baby.sex === 'M' ? '<i class="fa-solid fa-mars"></i>' : baby.sex === 'F' ? '<i class="fa-solid fa-venus"></i>' : '<i class="fa-solid fa-genderless"></i>';
             const sexColor = baby.sex === 'F' ? 'pink' : 'blue';
             const label = baby.name || (babies.length > 1 ? `Малыш ${i + 1}` : 'Малыш');
             const milestones = (baby.milestones || []).slice(-2).map(m => m.text).join(', ');
@@ -312,6 +467,8 @@ function carriersHtml(tr) {
     const s = getSettings();
     const cards = [];
     for (const { who, data } of getCarriers()) {
+        // Нечего показывать (мужчина-бета в обычном мире и не беременный) — карточку пропускаем
+        if (!data.isPregnant && !hasAnyTracking(s, who)) continue;
         cards.push(data.isPregnant ? pregnancyCardHtml(who, data, tr) : cycleCardHtml(who, data, tr));
     }
     if (cards.length <= 1) return cards[0] || '';
@@ -357,7 +514,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
         const pct = Math.min(100, Math.round((weeks / dur) * 100));
         const trimester = weeks <= 12 ? 1 : weeks <= 27 ? 2 : 3;
         const sexRevealed = !!p.fetusSexRevealed;
-        const sexStr = sexRevealed && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? '♂ мальчик' : '♀ девочка').join(', ') : 'неизвестно';
+        const sexStr = sexRevealed && p.fetusSex?.length ? p.fetusSex.map(s => s === 'M' ? '<i class="fa-solid fa-mars"></i> мальчик' : '<i class="fa-solid fa-venus"></i> девочка').join(', ') : 'неизвестно';
         // Размер плода: приоритет — живое описание от МОДЕЛИ (fetus_size в RP_STATUS),
         // фолбэк — расчётная таблица по сроку.
         const fetusSize = tr((p._dynamic || {}).fetusSize) || getFetusSizeForProgress(pct, false);
@@ -481,21 +638,52 @@ function cycleCardHtml(who, c, tr) {
     const phase = getPhaseInfo(day);
     const cyclePct = Math.round(day / 28 * 100);
     const cd = getCycleDetails(day);
+    const p0 = getPregnancyData();
+
+    // Задержка / скрытая беременность: героиня не знает, но задержку видит
+    const delay = missedDays(day, 28);
+    const pp = getPostpartum(c, p0);
+    const win = s.tryingToConceive ? fertileWindow(day, 28) : null;
+    const testRes = c.lastTestResult;
+
+    let extraRows = '';
+    if (delay > 0 && !pp) {
+        extraRows += stat('fa-calendar-xmark', 'orange', 'Задержка', `${delay} дн.`);
+    }
+    if (testRes) {
+        const tLabel = testRes === 'positive' ? 'Две полоски' : testRes === 'faint' ? 'Слабая вторая' : 'Отрицательный';
+        extraRows += stat('fa-vial', testRes === 'negative' ? 'blue' : 'pink', 'Тест', tLabel);
+    }
+    if (win) {
+        extraRows += stat('fa-bullseye', win.fertile ? 'pink' : 'blue', 'Планируем',
+            win.fertile ? (win.peak ? 'Пик — сегодня' : 'Фертильное окно') : `Окно через ${win.daysToPeak} дн.`);
+    }
+    if (pp) {
+        extraRows += stat('fa-heart-pulse', 'green', 'После родов', `${pp.days} дн.`);
+        if (pp.lactating) extraRows += stat('fa-bottle-droplet', 'blue', 'Лактация', 'Кормит');
+        if (pp.healing) extraRows += stat('fa-bandage', 'orange', 'Заживление', pp.healing);
+        if (!pp.cycleReturned) extraRows += stat('fa-clock-rotate-left', 'purple', 'Цикл', 'Не вернулся');
+    }
+
+    const badge = pp && !pp.cycleReturned
+        ? `После родов · ${pp.days} дн.`
+        : `День ${day}/28 · ${phase.name}${delay > 0 ? ` · задержка ${delay}` : ''}`;
 
     return `<details class="repro">
         <summary><div class="repro-header">
-            <div class="repro-icon cycle">${ic('fa-clock')}</div>
-            <span class="repro-title">${carrierTag(who)}Цикл</span>
-            <span class="repro-badge cycle">День ${day}/28 · ${phase.name}</span>
+            <div class="repro-icon cycle">${ic(pp ? 'fa-heart-pulse' : 'fa-clock')}</div>
+            <span class="repro-title">${carrierTag(who)}${pp ? 'Восстановление' : 'Цикл'}</span>
+            <span class="repro-badge cycle">${badge}</span>
             <div class="repro-chev">${ic('fa-chevron-down')}</div>
         </div></summary>
         <div class="repro-c">
             <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>
             <div class="repro-grid">
-                ${stat('fa-droplet', 'green', 'Фертильность', tr(d.fertility) || cd.fertility)}
+                ${stat('fa-droplet', 'green', 'Фертильность', tr(d.fertility) || (pp && !pp.cycleReturned ? 'Очень низкая' : cd.fertility))}
                 ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || cd.libido)}
                 ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || cd.mood)}
                 ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || cd.physical)}
+                ${extraRows}
                 <div class="repro-note">${d.note || cd.note}</div>
             </div>
         </div>
@@ -518,6 +706,75 @@ function fmtRpDate(iso) {
     const d = new Date(iso);
     if (isNaN(d.getTime())) return '';
     return d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+}
+
+// Пилюля родителя: имя + роль (без инициала — он только шумит)
+function parentPill(name, cls, roleLabel, unknown = false) {
+    return `<span class="rp-pill ${cls}${unknown ? ' unknown' : ''}">
+        <span class="rp-pill-tx"><b>${name}</b><span class="rp-pill-role">${roleLabel}</span></span>
+    </span>`;
+}
+
+// Плитка факта (bento)
+function bentoTile(label, value, gold = false) {
+    return `<div class="rp-bento-tile${gold ? ' gold' : ''}">
+        <div class="rp-bento-lbl">${label}</div>
+        <div class="rp-bento-val">${value}</div>
+    </div>`;
+}
+
+// Кольцо прогресса развития вокруг инициала
+function progressRing(pct, initial, sexCls) {
+    const r = 18, circ = 2 * Math.PI * r;
+    const dash = Math.max(0, Math.min(circ, (pct / 100) * circ));
+    return `<span class="rp-ring ${sexCls}">
+        <svg viewBox="0 0 40 40" aria-hidden="true">
+            <circle cx="20" cy="20" r="${r}" class="rp-ring-bg"></circle>
+            <circle cx="20" cy="20" r="${r}" class="rp-ring-fg" stroke-dasharray="${dash.toFixed(1)} ${circ.toFixed(1)}"></circle>
+        </svg>
+        <span class="rp-ring-tx">${initial}</span>
+    </span>`;
+}
+
+// Достижения чипами, сгруппированные по возрасту на момент вехи
+function milestoneChips(k, p) {
+    const ms = k.milestones || [];
+    if (!ms.length) return `<div class="rp-tree-ms-empty">достижений пока нет</div>`;
+
+    const birthMs = k.birthRpDate ? new Date(k.birthRpDate).getTime() : NaN;
+    const groupOf = (m) => {
+        const t = m.rpDate ? new Date(m.rpDate).getTime() : NaN;
+        if (isNaN(birthMs) || isNaN(t)) return { key: 'z', label: '', date: fmtRpDate(m.rpDate) };
+        const days = Math.max(0, Math.floor((t - birthMs) / 86400000));
+        if (days < 30) return { key: 'a', label: 'первый месяц', date: fmtRpDate(m.rpDate) };
+        if (days < 183) return { key: 'b', label: 'до полугода', date: fmtRpDate(m.rpDate) };
+        if (days < 365) return { key: 'c', label: 'до года', date: fmtRpDate(m.rpDate) };
+        const years = Math.floor(days / 365);
+        return { key: 'd' + years, label: `${years} ${years === 1 ? 'год' : years < 5 ? 'года' : 'лет'}`, date: fmtRpDate(m.rpDate) };
+    };
+
+    const groups = new Map();
+    for (const m of ms) {
+        const g = groupOf(m);
+        if (!groups.has(g.key)) groups.set(g.key, { label: g.label, date: g.date, items: [] });
+        groups.get(g.key).items.push(m);
+    }
+
+    let out = `<div class="rp-tree-ms-title"><i class="fa-solid fa-award"></i>Достижения · ${ms.length}</div>`;
+    for (const g of [...groups.values()].reverse()) {
+        out += `<div class="rp-ms-group">
+            <span class="rp-ms-group-lbl">${g.label || 'вехи'}</span>
+            <span class="rp-ms-group-line"></span>
+            <span class="rp-ms-group-date">${g.date || ''}</span>
+        </div><div class="rp-ms-chips">`;
+        for (const m of g.items.slice().reverse()) {
+            const story = m.source === 'story';
+            const icon = story ? 'fa-trophy' : (MILESTONE_ICONS[m.key] || 'fa-star');
+            out += `<span class="rp-ms-chip${story ? ' story' : ''}"><i class="fa-solid ${icon}"></i>${m.text}</span>`;
+        }
+        out += `</div>`;
+    }
+    return out;
 }
 
 export function showFamilyTree() {
@@ -563,48 +820,42 @@ export function showFamilyTree() {
         const stageStr = stage ? (stage.key === 'newborn' ? '' : stage.label) : (k._grown ? 'взрослый' : '');
         const msCount = (k.milestones || []).length;
 
-        // Панель деталей: дата рождения, черты, все достижения
-        const ms = [...(k.milestones || [])].reverse();
-        let msHtml = '';
-        if (ms.length > 0) {
-            msHtml = `<div class="rp-tree-ms-title"><i class="fa-solid fa-award"></i>Достижения · ${ms.length}</div>`;
-            msHtml += `<div class="rp-tree-ms-list">` + ms.map(m => {
-                const icon = m.source === 'story'
-                    ? '<i class="fa-solid fa-trophy rp-tree-ms-story"></i>'
-                    : '<i class="fa-solid fa-star rp-tree-ms-auto"></i>';
-                const dateStr = fmtRpDate(m.rpDate);
-                return `<div class="rp-tree-ms">${icon}<span class="rp-tree-ms-text">${m.text}</span>${dateStr ? `<span class="rp-tree-ms-date">${dateStr}</span>` : ''}</div>`;
-            }).join('') + `</div>`;
-        } else {
-            msHtml = `<div class="rp-tree-ms-empty">достижений пока нет</div>`;
-        }
-        const traits = [];
+        // ── Достижения: группируем по возрасту на момент вехи, показываем чипами ──
+        const msHtml = milestoneChips(k, p);
+
+        // Bento-плитки фактов
+        const tiles = [];
         const birthStr = fmtRpDate(k.birthRpDate);
-        if (birthStr) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-cake-candles"></i>Родился(ась) ${birthStr}</div>`);
-        if (k.personality?.length) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-brain"></i>${k.personality.join(', ')}</div>`);
-        if (k.appearance?.length) traits.push(`<div class="rp-tree-trait"><i class="fa-solid fa-eye"></i>${k.appearance.join(', ')}</div>`);
-        if (k.special) traits.push(`<div class="rp-tree-trait gold"><i class="fa-solid fa-wand-magic-sparkles"></i>${k.special.name || k.special}</div>`);
+        if (birthStr) tiles.push(bentoTile('Родился(ась)', birthStr));
+        if (k.personality?.length) tiles.push(bentoTile('Характер', k.personality.join(', ')));
+        if (k.appearance?.length) tiles.push(bentoTile('Внешность', k.appearance.join(', ')));
+        if (k.special) tiles.push(bentoTile('Особенность', k.special.name || k.special, true));
+
+        // Прогресс развития: сколько вех пройдено из каталога
+        const total = milestonesTotal();
+        const done = Math.min(total, (k.milestones || []).filter(m => m.source !== 'story').length);
+        const pctDone = total ? Math.round((done / total) * 100) : 0;
+        const ring = progressRing(pctDone, initialOf(k.name), sexCls);
 
         const idx = detailPanels.length;
         detailKids.push(k);
         detailPanels.push(`
             <div class="rp-tree-det-head">
-                <span class="rp-tree-ava ${sexCls}">${initialOf(k.name)}</span>
-                <div>
+                ${ring}
+                <div class="rp-tree-det-tx">
                     <div class="rp-tree-det-name">${k.name || 'без имени'}</div>
-                    <div class="rp-tree-det-sub">${ageStr}${stageStr ? ' · ' + stageStr : ''}${k._grown ? ' · вырос(ла)' : ''}</div>
+                    <div class="rp-tree-det-sub">${ageStr}${stageStr ? ' · ' + stageStr : ''}${k._grown ? ' · вырос(ла)' : ''} · развитие ${done} из ${total}</div>
                 </div>
+                <button class="rp-tree-del" data-del="${idx}" title="Удалить из семьи"><i class="fa-solid fa-trash"></i></button>
             </div>
-            ${traits.join('')}
-            ${msHtml}
-            <button class="rp-tree-del" data-del="${idx}"><i class="fa-solid fa-trash"></i> Удалить из семьи</button>`);
+            ${tiles.length ? `<div class="rp-tree-bento">${tiles.join('')}</div>` : ''}
+            ${msHtml}`);
 
         return `<div class="rp-tree-cell">
             <div class="rp-node kid ${sexCls}" data-det="${idx}" title="Нажми — профиль и достижения">
                 <span class="rp-node-ava">${initialOf(k.name)}<i class="fa-solid ${sexIcon} rp-node-sex"></i></span>
                 <span class="rp-node-name">${k.name || 'без имени'}</span>
-                <span class="rp-node-sub">${ageStr}</span>
-                <span class="rp-node-sub dim">${stageStr}</span>
+                <span class="rp-node-sub">${ageStr}${stageStr ? ` · ${stageStr}` : ''}</span>
                 <span class="rp-node-badges">
                     ${msCount ? `<span class="rp-node-badge gold" title="Достижения"><i class="fa-solid fa-trophy"></i>${msCount}</span>` : ''}
                     ${k._grown ? `<span class="rp-node-badge green" title="Вырос(ла)"><i class="fa-solid fa-check"></i></span>` : ''}
@@ -612,14 +863,6 @@ export function showFamilyTree() {
             </div>
         </div>`;
     };
-
-    // Узел мамы (повторяется в каждой паре — как в генеалогических древах,
-    // когда у одного родителя дети от разных партнёров).
-    const momNode = `<div class="rp-node mom">
-            <span class="rp-node-ava">${initialOf(momName)}</span>
-            <span class="rp-node-name">${momName}</span>
-            <span class="rp-node-sub dim">мама</span>
-        </div>`;
 
     let branchesHtml = '';
     for (const [father, children] of groups) {
@@ -648,18 +891,15 @@ export function showFamilyTree() {
         }
 
         const isUnknown = father === '—';
-        const fatherNode = `<div class="rp-node father${isUnknown ? ' unknown' : ''}">
-                <span class="rp-node-ava">${isUnknown ? '?' : initialOf(father)}</span>
-                <span class="rp-node-name">${isUnknown ? 'неизвестен' : father}</span>
-                <span class="rp-node-sub dim">папа</span>
-            </div>`;
 
-        // Пара: мама ♥ папа бок о бок, дети — под ними
+        // Пара: мама ♥ папа компактными пилюлями, дети — под ними
         branchesHtml += `<div class="rp-tree-union">
             <div class="rp-couple">
-                ${momNode}
+                ${parentPill(momName, 'mom', 'мама')}
+                <span class="rp-couple-line"></span>
                 <span class="rp-couple-link" title="${isUnknown ? 'отец неизвестен' : 'пара'}"><i class="fa-solid ${isUnknown ? 'fa-question' : 'fa-heart'}"></i></span>
-                ${fatherNode}
+                <span class="rp-couple-line"></span>
+                ${parentPill(isUnknown ? 'неизвестен' : father, 'dad', 'папа', isUnknown)}
             </div>
             ${cells ? `<div class="rp-tree-kids-wrap"><div class="rp-tree-row">${cells}</div></div>` : ''}
         </div>`;
@@ -671,7 +911,7 @@ export function showFamilyTree() {
            </div>
            <div class="rp-tree-details" style="display:none"></div>`
         : `<div class="rp-tree-canvas">
-              <div class="rp-tree-root no-line">${momNode}</div>
+              <div class="rp-tree-root no-line">${parentPill(momName, 'mom', 'мама')}</div>
            </div>
            <div class="rp-tree-empty"><i class="fa-solid fa-seedling"></i>Детей пока нет — древо ждёт свою историю</div>`;
 
@@ -762,20 +1002,20 @@ export function showQuickBar() {
     const rows = [];
     if (p.hasBaby) {
         const n = (p.babies?.length || p.babyCount || 1);
-        rows.push(`<i class="fa-solid fa-baby" style="color:rgba(130,200,255,.85)"></i> ${n > 1 ? n + ' малыша' : 'Малыш'} в семье`);
+        rows.push(`${n > 1 ? n + ' малыша' : 'Малыш'} в семье`);
     }
     for (const { who, data } of getCarriers()) {
         const nm = both ? `<b>${carrierName(who)}:</b> ` : '';
         if (data.isPregnant) {
-            rows.push(`<i class="fa-solid fa-heart" style="color:rgba(255,120,180,.85)"></i> ${nm}беременность — ${data.pregnancyWeeks || 0} нед.`);
+            rows.push(`${nm}беременность — ${data.pregnancyWeeks || 0} нед.`);
         } else if (isOmegaverse(s)) {
             const st = carrierAboStatus(data, designationOf(s, who), s);
             const hot = st.phase === 'heat' || st.inRut;
-            rows.push(`<i class="fa-solid ${designationOf(s, who) === 'alpha' ? 'fa-bolt' : 'fa-fire'}" style="color:${hot ? 'rgba(255,120,180,.9)' : 'rgba(180,120,255,.85)'}"></i> ${nm}${st.label}`);
+            rows.push(`${nm}<span style="color:${hot ? 'rgba(255,120,180,.9)' : 'inherit'}">${st.label}</span>`);
         } else {
             const d = who === 'char' ? (data.cycleDay || 1) : getCycleDay();
             const ph = getPhaseInfo(d);
-            rows.push(`<i class="fa-solid fa-clock" style="color:rgba(180,120,255,.85)"></i> ${nm}день ${d}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
+            rows.push(`${nm}день ${d}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
         }
     }
     const statusHtml = rows.join('<br>');
@@ -785,7 +1025,6 @@ export function showQuickBar() {
     <dialog id="rp-quick-overlay" aria-modal="true" aria-labelledby="rp-quick-title">
         <div class="rp-quick-dialog">
             <div class="rp-tree-head">
-                <span class="rp-tree-head-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></span>
                 <span class="rp-tree-title" id="rp-quick-title">Репродукция</span>
                 <button class="rp-tree-close" title="Закрыть"><i class="fa-solid fa-xmark"></i></button>
             </div>
@@ -799,9 +1038,13 @@ export function showQuickBar() {
                     <button class="rp-quick-set" id="rp-quick-setcycle">Установить</button>
                 </div>`}
                 <div class="rp-quick-actions">
-                    <button class="rp-quick-btn" id="rp-quick-tree"><i class="fa-solid fa-people-roof"></i>Семейное древо</button>
-                    ${p.isPregnant ? `<button class="rp-quick-btn" id="rp-quick-birth"><i class="fa-solid fa-baby"></i>Принять роды</button>` : ''}
-                    <button class="rp-quick-btn" id="rp-quick-settings"><i class="fa-solid fa-sliders"></i>Все настройки</button>
+                    ${(!p.isPregnant || !pregnancyIsKnown(p, s)) && !p.hasBaby
+                        ? `<button class="rp-quick-btn" id="rp-quick-test">Сделать тест на беременность</button>` : ''}
+                    ${!p.isPregnant && !p.hasBaby
+                        ? `<button class="rp-quick-btn" id="rp-quick-trying">${s.tryingToConceive ? 'Перестать планировать' : 'Планируем ребёнка'}</button>` : ''}
+                    <button class="rp-quick-btn" id="rp-quick-tree">Семейное древо</button>
+                    ${p.isPregnant ? `<button class="rp-quick-btn" id="rp-quick-birth">Принять роды</button>` : ''}
+                    <button class="rp-quick-btn" id="rp-quick-settings">Все настройки</button>
                 </div>
             </div>
         </div>
@@ -829,7 +1072,7 @@ export function showQuickBar() {
         setTimeout(() => { updatePromptInjection(); syncUI(); }, 30);
         // Обновляем строку статуса
         const ph = getPhaseInfo(v);
-        overlay.find('.rp-quick-status').html(`<i class="fa-solid fa-clock" style="color:rgba(180,120,255,.85)"></i> Цикл: день ${v}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
+        overlay.find('.rp-quick-status').html(`Цикл: день ${v}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
         showNotification(`День цикла: ${v}`, 'success');
     };
     overlay.find('.rp-quick-step').on('click', function() {
@@ -842,6 +1085,18 @@ export function showQuickBar() {
     overlay.find('#rp-quick-cycleday').on('keydown', function(e) { if (e.key === 'Enter') applyCycle($(this).val()); });
 
     // Нативный modal находится в top layer, поэтому перед открытием древа закрываем его.
+    overlay.find('#rp-quick-test').on('click', () => {
+        takePregnancyTest('user');
+        close();
+        setTimeout(() => { import('./message-handler.js').then(m => m.renderInfoblock()); }, 80);
+    });
+    overlay.find('#rp-quick-trying').on('click', () => {
+        setTrying(!getSettings().tryingToConceive);
+        close();
+        showNotification(getSettings().tryingToConceive
+            ? 'Планируем ребёнка — модель знает про фертильные дни'
+            : 'Планирование выключено', 'success');
+    });
     overlay.find('#rp-quick-tree').on('click', () => { close(); showFamilyTree(); });
     overlay.find('#rp-quick-birth').on('click', () => {
         close();
@@ -882,11 +1137,15 @@ export function syncUI() {
     if (enabled) enabled.checked = s.isEnabled;
     if (notify) notify.checked = s.showNotifications;
 
-    const debugLogs = el('repro-debuglogs');
-    if (debugLogs) debugLogs.checked = !!s.debugLogs;
-
     const contra = el('repro-contraception');
     if (contra) contra.value = s.contraception;
+
+    const hiddenPreg = el('repro-hidden-preg');
+    if (hiddenPreg) hiddenPreg.checked = s.hiddenPregnancy !== false;
+    const fert = el('repro-fertility');
+    if (fert) fert.value = s.fertilityFactor || 100;
+    const fertVal = el('repro-fertility-val');
+    if (fertVal) fertVal.textContent = (s.fertilityFactor || 100) + '%';
 
     // ── Носители / вселенная ──
     const trackSel = el('repro-trackfor');
@@ -1158,7 +1417,7 @@ export function syncUI() {
             babies.forEach((baby, i) => {
                 const bh = getHealthInfo(baby.health || 'normal');
                 const bhCls = (baby.health === 'critical') ? 'crit' : (baby.health === 'warning') ? 'warn' : 'ok';
-                const sexIcon = baby.sex === 'M' ? '♂' : baby.sex === 'F' ? '♀' : '';
+                const sexIcon = baby.sex === 'M' ? '<i class="fa-solid fa-mars"></i>' : baby.sex === 'F' ? '<i class="fa-solid fa-venus"></i>' : '';
                 const headColor = baby.sex === 'F' ? 'pink' : 'blue';
                 const label = baby.name || (babies.length > 1 ? `Малыш ${i + 1}` : 'без имени');
                 monHtml += `
@@ -1197,7 +1456,6 @@ export function setupUI() {
         <div class="reproductive-system-settings">
             <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
-            <label class="checkbox_label" title="Писать отладочные логи в консоль (F12). Держи выключенным — с логами заметная нагрузка."><input type="checkbox" id="repro-debuglogs"><span style="opacity:0.6">Debug-логи</span></label>
             <hr>
             <div style="display:flex;gap:4px;align-items:center" title="Кого отслеживает расширение: цикл, беременность и инфоблок">
                 <span style="font-size:9px;opacity:0.5">Отслеживать:</span>
@@ -1269,6 +1527,12 @@ export function setupUI() {
                 </div>
             </div>
             <hr>
+            <label class="checkbox_label" title="Героиня не знает о зачатии, пока не сделает тест или срок не станет очевидным"><input type="checkbox" id="repro-hidden-preg"><span>Скрытая беременность (тест)</span></label>
+            <div style="display:flex;gap:4px;align-items:center" title="Базовая фертильность носителя: ниже 100% — сложности с зачатием">
+                <span style="font-size:9px;opacity:0.5">Фертильность:</span>
+                <input type="range" id="repro-fertility" min="10" max="150" step="5" style="flex:1">
+                <span id="repro-fertility-val" style="font-size:9px;opacity:0.5;min-width:32px">100%</span>
+            </div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
                 <select id="repro-contraception" class="text_pole" style="flex:1">
@@ -1315,7 +1579,11 @@ export function setupUI() {
             <button id="repro-family-tree-btn" class="menu_button" style="width:100%"><i class="fa-solid fa-people-roof" style="margin-right:6px;color:rgba(130,200,255,.8)"></i>Семейное древо</button>
             <button id="repro-force-birth-btn" class="menu_button" style="width:100%;display:none"><i class="fa-solid fa-baby" style="margin-right:6px;color:rgba(255,120,180,.8)"></i>Принять роды сейчас</button>
             <hr>
-            <div id="repro-manual-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">Ручная беременность / малыш ▼</div>
+            <div style="display:flex;gap:4px;align-items:stretch">
+                <div id="repro-manual-toggle" class="menu_button" style="flex:1;font-size:10px;text-align:center;cursor:pointer">Ручная беременность / малыш ▼</div>
+                <div id="repro-css-toggle" class="menu_button" style="flex:1;font-size:10px;text-align:center;cursor:pointer">CSS инфоблока ▼</div>
+                <div id="repro-theme-btn" class="menu_button" style="flex:0 0 auto;font-size:10px;padding:0 9px;text-align:center;cursor:pointer" title="Стиль"><i class="fa-solid fa-palette"></i></div>
+            </div>
             <div id="repro-manual-panel" style="display:none;gap:4px;flex-direction:column">
                 <small style="opacity:0.5;font-size:9px;font-weight:600">Беременность</small>
                 <div style="display:flex;gap:4px;align-items:center" id="repro-manual-who-row">
@@ -1348,8 +1616,12 @@ export function setupUI() {
                     </select>
                 </div>
                 <div style="display:flex;gap:4px;align-items:center">
-                    <input type="number" id="repro-mb-age-days" class="text_pole" style="width:60px" min="0" max="730" value="0" title="Возраст в днях">
-                    <span style="font-size:9px;opacity:0.4">дн.</span>
+                    <input type="number" id="repro-mb-age-days" class="text_pole" style="width:52px" min="0" max="999" value="0" title="Возраст малыша">
+                    <select id="repro-mb-age-unit" class="text_pole" style="width:74px">
+                        <option value="d">дней</option>
+                        <option value="m">мес.</option>
+                        <option value="y">лет</option>
+                    </select>
                     <input type="text" id="repro-mb-father" class="text_pole" style="flex:1" maxlength="60" placeholder="Отец (необязательно)">
                 </div>
                 <input type="text" id="repro-mb-personality" class="text_pole" maxlength="200" placeholder="Характер: спокойный, любопытный (через запятую)" title="Черты характера через запятую — попадут в инфоблок и в промпт для модели">
@@ -1367,14 +1639,17 @@ export function setupUI() {
                     <option value="bottom">Внизу</option>
                 </select>
             </div>
-            <div id="repro-css-toggle" class="menu_button" style="font-size:10px;text-align:center;cursor:pointer">CSS инфоблока ▼</div>
+            <label style="display:flex;gap:6px;align-items:center;font-size:10px;cursor:pointer">
+                <input type="checkbox" id="repro-light-mode">
+                <span>Светлая тема</span>
+            </label>
             <div id="repro-css-panel" style="display:none;flex-direction:column;gap:4px">
                 <textarea id="repro-custom-css" class="text_pole" rows="10" style="font-family:monospace;font-size:10px;resize:vertical;min-height:80px;white-space:pre;tab-size:2" placeholder="/* Свой CSS для инфоблока */\ndetails.repro { ... }"></textarea>
                 <div style="display:flex;gap:4px">
                     <button id="repro-css-apply" class="menu_button" style="flex:1">Применить</button>
                     <button id="repro-css-reset" class="menu_button" style="flex:0 0 auto">Сброс</button>
                 </div>
-                <small style="opacity:0.35;font-size:8px">Селекторы: details.repro, .repro-header, .repro-c, .repro-stat, .rp-val, .repro-bar-fill и др.</small>
+                <small style="opacity:0.35;font-size:8px">Селекторы: details.repro, .repro-header, .repro-c, .repro-stat, .rp-val, .repro-bar-fill и др. Правила отсюда сильнее выбранного стиля.</small>
             </div>
             <hr>
             <small id="repro-stats" style="opacity:0.3;font-size:8px">0 / 0</small>
@@ -1408,7 +1683,6 @@ export function setupUI() {
         // Events
         $('#repro-enabled').on('change', function() { getSettings().isEnabled = this.checked; saveSettingsDebounced(); updatePromptInjection(); });
         $('#repro-notify').on('change', function() { getSettings().showNotifications = this.checked; saveSettingsDebounced(); });
-        $('#repro-debuglogs').on('change', function() { getSettings().debugLogs = this.checked; saveSettingsDebounced(); });
         $('#repro-baby-max-age').on('change', function() {
             const v = parseInt(this.value) || 730;
             getSettings().babyMaxAgeDays = v;
@@ -1492,6 +1766,13 @@ export function setupUI() {
         $('#repro-abo-user-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('user'); } });
         $('#repro-abo-char-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('char'); } });
 
+        $('#repro-hidden-preg').on('change', function() { getSettings().hiddenPregnancy = this.checked; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
+        $('#repro-fertility').on('input change', function() {
+            const v = Math.max(10, Math.min(150, parseInt(this.value) || 100));
+            getSettings().fertilityFactor = v;
+            $('#repro-fertility-val').text(v + '%');
+            saveSettingsDebounced();
+        });
         $('#repro-contraception').on('change', function() { getSettings().contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
 
         $('#repro-duration').on('change', function() {
@@ -1554,7 +1835,11 @@ export function setupUI() {
             if (warnIfNoChat()) return;
             const name = $('#repro-mb-name').val().trim();
             const sex = $('#repro-mb-sex').val();
-            const ageDays = Math.max(0, Math.min(730, parseInt($('#repro-mb-age-days').val()) || 0));
+            // Возраст: число + единица (дни / месяцы / годы) → в дни
+            const ageUnit = $('#repro-mb-age-unit').val() || 'd';
+            const ageRaw = Math.max(0, parseInt($('#repro-mb-age-days').val()) || 0);
+            const unitMul = ageUnit === 'y' ? 365 : ageUnit === 'm' ? 30 : 1;
+            const ageDays = Math.min(36500, ageRaw * unitMul);
             const father = $('#repro-mb-father').val().trim();
             // Характер/внешность: строка через запятую → массив черт (пустые отбрасываем)
             const splitTraits = (v) => String(v || '').split(',').map(x => x.trim()).filter(Boolean).slice(0, 10);
@@ -1629,6 +1914,13 @@ export function setupUI() {
         // Infoblock
         $('#repro-infoblock').on('change', function() { getSettings().infoblockPosition = this.value; saveSettingsDebounced(); });
 
+        // Светлая тема таверны
+        $('#repro-light-mode').prop('checked', !!s.lightMode).on('change', function() {
+            getSettings().lightMode = this.checked;
+            applyTheme(getSettings().theme, this.checked);
+            saveSettingsDebounced();
+        });
+
         // CSS editor
         $('#repro-css-toggle').on('click', function() {
             const panel = $('#repro-css-panel');
@@ -1644,10 +1936,11 @@ export function setupUI() {
         });
         $('#repro-css-apply').on('click', function() {
             const css = $('#repro-custom-css').val() || '';
-            getSettings().customInfoblockCss = css;
+            const skeleton = isSkeletonCss(css);
+            getSettings().customInfoblockCss = skeleton ? '' : css;
             saveSettingsDebounced();
             applyCustomCss(css);
-            showNotification('CSS применён', 'success');
+            showNotification(skeleton ? 'Скелет без правок — оставлен стиль расширения' : 'CSS применён', skeleton ? 'info' : 'success');
         });
         $('#repro-css-reset').on('click', function() {
             if (!confirm('Сбросить кастомный CSS?')) return;
@@ -1658,10 +1951,20 @@ export function setupUI() {
             showNotification('CSS сброшен (стандартный стиль)', 'info');
         });
 
-        // Apply saved custom CSS on load
+        // Выбор стиля
+        $('#repro-theme-btn').on('click', showThemePicker);
+
+        // Раньше «Применить» сохраняло скелет как кастом — он перекрывал стиль.
+        // Разово вычищаем такие настройки.
+        if (s.customInfoblockCss && isSkeletonCss(s.customInfoblockCss)) {
+            s.customInfoblockCss = '';
+            saveSettingsDebounced();
+        }
         if (s.customInfoblockCss) {
             applyCustomCss(s.customInfoblockCss);
         }
+        s.theme = normalizeTheme(s.theme);
+        applyTheme(s.theme);
 
         syncUI();
     } catch (error) {

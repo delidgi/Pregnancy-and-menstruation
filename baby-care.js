@@ -7,7 +7,7 @@
 // ═══════════════════════════════════════════
 
 import { saveSettingsDebounced } from '../../../../script.js';
-import { getSettings, getPregnancyData, dlog } from './state.js';
+import { getSettings, getPregnancyData } from './state.js';
 import { showNotification } from './notifications.js';
 
 // ─── Детерминированный «рандом» из строки (FNV-1a) ───
@@ -36,7 +36,7 @@ export function babyAgeDays(baby, p) {
 }
 
 // ─── Вехи развития: base — типичный день, range — персональный разброс ───
-const MILESTONES = [
+export const MILESTONES = [
     { key: 'smile',   label: 'первая улыбка',                base: 40,  range: 12 },
     { key: 'head',    label: 'уверенно держит головку',      base: 75,  range: 15 },
     { key: 'roll',    label: 'переворачивается со спины',    base: 120, range: 20 },
@@ -275,7 +275,6 @@ export function updateBabyCare() {
                 showNotification(`<i class="fa-solid fa-star"></i> Вехи развития: +${newly.length}`, 'success');
             }
         }
-        if (newly.length > 0) dlog(`[Reproductive] Baby milestones reached: ${newly.map(x => x.m.key).join(', ')}`);
 
         return changed;
     } catch (e) {
@@ -283,3 +282,15 @@ export function updateBabyCare() {
         return false;
     }
 }
+
+// Иконка вехи по ключу — для чипов в древе
+export const MILESTONE_ICONS = {
+    smile: 'fa-face-smile', head: 'fa-child-reaching', roll: 'fa-arrows-rotate',
+    laugh: 'fa-face-laugh', sit: 'fa-chair', solids: 'fa-utensils',
+    tooth: 'fa-tooth', crawl: 'fa-baby', stand: 'fa-person', babble: 'fa-comment',
+    steps: 'fa-shoe-prints', words: 'fa-comments', run: 'fa-person-running',
+    phrases: 'fa-message', potty: 'fa-toilet',
+};
+
+// Всего вех в каталоге (для прогресса развития)
+export function milestonesTotal() { return MILESTONES.length; }

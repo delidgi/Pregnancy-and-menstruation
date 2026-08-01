@@ -5,7 +5,7 @@
 import { eventSource, event_types, saveSettingsDebounced } from '../../../../script.js';
 import { extension_settings } from '../../../extensions.js';
 import { extensionName, defaultSettings } from './config.js';
-import { getSettings, getPregnancyData, getCurrentChatId, resetChatIdCache, resetFallback, dlog, dwarn } from './state.js';
+import { getSettings, getPregnancyData, getCurrentChatId, resetChatIdCache, resetFallback } from './state.js';
 import { initCustomNotifications } from './notifications.js';
 import { setSyncUI, setUpdatePromptInjection, setRenderInfoblock } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
@@ -32,7 +32,6 @@ function loadSettings() {
 
             // Миграция старых данных
             if (s.isPregnant !== undefined && !s.chatPregnancyData) {
-                dlog('[Reproductive] Migrating old data...');
                 s.chatPregnancyData = {};
                 const chatId = getCurrentChatId();
                 if (chatId && s.isPregnant) {
@@ -97,7 +96,6 @@ function loadSettings() {
                         const ct = new Date(cp.conceptionDate).getTime();
                         const rt = new Date(cp.rpDate).getTime();
                         if (ct > rt) {
-                            dwarn(`[Reproductive] Repair chat ${cid}: conceptionDate (${cp.conceptionDate.slice(0,10)}) > rpDate (${cp.rpDate.slice(0,10)}) — clamping`);
                             // Preserve pregnancyWeeks by shifting conceptionDate backwards from rpDate
                             const w = Math.max(0, cp.pregnancyWeeks || 0);
                             cp.conceptionDate = new Date(rt - w * 7 * 86400000).toISOString();
@@ -107,7 +105,6 @@ function loadSettings() {
                 }
             }
         }
-        dlog('[Reproductive] Settings loaded');
     } catch (error) {
         console.error('[Reproductive] Error loading settings:', error);
         extension_settings[extensionName] = structuredClone(defaultSettings);
@@ -117,7 +114,6 @@ function loadSettings() {
 function refreshAfterChatChange(attempt = 1) {
     const MAX_ATTEMPTS = 6;
     const chatId = getCurrentChatId();
-    dlog(`[Reproductive] chat refresh attempt ${attempt} — chatId: ${chatId ?? 'null'}`);
     syncUI();
     updatePromptInjection();
     renderInfoblock();
@@ -157,24 +153,19 @@ async function maybeBootstrapFromHistory() {
         }
 
         _bootstrapRunning = true;
-        dlog(`[Reproductive] Virgin state + ${chat.length} messages in chat — bootstrapping from history...`);
         const stats = await scanFullHistory();
         getPregnancyData()._bootstrapDone = true; // scanFullHistory сбрасывает состояние — вернуть флаг
-        dlog('[Reproductive] Bootstrap scan done:', stats);
         saveSettingsDebounced();
         syncUI();
         updatePromptInjection();
         setTimeout(renderInfoblock, 300);
-    } catch (e) {
-        dwarn('[Reproductive] Bootstrap from history failed:', e);
-    } finally {
+    } catch (e) { /* ignore */ } finally {
         _bootstrapRunning = false;
     }
 }
 
 jQuery(async () => {
     try {
-        dlog('[Reproductive] Loading...');
 
         loadSettings();
 
@@ -190,11 +181,8 @@ jQuery(async () => {
         // Сканирование при получении нового сообщения (основной путь)
         eventSource.on(event_types.MESSAGE_RECEIVED, onMessageReceived);
 
-        // ── Common handler для финального скана, рендера infoblock и скрытия тегов ──
-        // В некоторых конфигурациях ST CHARACTER_MESSAGE_RENDERED приходит раньше
-        // MESSAGE_RECEIVED. Поэтому сначала повторно читаем ПОЛНЫЙ исходный текст:
-        // rescanStatusOnly идемпотентно перезаписывает динамический RP_STATUS и гарантирует,
-        // что вручную добавленный малыш получит mood/sleep/feeding/diaper из ответа модели.
+        // ── Финальный скан, рендер инфоблока и скрытие тегов ──
+        // rescanStatusOnly идемпотентно перечитывает RP_STATUS с полного текста.
         const processFinalMessage = (messageIndex) => {
             try {
                 const context = SillyTavern.getContext();
@@ -212,9 +200,7 @@ jQuery(async () => {
                 // RP_STATUS восстановить из msg.mes уже невозможно.
                 try {
                     rescanStatusOnly(msg.mes);
-                } catch (e) {
-                    dwarn('[Reproductive] Final RP_STATUS rescan failed:', e);
-                }
+                } catch (e) { /* ignore */ }
                 // Скрываем теги только в отображаемом DOM. msg.mes оставляем исходным:
                 // технические комментарии нужны при повторном скане, swipe и открытии чата.
                 if (
@@ -239,9 +225,7 @@ jQuery(async () => {
                         }
                     }
                 }
-            } catch (e) {
-                dwarn('[Reproductive] processFinalMessage error:', e);
-            }
+            } catch (e) { /* ignore */ }
             setTimeout(renderInfoblock, 300);
             setTimeout(renderInfoblock, 800); // second pass — survives ST's own re-render
         };
@@ -251,11 +235,8 @@ jQuery(async () => {
             eventSource.on(event_types.CHARACTER_MESSAGE_RENDERED, processFinalMessage);
         }
 
-        // GENERATION_ENDED — ЕДИНСТВЕННЫЙ хук для стриминговых swipe/continue
-        // (SillyTavern для них не эмитит ни MESSAGE_RECEIVED, ни CHARACTER_MESSAGE_RENDERED).
-        // КРИТИЧНО: сканируем ДО processFinalMessage — иначе стрип вырежет теги из msg.mes
-        // раньше, чем сканер их прочитает, и данные потеряются навсегда.
-        // runScan дедупит по позиции+хэшу текста — двойного сканирования не будет.
+        // GENERATION_ENDED — единственный хук для стриминговых swipe/continue.
+        // Сканируем ДО processFinalMessage: стрип вырезает теги из msg.mes.
         if (event_types.GENERATION_ENDED) {
             eventSource.on(event_types.GENERATION_ENDED, (messageIndex) => {
                 // 1) Скан полного текста (пока теги ещё на месте)
@@ -276,22 +257,15 @@ jQuery(async () => {
         // Regeneration / swipe — mark so time doesn't double-count
         if (event_types.MESSAGE_SWIPED) {
             eventSource.on(event_types.MESSAGE_SWIPED, () => {
-                dlog('[Reproductive] Swipe detected — marking regeneration');
                 markRegeneration();
             });
         }
         if (event_types.GENERATION_STARTED) {
-            // ВАЖНО: GENERATION_STARTED стреляет в САМОМ НАЧАЛЕ Generate() — ДО того как
-            // сообщение юзера добавлено в чат. Старая эвристика «длина чата не выросла =
-            // реген» из-за этого помечала регеном КАЖДУЮ обычную отправку: последним в чате
-            // ещё висел прошлый бот-пост, длина совпадала с _lastScannedPosition. Дальше скан
-            // юзерского сообщения «восстанавливал» снапшот до бот-поста → терялись _dynamic
-            // (инфоблок падал на заглушки), сдвиги даты и цикла.
-            // Теперь используем ЯВНЫЙ тип генерации, который ST передаёт первым аргументом.
+            // GENERATION_STARTED стреляет ДО добавления юзерского сообщения в чат,
+            // поэтому реген определяем по ЯВНОМУ типу генерации из первого аргумента.
             eventSource.on(event_types.GENERATION_STARTED, (genType, params, dryRun) => {
                 if (dryRun) return;
                 if (genType === 'regenerate' || genType === 'swipe') {
-                    dlog(`[Reproductive] Regeneration detected via GENERATION_STARTED (type=${genType})`);
                     markRegeneration();
                 }
             });
@@ -322,7 +296,6 @@ jQuery(async () => {
                         // Clear cached resolution and obtain fresh id
                         resetChatIdCache();
                         const newId = getCurrentChatId();
-                        dlog(`[Reproductive] Chat changed — prev:${prevId ?? 'null'} new:${newId ?? 'null'}`);
                             const s = getSettings();
                             // Consider same logical chat carefully:
                             // - If either id is a uuid: prefix, compare uuids exactly.
@@ -381,7 +354,6 @@ jQuery(async () => {
                     }, 80);
                 } catch (e) {
                     // Fallback to previous behavior on error
-                    dwarn('[Reproductive] CHAT_CHANGED handler failed, falling back to full reset', e);
                     resetChatIdCache();
                     resetFallback();
                     clearRegenState();
@@ -402,7 +374,6 @@ jQuery(async () => {
         // ST эмитит MESSAGE_DELETED с НОВОЙ длиной чата (после удаления).
         if (event_types.MESSAGE_DELETED) {
             eventSource.on(event_types.MESSAGE_DELETED, (newLength) => {
-                dlog(`[Reproductive] Message deleted — rolling back state (new len: ${newLength})`);
                 const s = getSettings();
                 s._lastScannedPosition = null;
                 s._lastScannedHash = null;
@@ -413,20 +384,13 @@ jQuery(async () => {
                         ? newLength
                         : (SillyTavern.getContext()?.chat?.length ?? 0);
                     const rolled = rollbackToPosition(len);
-                    if (rolled) {
-                        dlog('[Reproductive] State rollback after deletion: OK');
-                    }
-                } catch (e) {
-                    dwarn('[Reproductive] Rollback after deletion failed:', e);
-                }
+                } catch (e) { /* ignore */ }
                 saveSettingsDebounced();
                 syncUI();
                 updatePromptInjection();
                 setTimeout(renderInfoblock, 300);
             });
         }
-
-        dlog('[Reproductive] Ready!');
 
         // ── MutationObserver: re-insert infoblock if ST removes it during re-render ──
         // Continue/edit/swipe rebuild .mes_text, wiping our injected element.
@@ -471,11 +435,8 @@ jQuery(async () => {
                     }
                 });
                 observer.observe(chatEl, { childList: true, subtree: true });
-                dlog('[Reproductive] Infoblock observer attached');
             }
-        } catch (e) {
-            dwarn('[Reproductive] Observer setup failed:', e);
-        }
+        } catch (e) { /* ignore */ }
 
     } catch (error) {
         console.error('[Reproductive] FATAL ERROR:', error);

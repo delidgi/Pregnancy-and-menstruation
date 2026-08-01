@@ -140,8 +140,20 @@ export function advanceAboCycles(carrier, desig, s, days) {
     return events;
 }
 
-// Может ли носитель забеременеть в этой вселенной
+// ─── Может ли носитель ЗАБЕРЕМЕНЕТЬ ───
+// Обычный мир: только женщины. Омегаверс: женщины + омеги любого пола; альфы — никогда.
 export function canCarry(s, who) {
-    if (!isOmegaverse(s)) return true; // обычный мир — решает сам юзер настройкой trackFor
-    return designationOf(s, who) !== 'alpha';
+    const sex = sexOf(s, who);
+    if (!isOmegaverse(s)) return sex === 'female';
+    const d = designationOf(s, who);
+    if (d === 'alpha') return false;
+    return sex === 'female' || d === 'omega';
+}
+
+// Есть ли у носителя что отслеживать: цикл, течка или гон.
+export function hasAnyTracking(s, who) {
+    if (hasMenstrualCycle(s, who)) return true;
+    if (!isOmegaverse(s)) return false;
+    const d = designationOf(s, who);
+    return d === 'omega' || d === 'alpha';
 }

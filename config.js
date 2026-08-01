@@ -22,14 +22,13 @@ export const defaultSettings = {
     autoScan: true,
     infoblockPosition: 'off',
     customInfoblockCss: '',
+    theme: 'glass',
+    lightMode: false,
     // Возраст в RP-днях, после которого малыш считается «выросшим»: инфоблок сбрасывается,
     // ребёнок переходит в архив p.grownChildren. Дефолт 730 = 2 года.
     babyMaxAgeDays: 730,
     // Отладка: НЕ вырезать теги из текста сообщений (видны прямо в чате)
     debugKeepTags: false,
-    // Отладка: писать debug-логи в консоль (dlog/dwarn). По умолчанию выключено —
-    // логи с содержимым тегов/промпта заметно грузили консоль.
-    debugLogs: false,
 
     // ── Кого отслеживаем: 'user' (юзер) | 'char' (персонаж/бот) | 'both' (оба) ──
     // Цикл, беременность и инфоблок строятся для выбранных носителей.
@@ -44,6 +43,16 @@ export const defaultSettings = {
     // Женщина — цикл есть (в любой роли A/B/O), мужчина — нет.
     userSex: 'female',
     charSex: 'male',
+
+    // Скрытая беременность: героиня не знает о зачатии, пока не сделает тест
+    // или пока срок не станет очевидным. Трекер знает, промпт и инфоблок — молчат.
+    hiddenPregnancy: true,
+    // Неделя, после которой беременность становится очевидной сама собой
+    obviousAtWeek: 12,
+    // Режим «планируем»: подсветка фертильного окна и подсказки модели
+    tryingToConceive: false,
+    // Базовая фертильность носителя, % (100 = норма). Ниже — сложности с зачатием.
+    fertilityFactor: 100,
     // Длины циклов A/B/O в RP-днях
     heatCycleLength: 42,   // течка примерно раз в 6 недель
     heatDuration: 5,       // длится 5 дней
@@ -53,7 +62,7 @@ export const defaultSettings = {
 
 export const defaultPregnancyData = {
     isPregnant: false,
-    // Цикл — ПЕР-CHAT (раньше был в глобальных settings → утечка между чатами)
+    // Цикл — пер-чат
     cycleDay: 1,
     lastCycleUpdate: null,
     conceptionDate: null,
@@ -98,6 +107,15 @@ export const defaultPregnancyData = {
     grownChildren: [],
     // Dynamic descriptions from AI
     _dynamic: {},
+
+    // ── Знание о беременности (скрытая беременность) ──
+    pregnancyKnown: false,   // героиня знает, что беременна
+    testTakenAt: null,       // RP-дата последнего теста
+    lastTestResult: null,    // 'positive' | 'negative' | 'faint'
+    missedPeriodDays: 0,     // дней задержки
+
+    // ── Послеродовое состояние ──
+    postpartum: null,        // { startRpDate, lactating, healing, cycleReturned }
 
     // ── A/B/O-циклы носителя-юзера (только при universe='omegaverse') ──
     heatCycleDay: 1,        // день цикла течки (омега)
