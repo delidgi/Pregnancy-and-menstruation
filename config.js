@@ -22,6 +22,8 @@ export const defaultSettings = {
     autoScan: true,
     infoblockPosition: 'off',
     customInfoblockCss: '',
+    // Реализм цикла: гигиена, протечки, фазовые эффекты, сбои цикла
+    realism: false,
     theme: 'glass',
     lightMode: false,
     // Возраст в RP-днях, после которого малыш считается «выросшим»: инфоблок сбрасывается,
@@ -33,6 +35,11 @@ export const defaultSettings = {
     // ── Кого отслеживаем: 'user' (юзер) | 'char' (персонаж/бот) | 'both' (оба) ──
     // Цикл, беременность и инфоблок строятся для выбранных носителей.
     trackFor: 'user',
+
+    // ── Кто может ВЫНАШИВАТЬ: 'auto' | 'user' | 'char' | 'both' | 'none' ──
+    // auto: женщина в любой роли (включая альфу), мужчина — только омега.
+    // Остальные значения — прямое указание, когда тела нестандартные.
+    carrierMode: 'auto',
 
     // ── Вселенная: 'normal' | 'omegaverse' ──
     universe: 'normal',
@@ -51,8 +58,6 @@ export const defaultSettings = {
     obviousAtWeek: 12,
     // Режим «планируем»: подсветка фертильного окна и подсказки модели
     tryingToConceive: false,
-    // Базовая фертильность носителя, % (100 = норма). Ниже — сложности с зачатием.
-    fertilityFactor: 100,
     // Длины циклов A/B/O в RP-днях
     heatCycleLength: 42,   // течка примерно раз в 6 недель
     heatDuration: 5,       // длится 5 дней
@@ -117,6 +122,11 @@ export const defaultPregnancyData = {
     // ── Послеродовое состояние ──
     postpartum: null,        // { startRpDate, lactating, healing, cycleReturned }
 
+    // ── Реализм цикла ──
+    hygieneType: 'pad',          // 'pad' | 'tampon' | 'cup' | 'none'
+    hygieneChangedRpDate: null,  // когда последний раз меняли
+    _cycleShift: 0,              // сбой цикла: на сколько дней он растянут
+
     // ── A/B/O-циклы носителя-юзера (только при universe='omegaverse') ──
     heatCycleDay: 1,        // день цикла течки (омега)
     rutCycleDay: 1,         // день цикла гона (альфа)
@@ -149,6 +159,9 @@ export const defaultPartnerData = {
     _userSetWeeksAt: null,
     _userSetCycleAt: null,
     _dynamic: {},
+    hygieneType: 'pad',
+    hygieneChangedRpDate: null,
+    _cycleShift: 0,
     // A/B/O
     heatCycleDay: 20,
     rutCycleDay: 30,

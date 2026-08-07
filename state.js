@@ -228,7 +228,10 @@ export function getCycleDay() {
 
 export function setCycleDay(day, updateTimestamp = true, isUserAction = false) {
     const p = getPregnancyData();
-    const d = Math.max(1, Math.min(28, parseInt(day) || 1));
+    // При сбое цикла (реализм) текущий цикл растянут — день может уйти за 28,
+    // это и есть задержка. Без сбоя потолок обычный.
+    const maxDay = 28 + Math.max(0, parseInt(p._cycleShift) || 0);
+    const d = Math.max(1, Math.min(maxDay, parseInt(day) || 1));
     p.cycleDay = d;
     if (updateTimestamp) p.lastCycleUpdate = Date.now();
     if (isUserAction) {

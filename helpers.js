@@ -98,10 +98,17 @@ export function getPhaseInfo(day, lang = 'ru') {
     return { name: L ? 'Luteal' : 'Лютеиновая', icon: 'fa-moon', color: '#ffd43b' };
 }
 
+// Множитель шанса зачатия по дню цикла. Раньше «прочие дни» стоили 0.25 —
+// то есть можно было залететь прямо в месячные. Теперь окно совпадает с
+// реальным: сперма живёт ~5 дней, яйцеклетка ~сутки после овуляции.
 export function getCycleModifier(day) {
-    if (day >= 12 && day <= 16) return 1.65;
-    if (day >= 8 && day <= 11) return 0.5;
-    return 0.25;
+    const d = parseInt(day) || 1;
+    if (d <= 5) return 0.01;            // менструация — практически исключено
+    if (d <= 8) return 0.15;            // окно только начинает открываться
+    if (d <= 11) return 0.7;            // сперма доживёт до овуляции
+    if (d <= 16) return 1.65;           // овуляция — пик
+    if (d <= 18) return 0.2;            // яйцеклетка ещё может быть жива
+    return 0.02;                        // лютеиновая фаза — окно закрыто
 }
 
 export function calculateWeeksFromDates(conceptionDate, rpDate, fallbackWeeks = 0) {

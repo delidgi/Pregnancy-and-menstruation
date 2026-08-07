@@ -8,6 +8,7 @@ import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { pregnancyIsKnown, daysSinceConception, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, missedDays, conceptionStruggle } from './fertility.js';
+import { getFlow, getHygieneState, realismPromptLine, hoursBetween, DISRUPTIONS } from './cycle-realism.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatFetusCount, getHealthInfo, detectChatLanguage } from './helpers.js';
 import { calculateDueDate } from './date-parser.js';
 import { babyAgeDays, getCareNorms, getCareNeeds, getGrowthStage } from './baby-care.js';
@@ -69,8 +70,15 @@ function carrierCycleLine(who, s) {
         }
         return `${nm}: ${parts.join(', ')}`;
     }
+    // Носитель без месячных (мужчина, которого игрок сделал носителем) — цикла нет,
+    // но он всё равно может зачать: так и пишем, без выдуманного дня цикла
+    if (!hasMenstrualCycle(s, who)) {
+        return canCarry(s, who) ? `${nm}: no menstrual cycle, but CAN conceive` : '';
+    }
     const day = who === 'char' ? (carrier.cycleDay || 1) : getCycleDay();
     const phase = day <= 5 ? 'Menstruation' : day <= 11 ? 'Follicular' : day <= 16 ? 'Ovulation' : 'Luteal';
+    // Сбитый цикл: день ушёл за 28 — это задержка, а не 29-й день из ниоткуда
+    if (day > 28) return `${nm}: period is ${day - 28} day(s) late (cycle disrupted)`;
     return `${nm}: cycle day ${day}/28 (${phase})`;
 }
 
@@ -86,6 +94,30 @@ function termScaleBlock(duration, weeks, progressPercent) {
     b += `Week ${weeks} of ${duration} is ${Math.round(progressPercent)}% of the way — developmentally that matches about week ${humanEq} of a real 40-week pregnancy.\n`;
     b += `Scale EVERYTHING to this timeline: fetal size and development, belly, symptoms, what doctors say, how far along she looks. `;
     b += `Never describe the fetus as if it were at real-life week ${weeks}.\n`;
+    return b;
+}
+
+// ─── Реализм цикла ───
+// Тело носителя как часть сцены: самочувствие по фазе, гигиена в месячные,
+// сбои цикла. Держим коротко — это идёт в каждый ответ.
+function realismBlock(s, p) {
+    if (!s.realism || p.isPregnant) return '';
+    if (!hasMenstrualCycle(s, 'user') || !isTracked('user')) return '';
+    const day = getCycleDay();
+    const flow = getFlow(day);
+    const hy = flow.factor > 0
+        ? getHygieneState(p.hygieneType || 'pad', hoursBetween(p.hygieneChangedRpDate, p.rpDate), flow)
+        : null;
+
+    let b = `\n[BODY]\n`;
+    b += `{{user}} right now: ${realismPromptLine(day, hy, { lang: 'en' })}.\n`;
+    b += `Let this colour the scene — energy, patience, appetite, what she wants or avoids — without turning it into the plot.\n`;
+    // Органичность: партнёр не телепат
+    b += `Others know ONLY what is visible or told: a hand pressed to her back, painkillers, a hot-water bottle, a stain, her saying so. Nobody senses a phase or a fertile day.\n`;
+    if (hy && (hy.overdue || hy.type.id === 'none')) {
+        b += `If the scene allows, she would deal with it — stepping out, checking, asking for a spare. Play it plainly, no euphemisms and no drama.\n`;
+    }
+    b += `[CYCLE EVENT] Only if something in THIS reply would genuinely disrupt a cycle (severe stress, illness, starvation, long-haul travel, overtraining), add to RP_STATUS: "cycle_event":"stress|illness|starvation|travel|overtrain". Otherwise omit the field.\n`;
     return b;
 }
 
@@ -185,7 +217,8 @@ export function getBasePrompt() {
         prompt += pregnancyIsKnown(p, s)
             ? `{{user}} IS PREGNANT — never add CONCEPTION_CHECK tag.\n`
             : `Do NOT add the CONCEPTION_CHECK tag in this reply.\n`;
-        prompt += partnerPregnancyBlock(s);
+        prompt += realismBlock(s, p);
+    prompt += partnerPregnancyBlock(s);
         return prompt;
     }
 
@@ -228,7 +261,7 @@ export function getBasePrompt() {
     const langReq = langRequirement();
     prompt += `[STATUS TAG — REQUIRED every reply]\n`;
     prompt += `COPY THIS LINE VERBATIM at the END of your reply, on its own line (HTML comment, fields in ${langReq.langName} 2-4 words, describes {{user}}):\n`;
-    prompt += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
+    prompt += `<!-- [RP_STATUS:{"libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
     prompt += `"note" = 1 short sentence about {{user}}'s sensations from THIS scene. Must be an HTML comment; do NOT replace with a visible status block.\n`;
     prompt += `${langReq.line}\n\n`;
 
@@ -604,7 +637,7 @@ function hiddenPregnancyPrompt(p, s) {
     }
 
     b += `\n[STATUS TAG — REQUIRED every reply]\n`;
-    b += `<!-- [RP_STATUS:{"fertility":"...","libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
+    b += `<!-- [RP_STATUS:{"libido":"...","mood":"...","physical":"...","note":"..."}] -->\n`;
     b += `Describe only what {{user}} actually feels. ${lang.line}\n`;
     b += `\n[DATE TAG — REQUIRED every reply, very last line]\n<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
     return b;
@@ -615,7 +648,7 @@ function tryingBlock(s, p) {
     if (!s.tryingToConceive || p.isPregnant) return '';
     const w = fertileWindow(getCycleDay(), 28);
     const months = monthsTrying(p);
-    const struggle = conceptionStruggle(months, s.fertilityFactor);
+    const struggle = conceptionStruggle(months);
 
     let b = `\n[TRYING TO CONCEIVE]\n`;
     b += `{{user}} and her partner are actively trying for a baby. `;

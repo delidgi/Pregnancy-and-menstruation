@@ -8,6 +8,7 @@ import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag,
 import { getPartnerData, carrierName, isTracked } from './state.js';
 import { isOmegaverse, designationOf, advanceAboCycles, carrierAboStatus, sexOf, hasMenstrualCycle } from './omegaverse.js';
 import { updateBabyCare } from './baby-care.js';
+import { DISRUPTIONS, disruptionShift } from './cycle-realism.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, buildInfoblockHtml } from './ui.js';
 import { showNotification } from './notifications.js';
@@ -558,6 +559,21 @@ export function rescanStatusOnly(fullText) {
 
 // ─── Apply RP_STATUS JSON data to pregnancy state ───
 function applyStatusData(s, p, data) {
+    // Сбой цикла: модель отмечает событие, расширение растягивает текущий цикл.
+    // Только в режиме реализма и не чаще одного раза за цикл.
+    if (s.realism && typeof data.cycle_event === 'string' && !p.isPregnant) {
+        const kind = data.cycle_event.trim().toLowerCase();
+        if (DISRUPTIONS[kind] && !p._cycleShift) {
+            const days = disruptionShift(kind);
+            if (days > 0) {
+                p._cycleShift = days;
+                if (s.showNotifications) {
+                    showNotification(`<i class="fa-solid fa-calendar-xmark"></i> Цикл сбился (${DISRUPTIONS[kind].label}) — задержка около ${days} дн.`, 'warning');
+                }
+            }
+        }
+    }
+
 
     if (p.hasBaby) {
         // Baby mode
@@ -801,7 +817,16 @@ function advanceTime(s, p, daysPassed) {
         if (userSetMs > 0 && minutesSinceUserSet < 30) {
         } else {
         const oldDay = getCycleDay();
-        const newDay = ((oldDay - 1 + daysPassed) % 28) + 1;
+        // Сбой цикла (стресс, болезнь) растягивает ТЕКУЩИЙ цикл: месячные приходят позже.
+        // Как только цикл закрылся, растяжка сгорает — следующий снова обычный.
+        const shift = Math.max(0, parseInt(p._cycleShift) || 0);
+        const cycleLen = 28 + shift;
+        let newDay = oldDay + daysPassed;
+        if (newDay > cycleLen) {
+            newDay = ((newDay - 1) % cycleLen) + 1;
+            if (shift) p._cycleShift = 0;
+        }
+        if (newDay > 28 && !shift) newDay = ((newDay - 1) % 28) + 1;
         setCycleDay(newDay, true, false);
         changed = true;
 

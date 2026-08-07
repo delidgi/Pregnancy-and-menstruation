@@ -111,11 +111,9 @@ export function inheritLooks(motherLooks, fatherLooks, rnd = Math.random) {
 
 // ─── Сложности с зачатием ───
 // Сколько RP-месяцев пара «пытается» без результата → подсказка о проблеме.
-export function conceptionStruggle(monthsTrying, fertilityFactor = 100) {
+export function conceptionStruggle(monthsTrying) {
     const m = Math.max(0, parseInt(monthsTrying) || 0);
-    const f = Math.max(1, parseInt(fertilityFactor) || 100);
     if (m < 6) return null;
     if (m < 12) return { level: 'concern', label: 'Полгода без результата — стоит провериться' };
-    if (f < 60) return { level: 'diagnosed', label: 'Сниженная фертильность — нужна помощь врача' };
     return { level: 'serious', label: 'Год без результата — повод обратиться к репродуктологу' };
 }

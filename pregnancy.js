@@ -435,10 +435,6 @@ export function checkConception() {
     const pp = getPostpartum(p, p);
     if (pp) chance = Math.round(chance * pp.fertilityMul);
 
-    // Индивидуальная фертильность носителя (сложности с зачатием)
-    const fFactor = Math.max(1, Math.min(200, parseInt(s.fertilityFactor) || 100));
-    if (fFactor !== 100) chance = Math.round(chance * (fFactor / 100));
-
     const contraceptionEff = CHANCES.contraception[s.contraception];
     let contraceptionFailed = false;
 

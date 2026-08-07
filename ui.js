@@ -3,6 +3,7 @@ import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
+import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
 import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesTotal } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
@@ -627,11 +628,31 @@ function cycleCardHtml(who, c, tr) {
                            desig === 'alpha' ? 'Гон' : 'Течка',
                            `${st.label}${st.sub ? `<span class="rp-sub"> · ${st.sub}</span>` : ''}`, true) : ''}
                     ${menses ? stat('fa-calendar-day', 'purple', 'Месячные', `День ${mday}/28 · ${mphase.name}`) : ''}
-                    ${stat('fa-droplet', isHot ? 'pink' : 'green', 'Фертильность', fert)}
                     ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || (isHot ? 'Очень высокое' : menses ? mdet.libido : 'Обычное'))}
                     ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || (isHot ? 'На взводе' : menses ? mdet.mood : 'Спокойное'))}
                     ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || (isHot ? 'Жар, обострённые чувства' : menses ? mdet.physical : 'Норма'))}
                     <div class="repro-note">${d.note || hint}</div>
+                </div>
+            </div>
+        </details>`;
+    }
+
+    // ── НОСИТЕЛЬ БЕЗ МЕСЯЧНЫХ ──
+    // Мужчина, которого игрок сделал носителем: цикла нет, но состояние показываем.
+    if (!hasMenstrualCycle(s, who)) {
+        return `<details class="repro">
+            <summary><div class="repro-header">
+                <div class="repro-icon baby">${ic('fa-user')}</div>
+                <span class="repro-title">${carrierTag(who)}Состояние</span>
+                <span class="repro-badge baby">Может зачать</span>
+                <div class="repro-chev">${ic('fa-chevron-down')}</div>
+            </div></summary>
+            <div class="repro-c">
+                <div class="repro-grid">
+                    ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || 'Обычное')}
+                    ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || 'Спокойное')}
+                    ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || 'Норма', true)}
+                    ${d.note ? `<div class="repro-note">${d.note}</div>` : ''}
                 </div>
             </div>
         </details>`;
@@ -656,6 +677,25 @@ function cycleCardHtml(who, c, tr) {
     const testRes = c.lastTestResult;
 
     let extraRows = '';
+
+    // ── Реализм: гигиена и протечки в дни менструации ──
+    if (s.realism && day <= 5 && !pp && !hidden) {
+        const flow = getFlow(day);
+        const hrs = hoursBetween(c.hygieneChangedRpDate, p0.rpDate);
+        const hy = getHygieneState(c.hygieneType || 'pad', hrs, flow);
+        const worn = hrs === null ? '' : ` · ${Math.round(hrs)} ч`;
+        extraRows += stat('fa-droplet', 'pink', 'Выделения', flow.label);
+        extraRows += stat(
+            hy.overdue ? 'fa-triangle-exclamation' : 'fa-shield-heart',
+            hy.overdue ? 'red' : hy.needsChange ? 'orange' : 'green',
+            'Средство',
+            `${hy.label}${worn}${hy.overdue ? ' — пора менять!' : hy.needsChange ? ' — скоро менять' : ''}`,
+            true);
+        if (hy.health === 'tampon-too-long') {
+            extraRows += stat('fa-kit-medical', 'red', 'Внимание', 'Тампон дольше 8 часов', true);
+        }
+    }
+
     if (delay > 0 && !pp) {
         extraRows += stat('fa-calendar-xmark', 'orange', 'Задержка', `${delay} дн.`);
     }
@@ -690,7 +730,7 @@ function cycleCardHtml(who, c, tr) {
         <div class="repro-c">
             <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>
             <div class="repro-grid">
-                ${stat('fa-droplet', 'green', 'Фертильность', tr(d.fertility) || (pp && !pp.cycleReturned ? 'Очень низкая' : cd.fertility))}
+                ${stat('fa-droplet', 'green', 'Фертильность', pp && !pp.cycleReturned ? 'Очень низкая' : cd.fertility)}
                 ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || cd.libido)}
                 ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || cd.mood)}
                 ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || cd.physical)}
@@ -792,6 +832,13 @@ export function showFamilyTree() {
     $('#rp-tree-overlay').remove();
 
     const p = getPregnancyData();
+    const s = getSettings();
+    // Роль носителя — по полу, а не «мама» всегда: в яое мам нет, носитель — отец.
+    const carrierSex = sexOf(s, 'user');
+    const carrierRole = carrierSex === 'female' ? 'мама' : 'отец';
+    // Второму родителю противоположную роль давать нельзя (оба могут быть мужчинами)
+    const partnerRole = carrierSex === 'female' ? 'папа' : 'родитель';
+
     let momName = 'Ты';
     try {
         const ctx = SillyTavern.getContext();
@@ -906,11 +953,11 @@ export function showFamilyTree() {
         // Пара: мама ♥ папа компактными пилюлями, дети — под ними
         branchesHtml += `<div class="rp-tree-union">
             <div class="rp-couple">
-                ${parentPill(momName, 'mom', 'мама')}
+                ${parentPill(momName, 'mom', carrierRole)}
                 <span class="rp-couple-line"></span>
                 <span class="rp-couple-link" title="${isUnknown ? 'отец неизвестен' : 'пара'}"><i class="fa-solid ${isUnknown ? 'fa-question' : 'fa-heart'}"></i></span>
                 <span class="rp-couple-line"></span>
-                ${parentPill(isUnknown ? 'неизвестен' : father, 'dad', 'папа', isUnknown)}
+                ${parentPill(isUnknown ? 'неизвестен' : father, 'dad', partnerRole, isUnknown)}
             </div>
             ${cells ? `<div class="rp-tree-kids-wrap"><div class="rp-tree-row">${cells}</div></div>` : ''}
         </div>`;
@@ -922,7 +969,7 @@ export function showFamilyTree() {
            </div>
            <div class="rp-tree-details" style="display:none"></div>`
         : `<div class="rp-tree-canvas">
-              <div class="rp-tree-root no-line">${parentPill(momName, 'mom', 'мама')}</div>
+              <div class="rp-tree-root no-line">${parentPill(momName, 'mom', carrierRole)}</div>
            </div>
            <div class="rp-tree-empty"><i class="fa-solid fa-seedling"></i>Детей пока нет — древо ждёт свою историю</div>`;
 
@@ -1032,6 +1079,22 @@ export function showQuickBar() {
     const statusHtml = rows.join('<br>');
 
     const day = getCycleDay();
+
+    // ── Реализм: смена средства гигиены в дни менструации ──
+    let realismRow = '';
+    if (s.realism && isTracked('user') && !p.isPregnant && !isOmegaverse(s) && hasMenstrualCycle(s, 'user') && day <= 5) {
+        const hrs = hoursBetween(p.hygieneChangedRpDate, p.rpDate);
+        const hy = getHygieneState(p.hygieneType || 'pad', hrs, getFlow(day));
+        const opts = Object.values(HYGIENE)
+            .map(h => `<option value="${h.id}"${(p.hygieneType || 'pad') === h.id ? ' selected' : ''}>${h.label}</option>`)
+            .join('');
+        realismRow = `<div class="rp-quick-cycle">
+            <span class="rp-quick-lbl">Гигиена</span>
+            <select id="rp-quick-hygiene" class="text_pole" style="flex:1">${opts}</select>
+            <button class="rp-quick-set" id="rp-quick-changed">${hy.needsChange ? 'Сменить' : 'Сменила'}</button>
+        </div>`;
+    }
+
     const overlay = $(`
     <dialog id="rp-quick-overlay" aria-modal="true" aria-labelledby="rp-quick-title">
         <div class="rp-quick-dialog">
@@ -1048,6 +1111,7 @@ export function showQuickBar() {
                     <button class="rp-quick-step" data-d="1"><i class="fa-solid fa-plus"></i></button>
                     <button class="rp-quick-set" id="rp-quick-setcycle">Установить</button>
                 </div>`}
+                ${realismRow}
                 <div class="rp-quick-actions">
                     ${(!p.isPregnant || !pregnancyIsKnown(p, s)) && !p.hasBaby
                         ? `<button class="rp-quick-btn" id="rp-quick-test">Сделать тест на беременность</button>` : ''}
@@ -1073,6 +1137,24 @@ export function showQuickBar() {
     overlay.on('cancel', (e) => { e.preventDefault(); close(); });
     overlay.on('click', function(e) { if (e.target === this) close(); });
     overlay.find('.rp-tree-close').on('click', close);
+
+    overlay.find('#rp-quick-hygiene').on('change', function() {
+        const pd = getPregnancyData();
+        pd.hygieneType = this.value;
+        pd.hygieneChangedRpDate = pd.rpDate || null;
+        saveSettingsDebounced();
+        syncUI();
+        updatePromptInjection();
+    });
+    overlay.find('#rp-quick-changed').on('click', function() {
+        const pd = getPregnancyData();
+        pd.hygieneChangedRpDate = pd.rpDate || null;
+        saveSettingsDebounced();
+        syncUI();
+        updatePromptInjection();
+        showNotification('<i class="fa-solid fa-shield-heart"></i> Средство сменено', 'success');
+        close();
+    });
 
     const applyCycle = (v) => {
         v = Math.max(1, Math.min(28, parseInt(v) || 1));
@@ -1153,14 +1235,12 @@ export function syncUI() {
 
     const hiddenPreg = el('repro-hidden-preg');
     if (hiddenPreg) hiddenPreg.checked = s.hiddenPregnancy !== false;
-    const fert = el('repro-fertility');
-    if (fert) fert.value = s.fertilityFactor || 100;
-    const fertVal = el('repro-fertility-val');
-    if (fertVal) fertVal.textContent = (s.fertilityFactor || 100) + '%';
 
     // ── Носители / вселенная ──
     const trackSel = el('repro-trackfor');
     if (trackSel) trackSel.value = s.trackFor || 'user';
+    const carrierSel = el('repro-carrier-mode');
+    if (carrierSel) carrierSel.value = s.carrierMode || 'auto';
     const uniSel = el('repro-universe');
     if (uniSel) uniSel.value = s.universe || 'normal';
     const aboPanel = el('repro-abo-panel');
@@ -1476,6 +1556,16 @@ export function setupUI() {
                     <option value="both">Обоих</option>
                 </select>
             </div>
+            <div style="display:flex;gap:4px;align-items:center" title="Кто может забеременеть. Авто: женщина в любой роли (в т.ч. альфа), мужчина — только омега. Выбери вручную, если тела нестандартные">
+                <span style="font-size:9px;opacity:0.5">Вынашивает:</span>
+                <select id="repro-carrier-mode" class="text_pole" style="flex:1">
+                    <option value="auto">Авто (по телу и роли)</option>
+                    <option value="user">Только я</option>
+                    <option value="char">Только персонаж</option>
+                    <option value="both">Оба</option>
+                    <option value="none">Никто</option>
+                </select>
+            </div>
             <div style="display:flex;gap:4px;align-items:center" title="Обычный мир или омегаверс (течки/гоны вместо цикла)">
                 <span style="font-size:9px;opacity:0.5">Вселенная:</span>
                 <select id="repro-universe" class="text_pole" style="flex:1">
@@ -1539,11 +1629,6 @@ export function setupUI() {
             </div>
             <hr>
             <label class="checkbox_label" title="Героиня не знает о зачатии, пока не сделает тест или срок не станет очевидным"><input type="checkbox" id="repro-hidden-preg"><span>Скрытая беременность (тест)</span></label>
-            <div style="display:flex;gap:4px;align-items:center" title="Базовая фертильность носителя: ниже 100% — сложности с зачатием">
-                <span style="font-size:9px;opacity:0.5">Фертильность:</span>
-                <input type="range" id="repro-fertility" min="10" max="150" step="5" style="flex:1">
-                <span id="repro-fertility-val" style="font-size:9px;opacity:0.5;min-width:32px">100%</span>
-            </div>
             <div style="display:flex;gap:4px;align-items:center">
                 <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
                 <select id="repro-contraception" class="text_pole" style="flex:1">
@@ -1654,6 +1739,10 @@ export function setupUI() {
                 <input type="checkbox" id="repro-light-mode">
                 <span>Светлая тема</span>
             </label>
+            <label style="display:flex;gap:6px;align-items:center;font-size:10px;cursor:pointer" title="Цикл становится частью РП: гигиена и протечки в месячные, самочувствие по фазам, сбои цикла от стресса или болезни">
+                <input type="checkbox" id="repro-realism">
+                <span>Реализм цикла</span>
+            </label>
             <button id="repro-purge-tags" class="menu_button" style="width:100%;font-size:10px" title="Убрать технические теги из текста сообщений этого чата — модель перестанет их видеть">Вычистить теги из чата</button>
             <div id="repro-css-panel" style="display:none;flex-direction:column;gap:4px">
                 <textarea id="repro-custom-css" class="text_pole" rows="10" style="font-family:monospace;font-size:10px;resize:vertical;min-height:80px;white-space:pre;tab-size:2" placeholder="/* Свой CSS для инфоблока */\ndetails.repro { ... }"></textarea>
@@ -1747,6 +1836,7 @@ export function setupUI() {
             setTimeout(() => { import('./message-handler.js').then(m => m.renderInfoblock()); }, 60);
         };
         $('#repro-trackfor').on('change', function() { getSettings().trackFor = this.value; refreshAll(); });
+        $('#repro-carrier-mode').on('change', function() { getSettings().carrierMode = this.value; refreshAll(); });
         $('#repro-universe').on('change', function() { getSettings().universe = this.value; refreshAll(); });
         $('#repro-user-desig').on('change', function() { getSettings().userDesignation = this.value; refreshAll(); });
         $('#repro-char-desig').on('change', function() { getSettings().charDesignation = this.value; refreshAll(); });
@@ -1793,12 +1883,6 @@ export function setupUI() {
         $('#repro-abo-char-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('char'); } });
 
         $('#repro-hidden-preg').on('change', function() { getSettings().hiddenPregnancy = this.checked; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
-        $('#repro-fertility').on('input change', function() {
-            const v = Math.max(10, Math.min(150, parseInt(this.value) || 100));
-            getSettings().fertilityFactor = v;
-            $('#repro-fertility-val').text(v + '%');
-            saveSettingsDebounced();
-        });
         $('#repro-contraception').on('change', function() { getSettings().contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
 
         $('#repro-duration').on('change', function() {
@@ -1948,6 +2032,14 @@ export function setupUI() {
                 const n = m.purgeChatTags();
                 showNotification(n ? `Теги убраны из ${n} сообщ.` : 'Тегов в этом чате нет', n ? 'success' : 'info');
             });
+        });
+
+        // Реализм цикла
+        $('#repro-realism').prop('checked', !!s.realism).on('change', function() {
+            getSettings().realism = this.checked;
+            saveSettingsDebounced();
+            updatePromptInjection();
+            syncUI();
         });
 
         // Светлая тема таверны

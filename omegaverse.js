@@ -141,18 +141,31 @@ export function advanceAboCycles(carrier, desig, s, days) {
 }
 
 // ─── Может ли носитель ЗАБЕРЕМЕНЕТЬ ───
-// Обычный мир: только женщины. Омегаверс: женщины + омеги любого пола; альфы — никогда.
+// Режим 'auto' угадывает по телу и роли, остальные — прямой выбор игрока
+// (юзер-девушка с членом, бот-мужчина, который вынашивает, яой без женщин).
+// В 'auto': женщина вынашивает в любой роли — включая АЛЬФУ-женщину;
+// мужчина — только если он омега. Оплодотворить при этом может кто угодно:
+// омега-мужчина спокойно делает ребёнка альфе-женщине, носитель здесь — она.
 export function canCarry(s, who) {
-    const sex = sexOf(s, who);
-    if (!isOmegaverse(s)) return sex === 'female';
-    const d = designationOf(s, who);
-    if (d === 'alpha') return false;
-    return sex === 'female' || d === 'omega';
+    const mode = s?.carrierMode || 'auto';
+    if (mode === 'none') return false;
+    if (mode === 'user' || mode === 'char') return mode === who;
+    if (mode === 'both') return true;
+
+    // auto — не носитель тот, кого вообще не отслеживают
+    const trackFor = s?.trackFor || 'user';
+    if (trackFor !== 'both' && trackFor !== who) return false;
+
+    if (sexOf(s, who) === 'female') return true;
+    return isOmegaverse(s) && designationOf(s, who) === 'omega';
 }
 
 // Есть ли у носителя что отслеживать: цикл, течка или гон.
 export function hasAnyTracking(s, who) {
     if (hasMenstrualCycle(s, who)) return true;
+    // Носитель без месячных (мужчина-омега, бот-носитель в обычном мире) — тоже
+    // отслеживается: у него нет цикла, но есть состояние и возможность зачатия
+    if (canCarry(s, who)) return true;
     if (!isOmegaverse(s)) return false;
     const d = designationOf(s, who);
     return d === 'omega' || d === 'alpha';
