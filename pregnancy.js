@@ -119,9 +119,13 @@ export function applyScanResult(result) {
         if (!p.isPregnant) {
             return updated;
         }
-        // 2) Игнорируем если roды на критически раннем сроке (<20 недель — плод не выживает)
+        // 2) Игнорируем роды раньше допустимого срока.
+        // При укороченной беременности настройка pregnancyDuration считается полным сроком,
+        // поэтому жёсткий порог 20 недель не должен блокировать варианты 12/16 недель из UI.
         const currentWeeks = p.pregnancyWeeks || 0;
-        if (currentWeeks > 0 && currentWeeks < 20) {
+        const configuredDuration = Math.max(4, parseInt(s.pregnancyDuration) || 40);
+        const minBirthWeek = Math.min(20, configuredDuration);
+        if (currentWeeks > 0 && currentWeeks < minBirthWeek) {
             return updated;
         }
         if (currentWeeks === 0) {
@@ -153,11 +157,15 @@ export function applyScanResult(result) {
         //            grownChildren (архив выросших), babies (старшие дети)
         const savedRpDate = p.rpDate;
         const savedLastRpDateTag = p._lastRpDateTag;
+        // Беременность/послеродовое состояние {{char}} живёт в p.partner и не должно
+        // исчезать, когда рожает {{user}}.
+        const savedPartner = p.partner ? structuredClone(p.partner) : null;
 
         Object.assign(p, structuredClone(defaultPregnancyData));
         p.rpDate = savedRpDate;
         p._lastRpDateTag = savedLastRpDateTag;
         p.grownChildren = existingGrown;
+        p.partner = savedPartner;
 
         // Блок пере-триггера на 12 сообщений: послеродовой текст не создаёт новую
         // беременность/роды (явный [CONCEPTION_CHECK] тег блок обходит)
@@ -421,32 +429,38 @@ export function checkConception() {
 
     if (!s.isEnabled) return null;
     if (p.isPregnant) return null;
+    if (!canCarry(s, 'user')) return null;
 
     s.totalChecks++;
 
     const currentCycleDay = getCycleDay();
-    // В омегаверсе шанс диктует фаза течки, иначе — фаза обычного цикла
-    const cycleModifier = isOmegaverse(s)
-        ? (carrierAboStatus(p, designationOf(s, 'user'), s).fertility ?? 1)
-        : getCycleModifier(currentCycleDay);
-    let chance = Math.round(CHANCES.base * cycleModifier);
+    // В омегаверсе у женщин обычный 28-дневный цикл продолжает иметь значение.
+    // Для омеги течка дополнительно усиливает/ослабляет фертильность; у носителя без
+    // месячных (например, мужчина-омега) шанс определяется только течкой.
+    let cycleModifier = hasMenstrualCycle(s, 'user') ? getCycleModifier(currentCycleDay) : 1;
+    if (isOmegaverse(s)) {
+        const abo = carrierAboStatus(p, designationOf(s, 'user'), s);
+        if (designationOf(s, 'user') === 'omega') cycleModifier *= (abo.fertility ?? 1);
+    }
+    let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
     // Послеродовой период: пока цикл не вернулся, зачатие почти невозможно
     const pp = getPostpartum(p, p);
-    if (pp) chance = Math.round(chance * pp.fertilityMul);
+    if (pp) chance = Math.max(0, Math.min(100, Math.round(chance * pp.fertilityMul)));
 
-    const contraceptionEff = CHANCES.contraception[s.contraception];
+    const contraceptionEff = CHANCES.contraception[s.contraception] || 0;
     let contraceptionFailed = false;
 
+    // Контрацепция — отдельный бинарный барьер. Если она сработала, зачатия нет;
+    // если подвела, дальше действует обычный биологический шанс. Так заявленные
+    // 85/91/99% не применяются дважды и соответствуют фактической эффективности.
     if (s.contraception !== 'none') {
-        const failRoll = roll(100);
-        if (failRoll > contraceptionEff) {
-            contraceptionFailed = true;
-            if (s.showNotifications) {
-                showNotification(L('contraceptionFailed'), 'warning');
-            }
+        const protectionRoll = roll(100);
+        if (protectionRoll <= contraceptionEff) {
+            chance = 0;
         } else {
-            chance = Math.round(chance * (1 - contraceptionEff / 100));
+            contraceptionFailed = true;
+            if (s.showNotifications) showNotification(L('contraceptionFailed'), 'warning');
         }
     }
 
@@ -561,17 +575,21 @@ export function terminatePregnancy(reason) {
 export function resetPregnancy() {
     const s = getSettings();
     const p = getPregnancyData();
-    Object.assign(p, structuredClone(defaultPregnancyData));
-    // Метка «юзер только что вмешался» — блокирует scanWeeksFromText на 30 минут.
-    // Без неё бот-ответ типа «ты на 16 неделе» мгновенно воссоздаст беременность из текста.
+
+    // Это именно «сброс беременности», а не «стереть весь чат-состояние».
+    // Дети, архив, RP-дата, цикл, partner и послеродовое состояние сохраняются.
+    if (p.isPregnant) {
+        terminatePregnancy('manual');
+        return;
+    }
+
     p._userSetWeeksAt = Date.now();
-    // Mark reset position so keyword/API detection doesn't re-trigger pregnancy from old context
     try {
         const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
         const chatLen = ctx?.chat?.length || 0;
         s._conceptionBlockedUntil = chatLen + 10;
         s._birthBlockedUntil = chatLen + 10;
-        s._lastScannedPosition = chatLen; // prevent re-scan of current message
+        s._lastScannedPosition = chatLen;
     } catch (e) {}
     refreshSnap();
     saveSettingsDebounced();
@@ -988,17 +1006,18 @@ export function partnerCheckConception() {
     const p = getPregnancyData();
 
     s.totalChecks++;
-    let chance;
+    let cycleModifier = hasMenstrualCycle(s, 'char') ? getCycleModifier(c.cycleDay || 1) : 1;
     if (isOmegaverse(s)) {
-        // Омегаверс: шанс зависит от фазы течки носителя
         const st = carrierAboStatus(c, designationOf(s, 'char'), s);
-        chance = Math.round(CHANCES.base * (st.fertility ?? 1));
-    } else {
-        chance = Math.round(CHANCES.base * getCycleModifier(c.cycleDay || 1));
+        if (designationOf(s, 'char') === 'omega') cycleModifier *= (st.fertility ?? 1);
     }
+    let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
+
     const contraEff = CHANCES.contraception[s.contraception] || 0;
-    if (s.contraception !== 'none' && roll(100) <= contraEff) {
-        chance = Math.round(chance * (1 - contraEff / 100));
+    if (s.contraception !== 'none') {
+        const protectionRoll = roll(100);
+        if (protectionRoll <= contraEff) chance = 0;
+        else if (s.showNotifications) showNotification(L('contraceptionFailed'), 'warning');
     }
 
     const r = roll(100);
@@ -1039,7 +1058,9 @@ export function partnerBirth(babyTraits) {
     const c = getPartnerData();
     if (!c.isPregnant) return false;
     const weeks = c.pregnancyWeeks || 0;
-    if (weeks > 0 && weeks < 20) return false;
+    const configuredDuration = Math.max(4, parseInt(s.pregnancyDuration) || 40);
+    const minBirthWeek = Math.min(20, configuredDuration);
+    if (weeks > 0 && weeks < minBirthWeek) return false;
 
     const count = c.fetusCount || 1;
     const sexes = c.fetusSex?.length ? [...c.fetusSex] : ['M'];

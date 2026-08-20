@@ -244,8 +244,8 @@ function runScan() {
         }
         // Block keyword-based birth when pregnancy is too early (require >= 85% of duration)
         if (tagResult.birth_occurred && tagResult._source === 'keyword' && p.isPregnant) {
-            const minWeek = Math.ceil((p.pregnancyDuration || 40) * 0.85);
-            if ((p.pregnancyWeek || 0) < minWeek) {
+            const minWeek = Math.ceil((s.pregnancyDuration || 40) * 0.85);
+            if ((p.pregnancyWeeks || 0) < minWeek) {
                 tagResult.birth_occurred = false;
             }
         }
@@ -478,8 +478,8 @@ export function rescanMessage(fullText, messageIndex) {
         }
         // Block keyword-based birth in early pregnancy (rescan: bot text only, but still apply week guard)
         if (tagResult.birth_occurred && tagResult._source === 'keyword' && p.isPregnant) {
-            const minWeek = Math.ceil((p.pregnancyDuration || 40) * 0.85);
-            if ((p.pregnancyWeek || 0) < minWeek) {
+            const minWeek = Math.ceil((s.pregnancyDuration || 40) * 0.85);
+            if ((p.pregnancyWeeks || 0) < minWeek) {
                 tagResult.birth_occurred = false;
             }
         }
@@ -795,13 +795,16 @@ function advanceTime(s, p, daysPassed) {
             }
             if (c.isPregnant && c.conceptionDate && p.rpDate) {
                 const w = Math.floor((new Date(p.rpDate).getTime() - new Date(c.conceptionDate).getTime()) / (7 * 86400000));
+                const dur = s.pregnancyDuration || 40;
                 if (w >= 0 && w !== c.pregnancyWeeks) {
                     c.pregnancyWeeks = w;
                     changed = true;
-                    const dur = s.pregnancyDuration || 40;
-                    if (s.showNotifications && w >= dur) {
-                        showNotification(`<i class="fa-solid fa-hospital"></i> ${carrierName('char')}: ПДР достигнута — роды в любой момент!`, 'warning');
-                    }
+                }
+                // Настроенная длительность — это фактический полный срок, а не только ПДР.
+                // Проверяем даже если номер недели не изменился: это чинит уже «зависшие» беременности
+                // после обновления расширения (например, состояние уже сохранено как 24/24).
+                if (w >= dur) {
+                    partnerBirth();
                 }
             }
         } catch (e) { /* ignore */ }
@@ -851,11 +854,10 @@ function advanceTime(s, p, daysPassed) {
 
         if (diffMs > 0) {
             const newW = Math.floor(diffMs / (7 * 86400000));
+            const duration = s.pregnancyDuration || 40;
             if (newW !== oldWeeks) {
                 p.pregnancyWeeks = newW;
                 changed = true;
-
-                const duration = s.pregnancyDuration || 40;
 
                 // ── Milestone notifications ──
                 if (s.showNotifications && newW > oldWeeks) {
@@ -881,26 +883,28 @@ function advanceTime(s, p, daysPassed) {
                     }
 
                     if (newW >= duration && oldWeeks < duration) {
-                        showNotification('<i class="fa-solid fa-hospital"></i> ПДР достигнута — роды могут начаться в любой момент!', 'warning');
+                        showNotification('<i class="fa-solid fa-hospital"></i> Срок беременности завершён — начинаются роды!', 'warning');
                     }
-                }
-
-                // ── AUTO-BIRTH: if weeks exceed duration+2, trigger birth automatically ──
-                if (newW >= duration + 2) {
-                    const birthResult = {
-                        birth_occurred: true,
-                        vaginal_ejaculation_occurred: false,
-                        cycle_day: null,
-                    };
-                    applyScanResult(birthResult);
-                    // Update snapshot to reflect post-birth state
-                    _preRegenSnapshot = snapshotOf(p);
-                    _snapshotChatId = getCurrentChatId();
-                    return; // applyScanResult handles everything
                 }
 
                 // ── Reveal planned complications whose week has arrived ──
                 revealPlannedComplications(s, p, oldWeeks, newW);
+            }
+
+            // ── AUTO-BIRTH: configured duration is the actual birth threshold ──
+            // Стоит вне проверки смены номера недели, чтобы уже сохранённое 24/24
+            // состояние родило при следующем продвижении RP-даты хотя бы на день.
+            if (newW >= duration) {
+                const birthResult = {
+                    birth_occurred: true,
+                    vaginal_ejaculation_occurred: false,
+                    cycle_day: null,
+                };
+                applyScanResult(birthResult);
+                // Update snapshot to reflect post-birth state
+                _preRegenSnapshot = snapshotOf(p);
+                _snapshotChatId = getCurrentChatId();
+                return; // applyScanResult handles everything
             }
         }
     }
