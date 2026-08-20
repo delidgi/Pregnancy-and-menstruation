@@ -64,12 +64,20 @@ function loadSettings() {
             delete s.customRaceName;
             delete s.specialTraits;
 
-            // Добавляем новые поля
+            // Миграция общей контрацепции в отдельные настройки носителей.
+            // Старое поле оставляем как alias {{user}}, чтобы старые конфиги не ломались.
+            const legacyContraception = s.contraception || 'none';
+            if (s.contraceptionUser === undefined) s.contraceptionUser = legacyContraception;
+            if (s.contraceptionChar === undefined) s.contraceptionChar = legacyContraception;
+
+            // Добавляем новые поля. Клонируем объекты/массивы, чтобы разные настройки
+            // не разделяли одну ссылку на defaultSettings.
             for (const key in defaultSettings) {
                 if (s[key] === undefined) {
-                    s[key] = defaultSettings[key];
+                    s[key] = structuredClone(defaultSettings[key]);
                 }
             }
+            s.contraception = s.contraceptionUser || 'none';
 
             // ── Repair broken conceptionDate (real-world Date stored vs RP rpDate) ──
             // Old bug: checkConception fell back to `new Date()` when rpDate was missing,

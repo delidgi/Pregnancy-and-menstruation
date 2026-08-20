@@ -1,13 +1,13 @@
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
-import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
 import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
 import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
 import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesTotal } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
-import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, daysSinceConception, setLactating, setTrying, monthsTrying } from './pregnancy.js';
+import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, daysSinceConception, setLactating, setTrying, monthsTrying, createUndoCheckpoint, undoLastDestructiveChange } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { showNotification } from './notifications.js';
 
@@ -1022,6 +1022,7 @@ export function showFamilyTree() {
         if (!k) return;
         if (!confirm(`Удалить ${k.name || 'этого ребёнка'} из семьи? Остальные дети останутся. Отменить нельзя.`)) return;
         const pd = getPregnancyData();
+        createUndoCheckpoint(`Удаление ребёнка: ${k.name || 'без имени'}`);
         const same = (b) => (b.name || '') === (k.name || '')
             && String(b.birthRpDate || '') === String(k.birthRpDate || '')
             && (b.sex || '') === (k.sex || '');
@@ -1039,6 +1040,7 @@ export function showFamilyTree() {
                 pd.babySex = pd.babies.map(b => b.sex);
             }
         }
+        syncBabyLegacyFields(pd);
         saveSettingsDebounced();
         showNotification(`${k.name || 'Ребёнок'} удалён(а) из семьи`, 'info');
         import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
@@ -1230,8 +1232,18 @@ export function syncUI() {
     if (enabled) enabled.checked = s.isEnabled;
     if (notify) notify.checked = s.showNotifications;
 
-    const contra = el('repro-contraception');
-    if (contra) contra.value = s.contraception;
+    const contraUser = el('repro-contraception-user');
+    const contraChar = el('repro-contraception-char');
+    if (contraUser) contraUser.value = getContraception('user');
+    if (contraChar) contraChar.value = getContraception('char');
+    const contraUserBox = el('repro-contraception-user-box');
+    const contraCharBox = el('repro-contraception-char-box');
+    if (contraUserBox) contraUserBox.style.display = isTracked('user') ? 'flex' : 'none';
+    if (contraCharBox) contraCharBox.style.display = isTracked('char') ? 'flex' : 'none';
+    const contraUserLabel = el('repro-contra-user-label');
+    const contraCharLabel = el('repro-contra-char-label');
+    if (contraUserLabel) contraUserLabel.textContent = `Контрацепция ${carrierName('user')}:`;
+    if (contraCharLabel) contraCharLabel.textContent = `Контрацепция ${carrierName('char')}:`;
 
     const hiddenPreg = el('repro-hidden-preg');
     if (hiddenPreg) hiddenPreg.checked = s.hiddenPregnancy !== false;
@@ -1629,13 +1641,16 @@ export function setupUI() {
             </div>
             <hr>
             <label class="checkbox_label" title="Героиня не знает о зачатии, пока не сделает тест или срок не станет очевидным"><input type="checkbox" id="repro-hidden-preg"><span>Скрытая беременность (тест)</span></label>
-            <div style="display:flex;gap:4px;align-items:center">
-                <span style="font-size:9px;opacity:0.5">Контрацепция:</span>
-                <select id="repro-contraception" class="text_pole" style="flex:1">
-                    <option value="none">Нет</option>
-                    <option value="condom">Презерватив</option>
-                    <option value="pill">Таблетки</option>
-                    <option value="iud">ВМС</option>
+            <div id="repro-contraception-user-box" style="display:flex;gap:4px;align-items:center">
+                <span id="repro-contra-user-label" style="font-size:9px;opacity:0.5">Контрацепция {{user}}:</span>
+                <select id="repro-contraception-user" class="text_pole" style="flex:1">
+                    <option value="none">Нет</option><option value="condom">Презерватив</option><option value="pill">Таблетки</option><option value="iud">ВМС</option>
+                </select>
+            </div>
+            <div id="repro-contraception-char-box" style="display:none;gap:4px;align-items:center">
+                <span id="repro-contra-char-label" style="font-size:9px;opacity:0.5">Контрацепция {{char}}:</span>
+                <select id="repro-contraception-char" class="text_pole" style="flex:1">
+                    <option value="none">Нет</option><option value="condom">Презерватив</option><option value="pill">Таблетки</option><option value="iud">ВМС</option>
                 </select>
             </div>
             <div style="display:flex;gap:4px;align-items:center">
@@ -1725,6 +1740,7 @@ export function setupUI() {
                 <button id="repro-manual-baby-add" class="menu_button" style="width:100%">Добавить малыша</button>
                 <button id="repro-reset" class="menu_button redWarningBG" style="width:100%;display:none">Сброс берем.</button>
                 <button id="repro-reset-baby" class="menu_button redWarningBG" style="width:100%;display:none">Сброс малыша</button>
+                <button id="repro-undo" class="menu_button" style="width:100%">↶ Отменить последний сброс/удаление</button>
             </div>
             <hr>
             <div style="display:flex;gap:4px;align-items:center">
@@ -1883,7 +1899,8 @@ export function setupUI() {
         $('#repro-abo-char-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('char'); } });
 
         $('#repro-hidden-preg').on('change', function() { getSettings().hiddenPregnancy = this.checked; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
-        $('#repro-contraception').on('change', function() { getSettings().contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
+        $('#repro-contraception-user').on('change', function() { const s = getSettings(); s.contraceptionUser = this.value; s.contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
+        $('#repro-contraception-char').on('change', function() { const s = getSettings(); s.contraceptionChar = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
 
         $('#repro-duration').on('change', function() {
             const v = $(this).val();
@@ -1932,6 +1949,10 @@ export function setupUI() {
 
         $('#repro-reset').on('click', function() { if (confirm('Сбросить беременность?')) { resetPregnancy(); showNotification('Сброшено', 'info'); } });
         $('#repro-reset-baby').on('click', function() { if (confirm('Сбросить малыша?')) { resetBaby(); showNotification('Сброшено', 'info'); } });
+        $('#repro-undo').on('click', function() {
+            const label = undoLastDestructiveChange();
+            showNotification(label ? `Отменено: ${label}` : 'Нечего отменять', label ? 'success' : 'info');
+        });
 
         // Manual pregnancy/baby toggle (объединённая панель)
         $('#repro-manual-toggle').on('click', function() {

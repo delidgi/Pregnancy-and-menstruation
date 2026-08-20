@@ -9,6 +9,97 @@ export function getSettings() {
     return extension_settings[extensionName];
 }
 
+
+function cloneDefault(value) {
+    return (value && typeof value === 'object') ? structuredClone(value) : value;
+}
+
+function fillMissing(target, defaults) {
+    if (!target || typeof target !== 'object') return;
+    for (const key in defaults) {
+        if (target[key] === undefined) target[key] = cloneDefault(defaults[key]);
+    }
+}
+
+function legacyBabyFromRoot(p, index, count) {
+    const sexList = Array.isArray(p.babySex) ? p.babySex : [];
+    return {
+        name: index === 0 ? (p.babyName || '') : '',
+        sex: sexList[index] || sexList[0] || 'M',
+        health: p.babyHealth || 'normal',
+        mood: p.babyMood || 'спокойный',
+        sleep: p.babySleep || 'спит',
+        diaperClean: p.babyDiaperClean !== false,
+        teething: !!p.babyTeething,
+        colicky: !!p.babyColicky,
+        feedingType: p.babyFeedingType || '',
+        milestones: index === 0 && Array.isArray(p.babyMilestones) ? structuredClone(p.babyMilestones) : [],
+        personality: [],
+        appearance: [],
+        birthRpDate: p.babyBirthRpDate || p.rpDate || null,
+        age: p.babyAge || 'новорождённый',
+    };
+}
+
+// babies[] is the canonical active-child state. Legacy singular fields remain as
+// compatibility mirrors for old UI/prompts/saves and are rebuilt from babies[].
+export function syncBabyLegacyFields(p = getPregnancyData()) {
+    if (!p || typeof p !== 'object') return p;
+    if (!Array.isArray(p.babies)) p.babies = [];
+    if (!Array.isArray(p.grownChildren)) p.grownChildren = [];
+
+    // Upgrade old saves that only had babyName/babyCount/etc.
+    if (p.babies.length === 0 && p.hasBaby) {
+        const legacyCount = Math.max(1, parseInt(p.babyCount) || (Array.isArray(p.babySex) ? p.babySex.length : 0) || 1);
+        for (let i = 0; i < legacyCount; i++) p.babies.push(legacyBabyFromRoot(p, i, legacyCount));
+    }
+
+    p.babies = p.babies.filter(b => b && typeof b === 'object');
+    if (p.babies.length === 0) {
+        p.hasBaby = false;
+        p.babyCount = 0;
+        p.babyName = '';
+        p.babySex = [];
+        p.babyBirthRpDate = null;
+        return p;
+    }
+
+    p.hasBaby = true;
+    p.babyCount = p.babies.length;
+    p.babySex = p.babies.map(b => b.sex || '?');
+    const primary = p.babies[0];
+    p.babyName = primary.name || '';
+    p.babyHealth = primary.health || 'normal';
+    p.babyMood = primary.mood || '';
+    p.babySleep = primary.sleep || '';
+    p.babyDiaperClean = primary.diaperClean !== false;
+    p.babyTeething = !!primary.teething;
+    p.babyColicky = !!primary.colicky;
+    p.babyFeedingType = primary.feedingType || '';
+    p.babyMilestones = Array.isArray(primary.milestones) ? primary.milestones : [];
+    p.babyAge = primary.age || p.babyAge || '';
+    p.babyBirthRpDate = primary.birthRpDate || null;
+    return p;
+}
+
+export function migratePregnancyData(p, s = getSettings()) {
+    if (!p || typeof p !== 'object') return p;
+    fillMissing(p, defaultPregnancyData);
+    if (!p.partner || typeof p.partner !== 'object') p.partner = structuredClone(defaultPartnerData);
+    fillMissing(p.partner, defaultPartnerData);
+    syncBabyLegacyFields(p);
+    return p;
+}
+
+export function getContraception(who = 'user') {
+    const s = getSettings();
+    if (!s) return 'none';
+    const legacy = s.contraception || 'none';
+    if (s.contraceptionUser === undefined || s.contraceptionUser === null) s.contraceptionUser = legacy;
+    if (s.contraceptionChar === undefined || s.contraceptionChar === null) s.contraceptionChar = legacy;
+    return who === 'char' ? (s.contraceptionChar || 'none') : (s.contraceptionUser || 'none');
+}
+
 // ──────────────────────────────────────────────────────────────────────
 // Управление chatId с кэшем.
 // ──────────────────────────────────────────────────────────────────────
@@ -147,6 +238,7 @@ export function getPregnancyData() {
         s.chatPregnancyData[chatId] = fresh;
     }
 
+    migratePregnancyData(s.chatPregnancyData[chatId], s);
     return s.chatPregnancyData[chatId];
 }
 
@@ -156,11 +248,8 @@ export function getPregnancyData() {
 // ──────────────────────────────────────────────────────────────────────
 export function getPartnerData() {
     const p = getPregnancyData();
-    if (!p.partner) p.partner = structuredClone(defaultPartnerData);
-    // Досыпаем новые поля в старые сейвы
-    for (const k in defaultPartnerData) {
-        if (p.partner[k] === undefined) p.partner[k] = defaultPartnerData[k];
-    }
+    if (!p.partner || typeof p.partner !== 'object') p.partner = structuredClone(defaultPartnerData);
+    fillMissing(p.partner, defaultPartnerData);
     return p.partner;
 }
 

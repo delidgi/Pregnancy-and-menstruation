@@ -534,6 +534,11 @@ export async function scanChat() {
 // 3) Возвращает {processed, conceptions, births, dates, sexReveals} для отчёта
 //
 // ВАЖНО: на время сканирования глушит нотификации, иначе спам.
+function isTrackedForScan(s, who) {
+    const mode = s?.trackFor || 'user';
+    return mode === 'both' || mode === who;
+}
+
 export async function scanFullHistory() {
     const chat = typeof SillyTavern?.getContext === 'function'
         ? SillyTavern.getContext().chat
@@ -541,13 +546,13 @@ export async function scanFullHistory() {
     if (!chat || chat.length === 0) return { processed: 0, conceptions: 0, births: 0, dates: 0, sexReveals: 0 };
 
     // Динамические импорты, чтобы избежать циклов
-    const { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag } = await import('./pregnancy.js');
+    const { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, createUndoCheckpoint } = await import('./pregnancy.js');
     const { processDateTag } = await import('./message-handler.js');
-    const { getPregnancyData, getSettings, setCycleDay } = await import('./state.js');
+    const { getPregnancyData, getPartnerData, getSettings, setCycleDay } = await import('./state.js');
     const { defaultPregnancyData } = await import('./config.js');
 
     const s = getSettings();
-    const stats = { processed: 0, conceptions: 0, births: 0, dates: 0, sexReveals: 0 };
+    const stats = { processed: 0, conceptions: 0, births: 0, charConceptions: 0, charBirths: 0, dates: 0, sexReveals: 0, charSexReveals: 0 };
 
     // ── СБРОС per-chat состояния ──
     // ВАЖНО что мы сохраняем:
@@ -557,6 +562,16 @@ export async function scanFullHistory() {
     //     datepicker), то после сброса малыш бы исчез. Сохраняем и восстанавливаем потом,
     //     если за время скана не было найдено новых родов.
     const p = getPregnancyData();
+    createUndoCheckpoint('Полное пересканирование чата');
+    const savedUserPregnancy = p.isPregnant ? structuredClone({
+        isPregnant: p.isPregnant, conceptionDate: p.conceptionDate, pregnancyWeeks: p.pregnancyWeeks,
+        _conceptionAnchored: p._conceptionAnchored, fetusCount: p.fetusCount, fetusSex: p.fetusSex,
+        fetusSexRevealed: p.fetusSexRevealed, complications: p.complications, _plannedComplications: p._plannedComplications,
+        healthStatus: p.healthStatus, pregnancyKnown: p.pregnancyKnown, testTakenAt: p.testTakenAt,
+        lastTestResult: p.lastTestResult, fatherName: p.fatherName, mood: p.mood, libido: p.libido,
+        weightGain: p.weightGain, babyActivity: p.babyActivity,
+    }) : null;
+    const savedPartner = p.partner ? structuredClone(p.partner) : null;
     const savedGrown = Array.isArray(p.grownChildren) ? [...p.grownChildren] : [];
     const savedBabyState = p.hasBaby ? {
         hasBaby: true,
@@ -576,8 +591,10 @@ export async function scanFullHistory() {
         babyMilestones: Array.isArray(p.babyMilestones) ? [...p.babyMilestones] : [],
         momState: p.momState || null,
     } : null;
+    const undoSnapshot = p._undoSnapshot ? structuredClone(p._undoSnapshot) : null;
     Object.keys(p).forEach(k => delete p[k]);
     Object.assign(p, structuredClone(defaultPregnancyData));
+    if (undoSnapshot) p._undoSnapshot = undoSnapshot;
     p.grownChildren = savedGrown;
     // cycleDay начинаем с 14 (овуляция) как нейтрального дефолта — модель его передвинет
     setCycleDay(14, false);
@@ -587,8 +604,20 @@ export async function scanFullHistory() {
     s.showNotifications = false;
 
     // Отключаем reset-protection
-    const oldBlock = s._conceptionBlockedUntil;
+    const oldBlocks = {
+        conceptionUser: s._conceptionBlockedUntilUser,
+        conceptionChar: s._conceptionBlockedUntilChar,
+        birthUser: s._birthBlockedUntilUser,
+        birthChar: s._birthBlockedUntilChar,
+        legacy: s._conceptionBlockedUntil,
+        historyScan: s._historyScanInProgress,
+    };
+    s._conceptionBlockedUntilUser = null;
+    s._conceptionBlockedUntilChar = null;
+    s._birthBlockedUntilUser = null;
+    s._birthBlockedUntilChar = null;
     s._conceptionBlockedUntil = null;
+    s._historyScanInProgress = true;
 
     try {
         for (let i = 0; i < chat.length; i++) {
@@ -649,7 +678,7 @@ export async function scanFullHistory() {
                     applyScanResult(tagResult);
                     stats.conceptions++;
                 } else if (tagResult.birth_occurred && p2.isPregnant) {
-                    applyScanResult(tagResult);
+                    applyScanResult({ ...tagResult, _silent: true });
                     stats.births++;
                 } else if ((tagResult.miscarriage_occurred || tagResult.abortion_occurred) && p2.isPregnant) {
                     applyScanResult(tagResult);
@@ -664,6 +693,26 @@ export async function scanFullHistory() {
                     }
                     p2.fetusSexRevealed = true;
                     stats.sexReveals++;
+                }
+            }
+
+            // 3b) :CHAR events — symmetric recovery for the tracked partner.
+            if (tagResult && isTrackedForScan(s, 'char')) {
+                const c = getPartnerData();
+                if (tagResult.char_conception && !c.isPregnant) {
+                    partnerCheckConception();
+                    stats.charConceptions++;
+                }
+                if (tagResult.char_sex_revealed && c.isPregnant && !c.fetusSexRevealed) {
+                    if (tagResult.revealed_sexes?.length) {
+                        const need = c.fetusCount || 1;
+                        c.fetusSex = Array.from({ length: need }, (_, j) => tagResult.revealed_sexes[j] || tagResult.revealed_sexes[tagResult.revealed_sexes.length - 1]);
+                    }
+                    c.fetusSexRevealed = true;
+                    stats.charSexReveals++;
+                }
+                if (tagResult.char_birth && c.isPregnant) {
+                    if (partnerBirth(tagResult.baby_traits, { silent: true, source: 'tag' })) stats.charBirths++;
                 }
             }
 
@@ -693,8 +742,28 @@ export async function scanFullHistory() {
     } finally {
         // Восстанавливаем
         s.showNotifications = oldNotify;
-        s._conceptionBlockedUntil = oldBlock;
+        s._conceptionBlockedUntilUser = oldBlocks.conceptionUser;
+        s._conceptionBlockedUntilChar = oldBlocks.conceptionChar;
+        s._birthBlockedUntilUser = oldBlocks.birthUser;
+        s._birthBlockedUntilChar = oldBlocks.birthChar;
+        s._conceptionBlockedUntil = oldBlocks.legacy;
+        s._historyScanInProgress = oldBlocks.historyScan;
         s._lastScannedPosition = chat.length;
+    }
+
+    // Manual/current user pregnancy should survive a full scan when the history has
+    // no reproductive evidence capable of rebuilding it.
+    if (savedUserPregnancy && stats.conceptions === 0 && stats.births === 0) {
+        Object.assign(getPregnancyData(), savedUserPregnancy);
+    }
+
+    // If the partner was configured/manually pregnant but history contains no :CHAR
+    // reproductive events, preserve that state instead of silently deleting it.
+    if (savedPartner) {
+        const rebuiltPartner = getPartnerData();
+        const noCharEvidence = stats.charConceptions === 0 && stats.charBirths === 0 && stats.charSexReveals === 0;
+        const lostActivePregnancy = savedPartner.isPregnant && !rebuiltPartner.isPregnant && stats.charBirths === 0;
+        if (noCharEvidence || lostActivePregnancy) getPregnancyData().partner = savedPartner;
     }
 
     // ── Восстановление baby-состояния ──
@@ -702,7 +771,7 @@ export async function scanFullHistory() {
     // тега [BIRTH] в истории чата → это значит малыш был добавлен вручную (через кнопку
     // «принять роды» или ручную беременность). После сброса он бы исчез, но мы сохранили
     // состояние и возвращаем его обратно.
-    if (savedBabyState && stats.births === 0) {
+    if (savedBabyState && stats.births === 0 && stats.charBirths === 0) {
         const pNow = getPregnancyData();
         // Сбрасываем pregnancy-флаги (на случай если скан нашёл зачатие в истории)
         pNow.isPregnant = false;

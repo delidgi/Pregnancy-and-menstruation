@@ -4,7 +4,7 @@
 
 import { setExtensionPrompt, extension_prompt_types, extension_prompt_roles } from '../../../../script.js';
 import { extensionName } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName, isTracked } from './state.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, carrierName, isTracked, getContraception } from './state.js';
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
 import { pregnancyIsKnown, daysSinceConception, getPostpartum, monthsTrying } from './pregnancy.js';
 import { fertileWindow, missedDays, conceptionStruggle } from './fertility.js';
@@ -184,10 +184,13 @@ export function getBasePrompt() {
     else if (day <= 16) phase = 'Ovulation';
     else phase = 'Luteal';
 
-    const contraLabel =
-        s.contraception === 'condom' ? 'Condom' :
-        s.contraception === 'pill' ? 'Birth control pill' :
-        s.contraception === 'iud' ? 'IUD' : 'No protection';
+    const contraName = (value) => value === 'condom' ? 'Condom' : value === 'pill' ? 'Birth control pill' : value === 'iud' ? 'IUD' : 'No protection';
+    const userContra = getContraception('user');
+    const charContra = getContraception('char');
+    const contraParts = [];
+    if (isTracked('user')) contraParts.push(`{{user}} protection: ${contraName(userContra)}`);
+    if (isTracked('char')) contraParts.push(`{{char}} protection: ${contraName(charContra)}`);
+    const contraLabel = contraParts.join(' | ');
 
     // Строка статуса на каждого отслеживаемого носителя
     const carrierLines = [];
@@ -207,9 +210,8 @@ export function getBasePrompt() {
     prompt += `<!-- [RP_DATE:DD.MM.YYYY] -->\n`;
     prompt += `Must be an HTML comment exactly as shown. Do not turn it into prose like "Today: 15.06.2025".\n\n`;
 
-    if (s.contraception === 'condom') {
-        prompt += `Condom is in use (~15% failure chance — still possible to fail).\n\n`;
-    }
+    if (userContra === 'condom' && isTracked('user')) prompt += `{{user}}: condom is in use (~15% failure chance). Only add CONCEPTION_CHECK if it fails and semen is released inside.\n\n`;
+    if (charContra === 'condom' && isTracked('char')) prompt += `{{char}}: condom is in use (~15% failure chance). Only add CONCEPTION_CHECK:CHAR if it fails and semen is released inside {{char}}.\n\n`;
 
     // If pregnant — forbid conception tag, return early (но партнёрский блок всё равно нужен)
     if (p.isPregnant) {

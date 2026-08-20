@@ -3,8 +3,8 @@
 // ═══════════════════════════════════════════
 
 import { saveSettingsDebounced } from '../../../../script.js';
-import { CHANCES, defaultPregnancyData } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, carrierName, L } from './state.js';
+import { CHANCES } from './config.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, carrierName, L, getContraception, syncBabyLegacyFields } from './state.js';
 import { isOmegaverse, designationOf, carrierAboStatus, getCfg, canCarry, hasMenstrualCycle } from './omegaverse.js';
 import { rollTest, isObvious, postpartumState, fertileWindow, inheritLooks, conceptionStruggle, missedDays } from './fertility.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
@@ -25,6 +25,60 @@ function refreshSnap() {
     try {
         import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
     } catch (e) { /* ignore */ }
+}
+
+
+function configuredDuration(s) {
+    return Math.max(4, parseInt(s?.pregnancyDuration) || 40);
+}
+
+// One gate for every birth path. Auto-birth requires the configured full term;
+// explicit scene/manual birth keeps the legacy minimum threshold for plausibility.
+export function canTriggerBirth(carrier, s = getSettings(), source = 'tag') {
+    if (!carrier?.isPregnant) return false;
+    const weeks = Math.max(0, parseInt(carrier.pregnancyWeeks) || 0);
+    const duration = configuredDuration(s);
+    if (source === 'auto') return weeks >= duration;
+    const minBirthWeek = Math.min(20, duration);
+    return weeks > 0 && weeks >= minBirthWeek;
+}
+
+// When RP time jumps past the due date, auto-birth is anchored to the due date,
+// not the end of the time-skip. Explicit births use the current RP date.
+export function resolveBirthRpDate(carrier, root, s = getSettings(), source = 'tag') {
+    const current = root?.rpDate ? new Date(root.rpDate) : null;
+    if (source === 'auto' && carrier?.conceptionDate) {
+        const conception = new Date(carrier.conceptionDate);
+        if (!isNaN(conception.getTime())) {
+            const due = new Date(conception.getTime() + configuredDuration(s) * 7 * 86400000);
+            if (!current || isNaN(current.getTime()) || current.getTime() >= due.getTime()) return due.toISOString();
+        }
+    }
+    return current && !isNaN(current.getTime()) ? current.toISOString() : new Date().toISOString();
+}
+
+export function createUndoCheckpoint(label = 'Изменение') {
+    const p = getPregnancyData();
+    const snapshot = structuredClone(p);
+    delete snapshot._undoSnapshot;
+    p._undoSnapshot = { label, createdAt: Date.now(), state: snapshot };
+    return p._undoSnapshot;
+}
+
+export function undoLastDestructiveChange() {
+    const p = getPregnancyData();
+    const backup = p?._undoSnapshot;
+    if (!backup?.state) return false;
+    const restored = structuredClone(backup.state);
+    Object.keys(p).forEach(k => delete p[k]);
+    Object.assign(p, restored);
+    syncBabyLegacyFields(p);
+    refreshSnap();
+    saveSettingsDebounced();
+    _syncUI();
+    _updatePromptInjection();
+    _renderInfoblock();
+    return backup.label || true;
 }
 
 // Применить результат сканирования к состоянию
@@ -104,7 +158,7 @@ export function applyScanResult(result) {
         try {
             const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
             const chatLen = ctx?.chat?.length || 0;
-            if (s._birthBlockedUntil && chatLen < s._birthBlockedUntil) {
+            if (!s._historyScanInProgress && s._birthBlockedUntilUser && chatLen < s._birthBlockedUntilUser) {
                 return updated;
             }
         } catch (e) {}
@@ -119,23 +173,14 @@ export function applyScanResult(result) {
         if (!p.isPregnant) {
             return updated;
         }
-        // 2) Игнорируем роды раньше допустимого срока.
-        // При укороченной беременности настройка pregnancyDuration считается полным сроком,
-        // поэтому жёсткий порог 20 недель не должен блокировать варианты 12/16 недель из UI.
-        const currentWeeks = p.pregnancyWeeks || 0;
-        const configuredDuration = Math.max(4, parseInt(s.pregnancyDuration) || 40);
-        const minBirthWeek = Math.min(20, configuredDuration);
-        if (currentWeeks > 0 && currentWeeks < minBirthWeek) {
-            return updated;
-        }
-        if (currentWeeks === 0) {
-            return updated;
-        }
+        // 2) Единая проверка срока для всех путей родов.
+        const birthSource = result._birthSource || result._source || 'tag';
+        if (!canTriggerBirth(p, s, birthSource)) return updated;
         // 3) Игнорируем если только что был reset (anti-resurrection — модель цепляется за старый контекст)
         try {
             const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
             const chatLen = ctx?.chat?.length || 0;
-            if (s._birthBlockedUntil && chatLen < s._birthBlockedUntil) {
+            if (!s._historyScanInProgress && s._birthBlockedUntilUser && chatLen < s._birthBlockedUntilUser) {
                 return updated;
             }
         } catch (e) {}
@@ -143,46 +188,50 @@ export function applyScanResult(result) {
         // Save pregnancy data before resetting
         const babySex = p.fetusSex.length > 0 ? [...p.fetusSex] : ['M'];
         const newBabyCount = p.fetusCount || 1;
-        const birthRpDate = p.rpDate || new Date().toISOString();
+        const birthRpDate = resolveBirthRpDate(p, p, s, birthSource);
 
         // ── Сохраняем существующих детей (если они уже есть от предыдущих родов) ──
         const existingBabies = Array.isArray(p.babies) ? [...p.babies] : [];
-        const existingGrown = Array.isArray(p.grownChildren) ? [...p.grownChildren] : [];
-        // Сохраняем babyAge/momState — старшим детям актуальный возраст нужен
-        const prevBabyAge = p.babyAge;
         const prevMomState = p.momState;
 
-        // Сбрасываем ТОЛЬКО pregnancy-поля, сохраняя baby/family поля
-        // Сохраняем: rpDate, _lastRpDateTag (нужны для трекинга времени),
-        //            grownChildren (архив выросших), babies (старшие дети)
-        const savedRpDate = p.rpDate;
-        const savedLastRpDateTag = p._lastRpDateTag;
-        // Беременность/послеродовое состояние {{char}} живёт в p.partner и не должно
-        // исчезать, когда рожает {{user}}.
-        const savedPartner = p.partner ? structuredClone(p.partner) : null;
-
-        Object.assign(p, structuredClone(defaultPregnancyData));
-        p.rpDate = savedRpDate;
-        p._lastRpDateTag = savedLastRpDateTag;
-        p.grownChildren = existingGrown;
-        p.partner = savedPartner;
+        // ВАЖНО: не заменяем весь root defaultPregnancyData. Корень хранит не только
+        // беременность, но и RP-дату, цикл, партнёра, историю/undo, родительские черты
+        // и семейные данные. Сбрасываем только поля ТЕКУЩЕЙ беременности {{user}}.
+        p.isPregnant = false;
+        p.conceptionDate = null;
+        p.pregnancyWeeks = 0;
+        p._conceptionAnchored = false;
+        p.fetusCount = 1;
+        p.fetusSex = [];
+        p.fetusSexRevealed = false;
+        p.complications = [];
+        p._plannedComplications = [];
+        p.healthStatus = 'normal';
+        p.lastComplicationCheck = null;
+        p.lastComplicationCheckRpDate = null;
+        p.lastDoctorVisitRpDate = null;
+        p.pregnancyKnown = false;
+        p.testTakenAt = null;
+        p.lastTestResult = null;
+        p.missedPeriodDays = 0;
+        p.mood = '';
+        p.libido = '';
+        p.weightGain = '';
+        p.babyActivity = '';
+        p._dynamic = {};
 
         // Блок пере-триггера на 12 сообщений: послеродовой текст не создаёт новую
         // беременность/роды (явный [CONCEPTION_CHECK] тег блок обходит)
         try {
-            const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
-            const chatLen = ctx?.chat?.length || 0;
-            s._conceptionBlockedUntil = chatLen + 12;
-            s._birthBlockedUntil = chatLen + 12;
-            p._userSetWeeksAt = Date.now(); // глушит scanWeeksFromText на 30 мин
+            if (!s._historyScanInProgress) {
+                const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
+                const chatLen = ctx?.chat?.length || 0;
+                s._conceptionBlockedUntilUser = chatLen + 12;
+                s._birthBlockedUntilUser = chatLen + 12;
+                p._userSetWeeksAt = Date.now(); // глушит scanWeeksFromText на 30 мин
+            }
         } catch (e) {}
 
-        p.hasBaby = true;
-        // Общее количество детей = старшие + новорождённые
-        p.babyCount = existingBabies.length + newBabyCount;
-        // babySex: для legacy кода — массив всех живых детей
-        p.babySex = [...existingBabies.map(b => b.sex), ...babySex];
-        p.babyBirthRpDate = birthRpDate;
         // Послеродовое восстановление: лактация, заживление, цикл не сразу
         p.postpartum = { startRpDate: birthRpDate, lactating: true };
         p.pregnancyKnown = false;
@@ -219,6 +268,7 @@ export function applyScanResult(result) {
                 age: 'новорождённый',
             });
         }
+        syncBabyLegacyFields(p);
         saveSettingsDebounced();
         _syncUI();
         _updatePromptInjection();
@@ -244,17 +294,18 @@ export function applyScanResult(result) {
         // Индекс начала новорождённых в массиве p.babies (чтобы диалог писал имена в правильные слоты)
         const newbornStartIdx = existingBabies.length;
 
-        // Show birth dialog for naming + traits (state already transitioned)
-        showBirthDialog(dialogBabies, (names, traitsData) => {
+        // Show birth dialog for naming + traits (state already transitioned).
+        // Full-history recovery runs silent to avoid popping historical birth dialogs.
+        const applyNewbornTraits = (names, traitsData) => {
             // Заполняем ТОЛЬКО новорождённых (со старта новорождённых до конца массива)
             for (let i = 0; i < newBabyCount; i++) {
                 const targetIdx = newbornStartIdx + i;
                 const baby = p.babies[targetIdx];
                 if (!baby) continue;
                 if (names[i]) baby.name = names[i];
-                const traits = traitsData[i] || { personality: [], appearance: [] };
-                baby.personality = traits.personality;
-                baby.appearance = traits.appearance;
+                const traits = traitsData[i] || {};
+                if (Array.isArray(traits.personality) && traits.personality.length) baby.personality = traits.personality;
+                if (Array.isArray(traits.appearance) && traits.appearance.length) baby.appearance = traits.appearance;
                 if (traits.special) baby.special = traits.special;
                 if (traits.fatherName) baby.fatherName = traits.fatherName;
             }
@@ -263,8 +314,21 @@ export function applyScanResult(result) {
             saveSettingsDebounced();
             _syncUI();
             _updatePromptInjection();
+            syncBabyLegacyFields(p);
             _renderInfoblock();
-        });
+        };
+        if (result._silent) {
+            const names = dialogBabies.map(b => b.name || '');
+            const traits = dialogBabies.map(b => ({
+                personality: Array.isArray(b.personality) ? b.personality : [],
+                appearance: Array.isArray(b.appearance) ? b.appearance : [],
+                special: b.special,
+                fatherName: b.fatherName,
+            }));
+            applyNewbornTraits(names, traits);
+        } else {
+            showBirthDialog(dialogBabies, applyNewbornTraits);
+        }
         return true;
     }
 
@@ -342,76 +406,62 @@ export function applyScanResult(result) {
         if (result.baby_activity && result.baby_activity !== p.babyActivity) { p.babyActivity = result.baby_activity; updated = true; }
     }
 
-    // Baby state tracking
-    if (p.hasBaby) {
-        if (result.baby_name && result.baby_name !== p.babyName) {
-            p.babyName = result.baby_name;
+    // Baby state tracking. babies[] is authoritative; legacy root fields are mirrors.
+    if (p.hasBaby && Array.isArray(p.babies) && p.babies.length > 0) {
+        const baby = p.babies[0];
+        if (result.baby_name && result.baby_name !== baby.name) {
+            baby.name = result.baby_name;
             updated = true;
         }
-        if (result.baby_age && result.baby_age !== p.babyAge) {
-            p.babyAge = result.baby_age;
+        if (result.baby_age && result.baby_age !== baby.age) {
+            baby.age = result.baby_age;
             updated = true;
         }
         if (result.baby_health) {
             const validHealth = ['normal', 'warning', 'critical'];
-            if (validHealth.includes(result.baby_health) && result.baby_health !== p.babyHealth) {
-                p.babyHealth = result.baby_health;
+            if (validHealth.includes(result.baby_health) && result.baby_health !== baby.health) {
+                baby.health = result.baby_health;
                 updated = true;
             }
         }
         if (result.baby_teething !== null && result.baby_teething !== undefined) {
-            if (result.baby_teething !== p.babyTeething) {
-                p.babyTeething = !!result.baby_teething;
-                updated = true;
-            }
+            const v = !!result.baby_teething;
+            if (v !== !!baby.teething) { baby.teething = v; updated = true; }
         }
         if (result.baby_diaper_clean !== null && result.baby_diaper_clean !== undefined) {
-            if (result.baby_diaper_clean !== p.babyDiaperClean) {
-                p.babyDiaperClean = !!result.baby_diaper_clean;
+            const v = !!result.baby_diaper_clean;
+            if (v !== (baby.diaperClean !== false)) {
+                baby.diaperClean = v;
                 updated = true;
-                if (!p.babyDiaperClean && s.showNotifications) {
-                    showNotification('<i class="fa-solid fa-baby-carriage"></i> Подгузник нужно сменить!', 'info');
-                }
+                if (!v && s.showNotifications) showNotification('<i class="fa-solid fa-baby-carriage"></i> Подгузник нужно сменить!', 'info');
             }
         }
-        if (result.baby_feeding && result.baby_feeding !== p.babyFeedingType) {
-            p.babyFeedingType = result.baby_feeding;
+        if (result.baby_feeding && result.baby_feeding !== baby.feedingType) {
+            baby.feedingType = result.baby_feeding;
+            baby.lastFeedRpDate = p.rpDate;
             p.babyLastFeedRpDate = p.rpDate;
             updated = true;
         }
-        if (result.baby_sleep && result.baby_sleep !== p.babySleep) {
-            p.babySleep = result.baby_sleep;
-            updated = true;
-        }
-        if (result.baby_mood && result.baby_mood !== p.babyMood) {
-            p.babyMood = result.baby_mood;
-            updated = true;
-        }
+        if (result.baby_sleep && result.baby_sleep !== baby.sleep) { baby.sleep = result.baby_sleep; updated = true; }
+        if (result.baby_mood && result.baby_mood !== baby.mood) { baby.mood = result.baby_mood; updated = true; }
         if (result.baby_colicky !== null && result.baby_colicky !== undefined) {
-            if (result.baby_colicky !== p.babyColicky) {
-                p.babyColicky = !!result.baby_colicky;
-                updated = true;
-            }
+            const v = !!result.baby_colicky;
+            if (v !== !!baby.colicky) { baby.colicky = v; updated = true; }
         }
         if (result.mom_state && result.mom_state !== p.momState) {
             p.momState = result.mom_state;
             updated = true;
         }
         if (result.baby_milestone) {
-            if (!p.babyMilestones) p.babyMilestones = [];
-            const exists = p.babyMilestones.some(m => m.text === result.baby_milestone);
+            if (!Array.isArray(baby.milestones)) baby.milestones = [];
+            const exists = baby.milestones.some(m => m.text === result.baby_milestone);
             if (!exists) {
-                p.babyMilestones.push({
-                    text: result.baby_milestone,
-                    rpDate: p.rpDate,
-                    date: new Date().toISOString(),
-                });
+                baby.milestones.push({ text: result.baby_milestone, rpDate: p.rpDate, date: new Date().toISOString() });
                 updated = true;
-                if (s.showNotifications) {
-                    showNotification(`<i class="fa-solid fa-star"></i> Развитие: ${result.baby_milestone}`, 'success');
-                }
+                if (s.showNotifications) showNotification(`<i class="fa-solid fa-star"></i> Развитие: ${result.baby_milestone}`, 'success');
             }
         }
+        if (updated) syncBabyLegacyFields(p);
     }
 
     if (updated) {
@@ -448,13 +498,13 @@ export function checkConception() {
     const pp = getPostpartum(p, p);
     if (pp) chance = Math.max(0, Math.min(100, Math.round(chance * pp.fertilityMul)));
 
-    const contraceptionEff = CHANCES.contraception[s.contraception] || 0;
+    const contraception = getContraception('user');
+    const contraceptionEff = CHANCES.contraception[contraception] || 0;
     let contraceptionFailed = false;
 
     // Контрацепция — отдельный бинарный барьер. Если она сработала, зачатия нет;
-    // если подвела, дальше действует обычный биологический шанс. Так заявленные
-    // 85/91/99% не применяются дважды и соответствуют фактической эффективности.
-    if (s.contraception !== 'none') {
+    // если подвела, дальше действует обычный биологический шанс.
+    if (contraception !== 'none') {
         const protectionRoll = roll(100);
         if (protectionRoll <= contraceptionEff) {
             chance = 0;
@@ -470,7 +520,7 @@ export function checkConception() {
     const result = {
         roll: conceptionRoll,
         chance,
-        contraception: s.contraception,
+        contraception,
         contraceptionFailed,
         cycleDay: currentCycleDay,
         success,
@@ -478,6 +528,7 @@ export function checkConception() {
 
     if (success) {
         p.isPregnant = true;
+        s._birthBlockedUntilUser = null;
         // Anchor conception STRICTLY to current rpDate. Никаких следов старых беременностей —
         // даже если в p случайно остались поля conceptionDate/pregnancyWeeks от прошлой беременности,
         // которая была сброшена не полностью, перезатираем их свежими значениями.
@@ -557,13 +608,14 @@ export function terminatePregnancy(reason) {
     // («ты была на 16 неделе...» сразу после потери)
     p._userSetWeeksAt = Date.now();
     try {
-        const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
-        const chatLen = ctx?.chat?.length || 0;
-        s._birthBlockedUntil = chatLen + 10;
-        // Явный тег зачатия блок обходит (проверка _source !== 'tag'), так что новая
-        // беременность по сюжету возможна — блокируем только keyword-воскрешение.
-        s._conceptionBlockedUntil = chatLen + 6;
-        s._lastConceptionRollAt = null;
+        if (!s._historyScanInProgress) {
+            const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
+            const chatLen = ctx?.chat?.length || 0;
+            s._birthBlockedUntilUser = chatLen + 10;
+            // Явный тег зачатия блок обходит; блокируем только воскрешение из старого контекста.
+            s._conceptionBlockedUntilUser = chatLen + 6;
+            s._lastConceptionRollAt = null;
+        }
     } catch (e) {}
     refreshSnap();
     saveSettingsDebounced();
@@ -579,6 +631,7 @@ export function resetPregnancy() {
     // Это именно «сброс беременности», а не «стереть весь чат-состояние».
     // Дети, архив, RP-дата, цикл, partner и послеродовое состояние сохраняются.
     if (p.isPregnant) {
+        createUndoCheckpoint('Сброс беременности');
         terminatePregnancy('manual');
         return;
     }
@@ -587,8 +640,8 @@ export function resetPregnancy() {
     try {
         const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
         const chatLen = ctx?.chat?.length || 0;
-        s._conceptionBlockedUntil = chatLen + 10;
-        s._birthBlockedUntil = chatLen + 10;
+        s._conceptionBlockedUntilUser = chatLen + 10;
+        s._birthBlockedUntilUser = chatLen + 10;
         s._lastScannedPosition = chatLen;
     } catch (e) {}
     refreshSnap();
@@ -600,13 +653,16 @@ export function resetPregnancy() {
 export function resetBaby() {
     const s = getSettings();
     const p = getPregnancyData();
+    if (p.hasBaby || (Array.isArray(p.babies) && p.babies.length > 0)) createUndoCheckpoint('Сброс малыша');
     // Block re-detection from stale context (conception, birth, AND text-week parsing)
     try {
         const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
         const chatLen = ctx?.chat?.length || 0;
         // 10 сообщений блокировки — должно хватить чтобы модель «забыла» прошлую родовую сцену
-        s._conceptionBlockedUntil = chatLen + 10;
-        s._birthBlockedUntil = chatLen + 10;
+        s._conceptionBlockedUntilUser = chatLen + 10;
+        s._conceptionBlockedUntilChar = chatLen + 10;
+        s._birthBlockedUntilUser = chatLen + 10;
+        s._birthBlockedUntilChar = chatLen + 10;
         s._lastScannedPosition = chatLen;
     } catch (e) {}
     p.hasBaby = false;
@@ -772,7 +828,10 @@ export function createPregnancyFromStateTag(pregState, { notify = true } = {}) {
 // fetusCount: 1-4
 // fetusSex: массив ['M'/'F'], опционально — если null, генерится случайно
 export function startManualPregnancy(conceptionDateISO, fetusCount, fetusSex = null) {
+    const s = getSettings();
     const p = getPregnancyData();
+    s._conceptionBlockedUntilUser = null;
+    s._birthBlockedUntilUser = null;
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
 
     p.isPregnant = true;
@@ -881,9 +940,7 @@ export function startManualBaby(babiesData) {
         });
     });
 
-    p.babySex = p.babies.map(b => b.sex);
-    if (p.babies[0]?.name) p.babyName = p.babies[0].name;
-    p.babyBirthRpDate = p.babies[p.babies.length - 1].birthRpDate;
+    syncBabyLegacyFields(p);
 
     // Малыш с ненулевым возрастом сразу получает уже достигнутые вехи развития
     // и флаги ухода (зубки/колики). Динамический импорт — чтобы не плодить циклы.
@@ -936,29 +993,7 @@ export function graduateBabies(graduatedBabies) {
 
     // Удаляем из активных
     p.babies = (p.babies || []).filter(b => !ids.has(`${b.name || ''}|${b.birthRpDate || ''}|${b.sex || ''}`));
-    p.babyCount = p.babies.length;
-
-    // Если активных детей не осталось — выключаем baby mode
-    if (p.babies.length === 0) {
-        p.hasBaby = false;
-        p.babyName = '';
-        p.babySex = [];
-        p.babyAge = '';
-        p.babyHealth = 'normal';
-        p.babyTeething = false;
-        p.babyColicky = false;
-        p.babyDiaperClean = true;
-        p.babyFeedingType = '';
-        p.babySleep = '';
-        p.babyMood = '';
-        p.babyMilestones = [];
-        p.babyBirthRpDate = null;
-    } else {
-        // Обновляем legacy-поля от первого оставшегося ребёнка
-        const first = p.babies[0];
-        p.babyName = first.name || '';
-        p.babySex = p.babies.map(b => b.sex);
-    }
+    syncBabyLegacyFields(p);
 
     saveSettingsDebounced();
     _syncUI();
@@ -1013,8 +1048,9 @@ export function partnerCheckConception() {
     }
     let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
-    const contraEff = CHANCES.contraception[s.contraception] || 0;
-    if (s.contraception !== 'none') {
+    const contraception = getContraception('char');
+    const contraEff = CHANCES.contraception[contraception] || 0;
+    if (contraception !== 'none') {
         const protectionRoll = roll(100);
         if (protectionRoll <= contraEff) chance = 0;
         else if (s.showNotifications) showNotification(L('contraceptionFailed'), 'warning');
@@ -1025,6 +1061,7 @@ export function partnerCheckConception() {
 
     if (success) {
         c.isPregnant = true;
+        s._birthBlockedUntilChar = null;
         c.conceptionDate = p.rpDate || null;
         c._conceptionAnchored = !!p.rpDate;
         c.pregnancyWeeks = 0;
@@ -1052,19 +1089,16 @@ export function partnerCheckConception() {
 }
 
 // Роды у партнёра: дети уходят в ОБЩИЙ p.babies, беременность партнёра сбрасывается.
-export function partnerBirth(babyTraits) {
+export function partnerBirth(babyTraits, options = {}) {
     const s = getSettings();
     const p = getPregnancyData();
     const c = getPartnerData();
-    if (!c.isPregnant) return false;
-    const weeks = c.pregnancyWeeks || 0;
-    const configuredDuration = Math.max(4, parseInt(s.pregnancyDuration) || 40);
-    const minBirthWeek = Math.min(20, configuredDuration);
-    if (weeks > 0 && weeks < minBirthWeek) return false;
+    const birthSource = options.source || 'tag';
+    if (!canTriggerBirth(c, s, birthSource)) return false;
 
     const count = c.fetusCount || 1;
     const sexes = c.fetusSex?.length ? [...c.fetusSex] : ['M'];
-    const birthRpDate = p.rpDate || new Date().toISOString();
+    const birthRpDate = resolveBirthRpDate(c, p, s, birthSource);
     const motherName = carrierName('char');
     const fatherName = c.fatherName || carrierName('user');
 
@@ -1091,20 +1125,19 @@ export function partnerBirth(babyTraits) {
             birthRpDate, age: 'новорождённый',
         });
     }
-    p.hasBaby = true;
-    p.babyCount = p.babies.length;
-    p.babySex = p.babies.map(b => b.sex);
-    p.babyBirthRpDate = birthRpDate;
+    syncBabyLegacyFields(p);
     c.postpartum = { startRpDate: birthRpDate, lactating: true };
     c.pregnancyKnown = false;
     c.lastTestResult = null;
 
     // Блок пере-триггера (как при родах юзера)
     try {
-        const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
-        const chatLen = ctx?.chat?.length || 0;
-        s._conceptionBlockedUntil = chatLen + 12;
-        s._birthBlockedUntil = chatLen + 12;
+        if (!s._historyScanInProgress) {
+            const ctx = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext() : window;
+            const chatLen = ctx?.chat?.length || 0;
+            s._conceptionBlockedUntilChar = chatLen + 12;
+            s._birthBlockedUntilChar = chatLen + 12;
+        }
     } catch (e) {}
 
     saveSettingsDebounced();
@@ -1125,14 +1158,14 @@ export function partnerBirth(babyTraits) {
             special: mt.special !== undefined ? mt.special : undefined,
         });
     }
-    showBirthDialog(dialogBabies, (names, traitsData) => {
+    const applyPartnerNewbornTraits = (names, traitsData) => {
         for (let i = 0; i < count; i++) {
             const baby = p.babies[startIdx + i];
             if (!baby) continue;
             if (names[i]) baby.name = names[i];
-            const tr = traitsData[i] || { personality: [], appearance: [] };
-            baby.personality = tr.personality;
-            baby.appearance = tr.appearance;
+            const tr = traitsData[i] || {};
+            if (Array.isArray(tr.personality) && tr.personality.length) baby.personality = tr.personality;
+            if (Array.isArray(tr.appearance) && tr.appearance.length) baby.appearance = tr.appearance;
             if (tr.special) baby.special = tr.special;
             if (tr.fatherName) baby.fatherName = tr.fatherName;
         }
@@ -1140,17 +1173,33 @@ export function partnerBirth(babyTraits) {
         saveSettingsDebounced();
         _syncUI();
         _updatePromptInjection();
+        syncBabyLegacyFields(p);
         _renderInfoblock();
-    });
+    };
+    if (options.silent) {
+        const names = dialogBabies.map(b => b.name || '');
+        const traits = dialogBabies.map(b => ({
+            personality: Array.isArray(b.personality) ? b.personality : [],
+            appearance: Array.isArray(b.appearance) ? b.appearance : [],
+            special: b.special,
+            fatherName: b.fatherName,
+        }));
+        applyPartnerNewbornTraits(names, traits);
+    } else {
+        showBirthDialog(dialogBabies, applyPartnerNewbornTraits);
+    }
 
-    if (s.showNotifications) showNotification(`<i class="fa-solid fa-baby"></i> ${motherName} родила!`, 'success');
+    if (!options.silent && s.showNotifications) showNotification(`<i class="fa-solid fa-baby"></i> ${motherName} родила!`, 'success');
     return true;
 }
 
 // Ручная беременность партнёра (из панели настроек)
 export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = null) {
+    const s = getSettings();
     const c = getPartnerData();
     const p = getPregnancyData();
+    s._conceptionBlockedUntilChar = null;
+    s._birthBlockedUntilChar = null;
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
     c.isPregnant = true;
     c.conceptionDate = conceptionDateISO;
@@ -1180,6 +1229,7 @@ export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = 
 // Сброс беременности партнёра
 export function resetPartnerPregnancy() {
     const c = getPartnerData();
+    if (c.isPregnant) createUndoCheckpoint('Сброс беременности персонажа');
     c.isPregnant = false;
     c.conceptionDate = null;
     c.pregnancyWeeks = 0;

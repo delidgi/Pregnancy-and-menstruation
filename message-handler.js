@@ -235,7 +235,7 @@ function runScan() {
             tagResult.vaginal_ejaculation_occurred = false;
         }
         // Block keyword/API-based conception after manual reset (only explicit tags bypass)
-        if (tagResult.vaginal_ejaculation_occurred && tagResult._source !== 'tag' && s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil) {
+        if (tagResult.vaginal_ejaculation_occurred && tagResult._source !== 'tag' && s._conceptionBlockedUntilUser && positionId <= s._conceptionBlockedUntilUser) {
             tagResult.vaginal_ejaculation_occurred = false;
         }
         // Block keyword-based birth on USER messages (only AI narration or explicit tag may trigger birth)
@@ -282,7 +282,7 @@ function runScan() {
             const c = getPartnerData();
             let charChanged = false;
             if (tagResult.char_conception && !c.isPregnant) {
-                const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
+                const blocked = s._conceptionBlockedUntilChar && positionId <= s._conceptionBlockedUntilChar;
                 if (blocked) {
                 } else if (s._lastCharConceptionRollAt === positionId) {
                 } else {
@@ -306,7 +306,7 @@ function runScan() {
                 }
             }
             if (tagResult.char_birth) {
-                const blocked = s._birthBlockedUntil && positionId <= s._birthBlockedUntil;
+                const blocked = s._birthBlockedUntilChar && positionId <= s._birthBlockedUntilChar;
                 if (!blocked && partnerBirth(tagResult.baby_traits)) charChanged = true;
             }
             if (charChanged) {
@@ -365,7 +365,7 @@ function runScan() {
         // Защиты: недавний ручной сброс/установка (30 мин) и блок после reset — не создаём.
         const userSetMs = p._userSetWeeksAt || 0;
         const recentlyUserSet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
-        const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
+        const blocked = s._conceptionBlockedUntilUser && positionId <= s._conceptionBlockedUntilUser;
         if (recentlyUserSet || blocked) {
         } else {
             createPregnancyFromStateTag(pregState);
@@ -434,7 +434,7 @@ function runScan() {
             const manualSetMs = p._userSetWeeksAt || 0;
             const minutesSinceManual = (Date.now() - manualSetMs) / 60000;
             const recentlyManual = manualSetMs > 0 && minutesSinceManual < 30;
-            const blocked = s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil;
+            const blocked = s._conceptionBlockedUntilUser && positionId <= s._conceptionBlockedUntilUser;
 
             if (recentlyManual) {
             } else if (blocked) {
@@ -473,7 +473,7 @@ export function rescanMessage(fullText, messageIndex) {
     const tagResult = scanMessage(fullText);
     if (tagResult) {
         if (p.isPregnant) tagResult.vaginal_ejaculation_occurred = false;
-        if (tagResult.vaginal_ejaculation_occurred && tagResult._source !== 'tag' && s._conceptionBlockedUntil && positionId <= s._conceptionBlockedUntil) {
+        if (tagResult.vaginal_ejaculation_occurred && tagResult._source !== 'tag' && s._conceptionBlockedUntilUser && positionId <= s._conceptionBlockedUntilUser) {
             tagResult.vaginal_ejaculation_occurred = false;
         }
         // Block keyword-based birth in early pregnancy (rescan: bot text only, but still apply week guard)
@@ -505,6 +505,43 @@ export function rescanMessage(fullText, messageIndex) {
             syncUI();
             updatePromptInjection();
             setTimeout(renderInfoblock, 300);
+        }
+
+        // Full-text rescan must also process :CHAR tags. Streaming often delivers
+        // trailing HTML comments only after MESSAGE_RECEIVED has already fired.
+        if (isTracked('char') && (tagResult.char_conception || tagResult.char_birth || tagResult.char_sex_revealed)) {
+            const c = getPartnerData();
+            let charChanged = false;
+            if (tagResult.char_conception && !c.isPregnant) {
+                const blocked = s._conceptionBlockedUntilChar && positionId <= s._conceptionBlockedUntilChar;
+                if (!blocked && s._lastCharConceptionRollAt !== positionId) {
+                    s._lastCharConceptionRollAt = positionId;
+                    partnerCheckConception();
+                    charChanged = true;
+                }
+            }
+            if (tagResult.char_sex_revealed && c.isPregnant && !c.fetusSexRevealed) {
+                if (tagResult.revealed_sexes?.length) {
+                    const need = c.fetusCount || 1;
+                    c.fetusSex = Array.from({ length: need }, (_, i) => tagResult.revealed_sexes[i] || tagResult.revealed_sexes[tagResult.revealed_sexes.length - 1]);
+                }
+                c.fetusSexRevealed = true;
+                charChanged = true;
+            }
+            if (tagResult.char_birth) {
+                const blocked = s._birthBlockedUntilChar && positionId <= s._birthBlockedUntilChar;
+                if (!blocked && partnerBirth(tagResult.baby_traits)) charChanged = true;
+            }
+            if (charChanged) {
+                _preRegenSnapshot = snapshotOf(getPregnancyData());
+                _snapshotChatId = getCurrentChatId();
+                s._lastScannedPosition = positionId;
+                pushStateHistory(positionId);
+                saveSettingsDebounced();
+                syncUI();
+                updatePromptInjection();
+                setTimeout(renderInfoblock, 300);
+            }
         }
 
         if (tagResult.vaginal_ejaculation_occurred || tagResult.birth_occurred || tagResult.miscarriage_occurred || tagResult.abortion_occurred) {
@@ -804,7 +841,7 @@ function advanceTime(s, p, daysPassed) {
                 // Проверяем даже если номер недели не изменился: это чинит уже «зависшие» беременности
                 // после обновления расширения (например, состояние уже сохранено как 24/24).
                 if (w >= dur) {
-                    partnerBirth();
+                    partnerBirth(null, { source: 'auto', silent: !!s._historyScanInProgress });
                 }
             }
         } catch (e) { /* ignore */ }
@@ -899,6 +936,8 @@ function advanceTime(s, p, daysPassed) {
                     birth_occurred: true,
                     vaginal_ejaculation_occurred: false,
                     cycle_day: null,
+                    _birthSource: 'auto',
+                    _silent: !!s._historyScanInProgress,
                 };
                 applyScanResult(birthResult);
                 // Update snapshot to reflect post-birth state
