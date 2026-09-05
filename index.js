@@ -1,3 +1,4 @@
+import { reportError } from './diagnostics.js';
 // ═══════════════════════════════════════════
 // INDEX — точка входа расширения
 // ═══════════════════════════════════════════
@@ -10,7 +11,7 @@ import { initCustomNotifications } from './notifications.js';
 import { setSyncUI, setUpdatePromptInjection, setRenderInfoblock } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, setupUI } from './ui.js';
-import { onMessageReceived, onMessageSent, renderInfoblock, markRegeneration, processDateTag, rescanStatusOnly, rollbackToPosition, clearRegenState, detachTags, rawTextOf } from './message-handler.js';
+import { onMessageReceived, onMessageSent, renderInfoblock, markRegeneration, prepareGeneration, processDateTag, rescanStatusOnly, rollbackToPosition, clearRegenState, detachTags, rawTextOf } from './message-handler.js';
 import { stripHiddenTags, scanFullHistory } from './scanner.js';
 
 // ── Load CSS ──
@@ -19,7 +20,7 @@ if (!document.getElementById(cssId)) {
     const link = document.createElement('link');
     link.id = cssId;
     link.rel = 'stylesheet';
-    link.href = '/scripts/extensions/third-party/Pregnancy/style.css?t=' + Date.now();
+    link.href = new URL('./style.css', import.meta.url).href;
     document.head.appendChild(link);
 }
 
@@ -29,6 +30,10 @@ function loadSettings() {
             extension_settings[extensionName] = structuredClone(defaultSettings);
         } else {
             const s = extension_settings[extensionName];
+            // Migrate before defaults can overwrite an older tracking choice.
+            if (!['user', 'char', 'both', 'none'].includes(s.carrierMode)) {
+                s.carrierMode = ['user', 'char', 'both', 'none'].includes(s.trackFor) ? s.trackFor : 'user';
+            }
 
             // Миграция старых данных
             if (s.isPregnant !== undefined && !s.chatPregnancyData) {
@@ -114,7 +119,7 @@ function loadSettings() {
             }
         }
     } catch (error) {
-        console.error('[Reproductive] Error loading settings:', error);
+        reportError('[Reproductive] Error loading settings:', error);
         extension_settings[extensionName] = structuredClone(defaultSettings);
     }
 }
@@ -191,6 +196,7 @@ jQuery(async () => {
 
         // ── Финальный скан, рендер инфоблока и скрытие тегов ──
         // rescanStatusOnly идемпотентно перечитывает RP_STATUS с полного текста.
+        const finalStatusSeen = new WeakMap();
         const processFinalMessage = (messageIndex) => {
             try {
                 const context = SillyTavern.getContext();
@@ -207,7 +213,11 @@ jQuery(async () => {
                 // Сканируем до вырезания тегов: после этого RP_STATUS
                 // восстановить из msg.mes уже невозможно.
                 try {
-                    rescanStatusOnly(rawTextOf(msg));
+                    const raw = rawTextOf(msg);
+                    if (finalStatusSeen.get(msg) !== raw) {
+                        rescanStatusOnly(raw);
+                        finalStatusSeen.set(msg, raw);
+                    }
                 } catch (e) { /* ignore */ }
                 // Отцепляем теги от текста: в контекст модели они больше не уходят,
                 // исходник остаётся в msg.extra.reproRaw для повторных сканов.
@@ -234,7 +244,7 @@ jQuery(async () => {
                 ) {
                     // Если включён debug режим — оставляем теги в чате для отладки
                     const s = getSettings();
-                    if (!s.debugKeepTags) {
+                    if (true) {
                         const renderedMessage = document.querySelector(`.mes[mesid="${idx}"] .mes_text`);
                         if (renderedMessage) {
                             renderedMessage.innerHTML = stripHiddenTags(renderedMessage.innerHTML);
@@ -243,7 +253,6 @@ jQuery(async () => {
                 }
             } catch (e) { /* ignore */ }
             setTimeout(renderInfoblock, 300);
-            setTimeout(renderInfoblock, 800); // second pass — survives ST's own re-render
         };
 
         // Fallback: рендер инфоблока + скрытие тегов после отрисовки сообщения (НЕ-streaming)
@@ -280,10 +289,7 @@ jQuery(async () => {
             // GENERATION_STARTED стреляет ДО добавления юзерского сообщения в чат,
             // поэтому реген определяем по ЯВНОМУ типу генерации из первого аргумента.
             eventSource.on(event_types.GENERATION_STARTED, (genType, params, dryRun) => {
-                if (dryRun) return;
-                if (genType === 'regenerate' || genType === 'swipe') {
-                    markRegeneration();
-                }
+                prepareGeneration(genType, dryRun);
             });
         }
 
@@ -418,7 +424,7 @@ jQuery(async () => {
                 const reinsert = () => {
                     if (pending) return;
                     pending = true;
-                    requestAnimationFrame(() => {
+                    setTimeout(() => {
                         pending = false;
                         try {
                             // Only re-insert if our block is missing from the last bot message
@@ -432,9 +438,11 @@ jQuery(async () => {
                                 renderInfoblock();
                             }
                         } catch (e) { /* ignore */ }
-                    });
+                    }, 150);
                 };
                 const observer = new MutationObserver((mutations) => {
+                    const s = getSettings();
+                    if (!s.isEnabled || !s.infoblockPosition || s.infoblockPosition === 'off') return;
                     for (const m of mutations) {
                         // Watch for child changes inside .mes_text and new messages added
                         if (m.target && (m.target.classList?.contains('mes_text') || m.target.classList?.contains('mes'))) {
@@ -455,6 +463,6 @@ jQuery(async () => {
         } catch (e) { /* ignore */ }
 
     } catch (error) {
-        console.error('[Reproductive] FATAL ERROR:', error);
+        reportError('[Reproductive] FATAL ERROR:', error);
     }
 });

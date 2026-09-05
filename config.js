@@ -32,6 +32,7 @@ export const defaultSettings = {
     customInfoblockCss: '',
     // Реализм цикла: гигиена, протечки, фазовые эффекты, сбои цикла
     realism: false,
+    menstruationEnabled: true,
     theme: 'glass',
     lightMode: false,
     // Возраст в RP-днях, после которого малыш считается «выросшим»: инфоблок сбрасывается,
@@ -44,20 +45,12 @@ export const defaultSettings = {
     // Цикл, беременность и инфоблок строятся для выбранных носителей.
     trackFor: 'user',
 
-    // ── Кто может ВЫНАШИВАТЬ: 'auto' | 'user' | 'char' | 'both' | 'none' ──
-    // auto: женщина в любой роли (включая альфу), мужчина — только омега.
-    // Остальные значения — прямое указание, когда тела нестандартные.
-    carrierMode: 'auto',
-
-    // ── Вселенная: 'normal' | 'omegaverse' ──
+    // Explicit selection also controls tracking. Legacy auto migrates from trackFor.
+    carrierMode: 'user',
+    // Changes only the ovulatory phase name, never anatomy or eligibility.
     universe: 'normal',
-    // Роли A/B/O (только для omegaverse). alpha — гон, omega — течка, beta — обычный цикл.
     userDesignation: 'omega',
     charDesignation: 'alpha',
-    // Биологический пол носителей: от него зависят МЕСЯЧНЫЕ (28-дневный цикл).
-    // Женщина — цикл есть (в любой роли A/B/O), мужчина — нет.
-    userSex: 'female',
-    charSex: 'male',
 
     // Скрытая беременность: героиня не знает о зачатии, пока не сделает тест
     // или пока срок не станет очевидным. Трекер знает, промпт и инфоблок — молчат.
@@ -66,11 +59,7 @@ export const defaultSettings = {
     obviousAtWeek: 12,
     // Режим «планируем»: подсветка фертильного окна и подсказки модели
     tryingToConceive: false,
-    // Длины циклов A/B/O в RP-днях
-    heatCycleLength: 42,   // течка примерно раз в 6 недель
-    heatDuration: 5,       // длится 5 дней
-    rutCycleLength: 70,    // гон альфы раз в ~10 недель
-    rutDuration: 3,
+
 };
 
 export const defaultPregnancyData = {
@@ -136,9 +125,6 @@ export const defaultPregnancyData = {
     _cycleShift: 0,              // сбой цикла: на сколько дней он растянут
 
     // ── A/B/O-циклы носителя-юзера (только при universe='omegaverse') ──
-    heatCycleDay: 1,        // день цикла течки (омега)
-    rutCycleDay: 1,         // день цикла гона (альфа)
-    heatSuppressant: false, // супрессанты глушат течку
 
     // ── Данные ПАРТНЁРА ({{char}}) — заполняются при trackFor 'char'/'both' ──
     // Дети (babies/grownChildren) ОБЩИЕ и живут в корне p — семья одна.
@@ -175,9 +161,6 @@ export const defaultPartnerData = {
     hygieneChangedRpDate: null,
     _cycleShift: 0,
     // A/B/O
-    heatCycleDay: 20,
-    rutCycleDay: 30,
-    heatSuppressant: false,
 };
 
 export const CHANCES = {

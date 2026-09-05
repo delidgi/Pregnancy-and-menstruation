@@ -15,29 +15,30 @@ export function esc(str) {
 // а не на дефолтном английском модели.
 export function detectChatLanguage() {
     try {
-        const chat = typeof SillyTavern?.getContext === 'function'
-            ? SillyTavern.getContext().chat : null;
-        if (!chat || chat.length === 0) return 'ru';
-        let cyr = 0, lat = 0, checked = 0;
-        for (let i = chat.length - 1; i >= 0 && checked < 5; i--) {
-            const m = chat[i];
-            if (!m || !m.mes || m.is_system) continue;
-            checked++;
-            const sample = m.mes.slice(0, 1500);
-            cyr += (sample.match(/[а-яё]/gi) || []).length;
-            lat += (sample.match(/[a-z]/gi) || []).length;
+        const chat = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext().chat : [];
+        const languageOf = text => {
+            const clean = String(text || '').replace(/<think[\s\S]*?<\/think>/gi,'').replace(/<think[\s\S]*$/gi,'').replace(/<!--[\s\S]*?-->/g,'').replace(/```[\s\S]*?```/g,'').replace(/<[^>]*>/g,'').slice(-3000);
+            const ru = (clean.match(/[а-яё]/gi)||[]).length, en = (clean.match(/[a-z]/gi)||[]).length;
+            return ru + en < 3 ? null : ru > 0 && ru >= en / 3 ? 'ru' : 'en';
+        };
+        // Latest player prose determines the scene language, not generated JSON keys.
+        for (const userOnly of [true,false]) {
+            for (let i=(chat?.length||0)-1;i>=Math.max(0,(chat?.length||0)-20);i--) {
+                const m=chat[i]; if (!m || m.is_system || (userOnly && !m.is_user)) continue;
+                const lang=languageOf(m.mes); if(lang) return lang;
+            }
         }
-        if (cyr === 0 && lat === 0) return 'ru';
-        return cyr >= lat ? 'ru' : 'en';
-    } catch (e) {
-        return 'ru';
-    }
+    } catch (e) { /* default for an empty scene */ }
+    return 'ru';
 }
 
 // ─── Фолбэк-перевод типовых английских значений статуса → русский ───
 // Модели иногда игнорируют требование языка и пишут "High"/"Anxious".
 // Инфоблок переводит известные односложные значения, незнакомые оставляет как есть.
 const STATUS_EN_RU = {
+    'concerned': 'Обеспокоенное', 'tense': 'Напряжённое', 'focused': 'Сосредоточенное', 'intrigued': 'Заинтересованное',
+    'cramps': 'Спазмы', 'pale': 'Бледность', 'watching over him': 'Присматривает за ним', 'hiding the pain': 'Скрывает боль',
+    'busy with work': 'Занят работой', 'end of workday': 'Конец рабочего дня',
     'high': 'Высокая', 'low': 'Низкая', 'medium': 'Средняя', 'average': 'Средняя',
     'normal': 'Норма', 'ok': 'Норма', 'good': 'Хорошо', 'bad': 'Плохо', 'none': 'Нет',
     'very high': 'Очень высокая', 'very low': 'Очень низкая',
@@ -58,8 +59,12 @@ const STATUS_EN_RU = {
 
 export function translateStatusValue(val) {
     if (!val || typeof val !== 'string') return val;
-    const key = val.trim().toLowerCase();
-    return STATUS_EN_RU[key] || val;
+    const key = val.trim().replace(/_/g,' ').toLowerCase();
+    if (STATUS_EN_RU[key]) return STATUS_EN_RU[key];
+    if (/[а-яё]/i.test(val) || !/[a-z]/i.test(val)) return val;
+    const parts = key.split(/[,;]\s*/).map(x => STATUS_EN_RU[x.trim()]);
+    return parts.every(Boolean) ? parts.join(', ') : '';
+
 }
 
 export function parseReproBlock(raw) {
@@ -90,11 +95,12 @@ export function roll(max = 100) {
     return Math.floor(Math.random() * max) + 1;
 }
 
-export function getPhaseInfo(day, lang = 'ru') {
+export function getPhaseInfo(day, lang = 'ru', heat = false, menstruation = true) {
     const L = lang === 'en';
-    if (day <= 5) return { name: L ? 'Menstruation' : 'Менструация', icon: 'fa-droplet', color: '#ff4444' };
+    if (day > 28) return { name: L ? 'Delayed period' : 'Задержка', icon: 'fa-clock', color: '#ffd43b' };
+    if (day <= 5 && menstruation) return { name: L ? 'Menstruation' : 'Менструация', icon: 'fa-droplet', color: '#ff4444' };
     if (day <= 11) return { name: L ? 'Follicular' : 'Фолликулярная', icon: 'fa-seedling', color: '#66bb6a' };
-    if (day <= 16) return { name: L ? 'Ovulation' : 'Овуляция', icon: 'fa-fire', color: '#ff6b6b' };
+    if (day <= 16) return { name: L ? (heat ? 'Ovulation / heat' : 'Ovulation') : (heat ? 'Овуляция / течка' : 'Овуляция'), icon: 'fa-fire', color: '#ff6b6b' };
     return { name: L ? 'Luteal' : 'Лютеиновая', icon: 'fa-moon', color: '#ffd43b' };
 }
 

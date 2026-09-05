@@ -1,3 +1,4 @@
+import { reportError } from './diagnostics.js';
 // ═══════════════════════════════════════════
 // BABY-CARE — возрастные нормы ухода и вехи развития малыша
 // Всё считается от RP-возраста (birthRpDate → p.rpDate).
@@ -278,7 +279,7 @@ export function updateBabyCare() {
 
         return changed;
     } catch (e) {
-        console.error('[Reproductive] updateBabyCare error:', e);
+        reportError('[Reproductive] updateBabyCare error:', e);
         return false;
     }
 }

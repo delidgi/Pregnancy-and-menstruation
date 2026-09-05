@@ -1,172 +1,46 @@
-// ═══════════════════════════════════════════
-// OMEGAVERSE — циклы течки (омега) и гона (альфа)
-// Чистые функции без зависимостей от ST — легко тестируются в node.
-// ═══════════════════════════════════════════
-
-// Конфиг длин циклов из настроек (с дефолтами)
-export function getCfg(s) {
-    return {
-        heatCycleLength: Math.max(7, parseInt(s?.heatCycleLength) || 42),
-        heatDuration: Math.max(1, parseInt(s?.heatDuration) || 5),
-        rutCycleLength: Math.max(7, parseInt(s?.rutCycleLength) || 70),
-        rutDuration: Math.max(1, parseInt(s?.rutDuration) || 3),
-    };
+// Compatibility API. One cycle per explicitly selected carrier; no sex/role inference.
+import { getPhaseInfo } from './helpers.js';
+export function isOmegaverse(s) { return s?.universe === 'omegaverse'; }
+export function carrierMode(s) {
+    if (['user', 'char', 'both', 'none'].includes(s?.carrierMode)) return s.carrierMode;
+    return ['user', 'char', 'both', 'none'].includes(s?.trackFor) ? s.trackFor : 'user';
 }
-
-export function isOmegaverse(s) {
-    return s?.universe === 'omegaverse';
-}
-
-// Роль носителя: 'user' → s.userDesignation, 'char' → s.charDesignation
+export function canCarry(s, who) { const m = carrierMode(s); return (who === 'user' || who === 'char') && (m === 'both' || m === who); }
+export function hasMenstrualCycle(s, who) { return canCarry(s, who); }
+export function hasAnyTracking(s, who) { const mode = s?.trackFor || 'user'; return mode === 'both' || mode === who; }
+// Legacy callers cannot reintroduce role-based fertility or independent clocks.
 export function designationOf(s, who) {
-    const d = who === 'char' ? s?.charDesignation : s?.userDesignation;
-    return (d === 'alpha' || d === 'beta' || d === 'omega') ? d : 'beta';
+    const role = who === 'char' ? s?.charDesignation : s?.userDesignation;
+    return ['alpha','beta','omega'].includes(role) ? role : who === 'char' ? 'alpha' : 'omega';
 }
-
-// Биологический пол носителя ('female' | 'male'). По умолчанию: юзер — женский, персонаж — мужской.
-export function sexOf(s, who) {
-    const v = who === 'char' ? s?.charSex : s?.userSex;
-    if (v === 'male' || v === 'female') return v;
-    return who === 'char' ? 'male' : 'female';
+export function hasCycle(s, who) { return canCarry(s, who) || (isOmegaverse(s) && designationOf(s, who) !== 'beta'); }
+export function roleLabel(s, who) { return {alpha:'Альфа',beta:'Бета',omega:'Омега'}[designationOf(s,who)]; }
+export function cyclePhase(s, who, day, lang = 'ru') {
+    const abo = isOmegaverse(s), role = designationOf(s, who), carrier = canCarry(s, who), en = lang === 'en';
+    const info = getPhaseInfo(day, lang, false, s?.menstruationEnabled !== false && carrier);
+    if (!abo) return carrier ? info : { ...info, name: en ? 'State' : 'Состояние', color:'#999999' };
+    const active = day >= 12 && day <= 16;
+    if (role === 'beta') return carrier ? info : { ...info, name: en ? 'Beta' : 'Бета', color:'#999999' };
+    if (active) return { ...info, name: role === 'alpha' ? (carrier ? (en ? 'Ovulation / rut' : 'Овуляция / гон') : (en ? 'Rut' : 'Гон')) : (carrier ? (en ? 'Ovulation / heat' : 'Овуляция / течка') : (en ? 'Heat' : 'Течка')), color:'#ff6b6b' };
+    if (!carrier) return { ...info, name: role === 'alpha' ? (en ? 'Outside rut' : 'Вне гона') : (en ? 'Between heats' : 'Между течками'), color:'#a88ae3' };
+    return info;
 }
-
-// Есть ли МЕСЯЧНЫЕ (обычный 28-дневный цикл). Зависит ТОЛЬКО от пола:
-// женщина — да, в любой роли A/B/O (омега, бета, альфа); мужчина — нет.
-export function hasMenstrualCycle(s, who) {
-    return sexOf(s, who) === 'female';
+export function sexOf(s, who) { return who === 'char' ? s?.charSex : s?.userSex; }
+export function getCfg() { return { heatCycleLength: 28, heatDuration: 5, rutCycleLength: 28, rutDuration: 0 }; }
+export function getHeatPhase(day) {
+    const d = Math.max(1, Math.trunc(Number(day)) || 1);
+    const info = getPhaseInfo(d, 'ru', true);
+    const heat = d >= 12 && d <= 16;
+    return { phase: heat ? 'heat' : d > 28 ? 'delayed' : 'normal', day: d, len: 28,
+        label: info.name + (heat ? ` · ${d - 11}/5 дн.` : ''),
+        sub: d > 28 ? `Задержка ${d - 28} дн.` : `день ${d} из 28`,
+        labelEn: getPhaseInfo(d, 'en', true).name + ` (cycle day ${d}/28)`, fertility: 1 };
 }
-
-// ─── Фаза течки омеги ───
-// Цикл: [1..heatDuration] = течка, за 2 дня до конца цикла — предтечка, остальное — норма.
-// Возвращает { phase, day, label, labelEn, fertility } — fertility = множитель шанса зачатия.
-export function getHeatPhase(day, cfg) {
-    const len = cfg.heatCycleLength;
-    const dur = cfg.heatDuration;
-    let d = ((parseInt(day) || 1) - 1) % len + 1;
-    if (d < 1) d += len;
-
-    if (d <= dur) {
-        return {
-            phase: 'heat', day: d, len,
-            // Короткая метка для бейджа + подробность отдельно (день цикла всегда виден)
-            label: `Течка · ${d}/${dur} дн.`,
-            sub: `день ${d} из ${len} в цикле течки`,
-            labelEn: `IN HEAT (day ${d} of ${dur}; cycle day ${d}/${len})`,
-            fertility: 3.2,
-        };
-    }
-    // Предтечка — последние 2 дня цикла перед новой течкой
-    if (d > len - 2) {
-        return {
-            phase: 'preheat', day: d, len,
-            label: `Предтечка · ${d}/${len}`,
-            sub: `течка начнётся через ${len - d + 1} дн.`,
-            labelEn: `PRE-HEAT, heat starts in ${len - d + 1} days (cycle day ${d}/${len})`,
-            fertility: 1.4,
-        };
-    }
-    return {
-        phase: 'normal', day: d, len,
-        label: `Спокойно · ${d}/${len}`,
-        sub: `до следующей течки ${len - d + 1} дн.`,
-        labelEn: `between heats, next heat in ${len - d + 1} days (cycle day ${d}/${len})`,
-        fertility: 0.35,
-    };
-}
-
-// ─── Фаза гона альфы ───
-export function getRutPhase(day, cfg) {
-    const len = cfg.rutCycleLength;
-    const dur = cfg.rutDuration;
-    let d = ((parseInt(day) || 1) - 1) % len + 1;
-    if (d < 1) d += len;
-
-    if (d <= dur) {
-        return {
-            inRut: true, phase: 'rut', day: d, len,
-            label: `Гон · ${d}/${dur} дн.`,
-            sub: `день ${d} из ${len} в цикле гона`,
-            labelEn: `IN RUT (day ${d} of ${dur}; cycle day ${d}/${len})`,
-            potency: 1.5,
-        };
-    }
-    return {
-        inRut: false, phase: 'normal', day: d, len,
-        label: `Вне гона · ${d}/${len}`,
-        sub: `до следующего гона ${len - d + 1} дн.`,
-        labelEn: `not in rut, next rut in ${len - d + 1} days (cycle day ${d}/${len})`,
-        potency: 1,
-    };
-}
-
-// ─── Статус носителя одной строкой (для UI/промпта) ───
-// carrier — объект данных носителя (p или p.partner), desig — роль, s — настройки.
+export function getRutPhase(day) { const phase = getHeatPhase(day); return { ...phase, phase: phase.phase === 'heat' ? 'rut' : phase.phase, inRut: phase.phase === 'heat', potency: phase.phase === 'heat' ? 1.5 : 1 }; }
 export function carrierAboStatus(carrier, desig, s) {
-    const cfg = getCfg(s);
-    if (desig === 'omega') {
-        if (carrier?.heatSuppressant) {
-            return { kind: 'heat', suppressed: true, label: 'Течка подавлена (супрессанты)', labelEn: 'heat suppressed (on suppressants)', fertility: 0.1 };
-        }
-        const ph = getHeatPhase(carrier?.heatCycleDay || 1, cfg);
-        return { kind: 'heat', suppressed: false, ...ph };
-    }
-    if (desig === 'alpha') {
-        const rt = getRutPhase(carrier?.rutCycleDay || 1, cfg);
-        return { kind: 'rut', ...rt, fertility: 1 };
-    }
-    return { kind: 'beta', label: 'Бета — обычный цикл', labelEn: 'beta (regular cycle)', fertility: 1 };
+    if (carrier?.isPregnant) return { kind:'cycle', phase:'paused', label:'Цикл приостановлен', labelEn:'cycle paused', fertility:0 };
+    const day = Math.max(1, parseInt(carrier?.cycleDay) || 1), active = day >= 12 && day <= 16;
+    const phase = desig === 'omega' && active ? 'heat' : desig === 'alpha' && active ? 'rut' : 'normal';
+    return { kind:desig, phase, day, len:28, inRut:phase==='rut', fertility:1, label:phase==='heat'?'Течка':phase==='rut'?'Гон':desig==='alpha'?'Вне гона':desig==='omega'?'Между течками':'Бета' };
 }
-
-// Продвижение A/B/O-циклов на N RP-дней (мутирует carrier). Возвращает описание событий.
-export function advanceAboCycles(carrier, desig, s, days) {
-    const cfg = getCfg(s);
-    const events = [];
-    if (!carrier || !(days > 0)) return events;
-
-    if (desig === 'omega') {
-        const before = getHeatPhase(carrier.heatCycleDay || 1, cfg);
-        carrier.heatCycleDay = ((carrier.heatCycleDay || 1) - 1 + days) % cfg.heatCycleLength + 1;
-        const after = getHeatPhase(carrier.heatCycleDay, cfg);
-        if (before.phase !== 'heat' && after.phase === 'heat') events.push('heat_start');
-        if (before.phase === 'heat' && after.phase !== 'heat') events.push('heat_end');
-        if (before.phase === 'normal' && after.phase === 'preheat') events.push('preheat');
-    } else if (desig === 'alpha') {
-        const before = getRutPhase(carrier.rutCycleDay || 1, cfg);
-        carrier.rutCycleDay = ((carrier.rutCycleDay || 1) - 1 + days) % cfg.rutCycleLength + 1;
-        const after = getRutPhase(carrier.rutCycleDay, cfg);
-        if (!before.inRut && after.inRut) events.push('rut_start');
-        if (before.inRut && !after.inRut) events.push('rut_end');
-    }
-    return events;
-}
-
-// ─── Может ли носитель ЗАБЕРЕМЕНЕТЬ ───
-// Режим 'auto' угадывает по телу и роли, остальные — прямой выбор игрока
-// (юзер-девушка с членом, бот-мужчина, который вынашивает, яой без женщин).
-// В 'auto': женщина вынашивает в любой роли — включая АЛЬФУ-женщину;
-// мужчина — только если он омега. Оплодотворить при этом может кто угодно:
-// омега-мужчина спокойно делает ребёнка альфе-женщине, носитель здесь — она.
-export function canCarry(s, who) {
-    const mode = s?.carrierMode || 'auto';
-    if (mode === 'none') return false;
-    if (mode === 'user' || mode === 'char') return mode === who;
-    if (mode === 'both') return true;
-
-    // auto — не носитель тот, кого вообще не отслеживают
-    const trackFor = s?.trackFor || 'user';
-    if (trackFor !== 'both' && trackFor !== who) return false;
-
-    if (sexOf(s, who) === 'female') return true;
-    return isOmegaverse(s) && designationOf(s, who) === 'omega';
-}
-
-// Есть ли у носителя что отслеживать: цикл, течка или гон.
-export function hasAnyTracking(s, who) {
-    if (hasMenstrualCycle(s, who)) return true;
-    // Носитель без месячных (мужчина-омега, бот-носитель в обычном мире) — тоже
-    // отслеживается: у него нет цикла, но есть состояние и возможность зачатия
-    if (canCarry(s, who)) return true;
-    if (!isOmegaverse(s)) return false;
-    const d = designationOf(s, who);
-    return d === 'omega' || d === 'alpha';
-}
+export function advanceAboCycles() { return []; }

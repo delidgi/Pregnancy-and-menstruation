@@ -1,10 +1,23 @@
+import { setManualCycleDay } from './message-handler.js';
+import { reportError } from './diagnostics.js';
+function cycleSummary(who, c, s) {
+    if (!hasCycle(s, who) && !c.isPregnant) return isOmegaverse(s) ? roleLabel(s, who) : 'Состояние';
+    if (c.isPregnant && pregnancyIsKnown(c, s)) return `Беременность — ${c.pregnancyWeeks || 0} нед.`;
+    const pp = getPostpartum(c, getPregnancyData());
+    if (pp && !pp.cycleReturned) return 'После родов · цикл не вернулся';
+    const day = (who === 'char' ? (c.cycleDay || 1) : getCycleDay()) + (c.isPregnant ? daysSinceConception(c, getPregnancyData()) : 0);
+    if (day > 28) return `Задержка ${day - 28} дн.`;
+    if (c.isPregnant) return `День ${day}/28 · состояние по сцене`;
+    return `День ${day}/28 · ${getPhaseInfo(day, 'ru', who).name}`;
+}
+function getPhaseInfo(day, lang = 'ru', who = 'user') { return cyclePhase(getSettings(), who, day, lang); }
 // UI v5 — compact, minimal icons, visual infoblock
 import { saveSettingsDebounced } from '../../../../script.js';
 import { getSettings, getPregnancyData, getPartnerData, getCarriers, carrierName, isTracked, getCycleDay, setCycleDay, getCurrentChatId, L, getContraception, syncBabyLegacyFields } from './state.js';
-import { isOmegaverse, designationOf, carrierAboStatus, getCfg, sexOf, hasMenstrualCycle, canCarry, hasAnyTracking } from './omegaverse.js';
+import { isOmegaverse, hasMenstrualCycle, canCarry, hasAnyTracking, hasCycle, designationOf, roleLabel, cyclePhase } from './omegaverse.js';
 import { missedDays, fertileWindow } from './fertility.js';
 import { HYGIENE, getFlow, getHygieneState, getPhaseEffects, hoursBetween } from './cycle-realism.js';
-import { getPhaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
+import { getPhaseInfo as phaseInfo, calculateWeeksFromDates, getSymptomsForProgress, getRecommendationsForProgress, formatSexIcons, formatFetusCount, getHealthInfo, detectChatLanguage, translateStatusValue } from './helpers.js';
 import { babyAgeDays, getCareNeeds, getGrowthStage, MILESTONE_ICONS, milestonesTotal } from './baby-care.js';
 import { calculateDueDate } from './date-parser.js';
 import { resetPregnancy, resetBaby, visitDoctor, applyScanResult, startManualPregnancy, startManualBaby, startPartnerPregnancy, resetPartnerPregnancy, takePregnancyTest, revealPregnancy, getPostpartum, pregnancyIsKnown, daysSinceConception, setLactating, setTrying, monthsTrying, createUndoCheckpoint, undoLastDestructiveChange } from './pregnancy.js';
@@ -368,7 +381,7 @@ export function buildInfoblockHtml() {
     // Фолбэк-перевод: модели иногда пишут значения по-английски ("High"/"Anxious")
     // несмотря на требование языка. В русском чате известные значения переводим.
     const isRuChat = detectChatLanguage() === 'ru';
-    const tr = (v) => (isRuChat ? translateStatusValue(v) : v);
+    const tr = (v) => (isRuChat ? translateStatusValue(v) : typeof v === 'string' && /[а-яё]/i.test(v) ? '' : v);
 
     // ── BABY MODE ──
     if (p.hasBaby) {
@@ -444,7 +457,7 @@ export function buildInfoblockHtml() {
                     ${stat('fa-baby-carriage', diaperIsClean ? 'green' : 'orange', 'Подгузник', diaperIsClean ? diaperText : `<span class="rp-val-warn">${diaperText}</span>`)}
                     ${baby.teething ? stat('fa-tooth', 'blue', 'Зубки', 'Режутся') : ''}
                     ${baby.colicky ? stat('fa-face-sad-tear', 'pink', 'Колики', 'Да') : ''}
-                    ${baby.fatherName ? stat('fa-user', 'blue', 'Отец', baby.fatherName) : ''}
+                    ${baby.fatherName ? stat('fa-user', 'blue', 'Второй родитель', baby.fatherName) : ''}
                     ${baby.personality?.length ? `<div class="repro-note"><i class="fa-solid fa-brain" style="margin-right:4px;opacity:0.5"></i>${baby.personality.join(', ')}</div>` : ''}
                     ${baby.appearance?.length ? `<div class="repro-note"><i class="fa-solid fa-eye" style="margin-right:4px;opacity:0.5"></i>${baby.appearance.join(', ')}</div>` : ''}
                     ${baby.special ? `<div class="repro-note" style="border-color:rgba(255,215,64,.35);background:rgba(255,215,64,.06)"><i class="fa-solid fa-star" style="margin-right:4px;color:#ffd740"></i><b>${baby.special.name || baby.special}</b>${baby.special.desc ? ` — ${baby.special.desc}` : ''}</div>` : ''}
@@ -481,12 +494,7 @@ function carriersHtml(tr) {
     const brief = getCarriers().map(({ who, data }) => {
         const nm = carrierName(who);
         if (data.isPregnant && pregnancyIsKnown(data, s)) return `${nm} · ${data.pregnancyWeeks || 0} нед.`;
-        if (isOmegaverse(s)) {
-            const st = carrierAboStatus(data, designationOf(s, who), s);
-            return `${nm} · ${st.label}`;
-        }
-        const d = who === 'char' ? (data.cycleDay || 1) : getCycleDay();
-        return `${nm} · ${d}/28`;
+        return `${nm} · ${cycleSummary(who, data, s)}`;
     }).join('  ·  ');
 
     return `<details class="repro repro-multi">
@@ -536,8 +544,8 @@ function buildPregnancyCard(who, p, root, s, tr) {
         }
         const pd = p._dynamic || {};
         let noteLines = [];
-        if (pd.symptoms || symptoms) noteLines.push(pd.symptoms || symptoms);
-        if (pd.note || recs) noteLines.push(pd.note || recs);
+        if (pd.symptoms || symptoms) noteLines.push(tr(pd.symptoms) || tr(symptoms));
+        if (pd.note || recs) noteLines.push(tr(pd.note) || tr(recs));
 
         return `<details class="repro">
             <summary><div class="repro-header">
@@ -552,7 +560,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
                     ${stat('fa-calendar-day', 'pink', 'Зачатие', conceptionStr)}
                     ${stat('fa-calendar', 'purple', 'ПДР', dueStr)}
                     ${stat('fa-baby', 'pink', 'Плод', `${formatFetusCount(p.fetusCount)} (${sexStr})`)}
-                    ${p.fatherName ? stat('fa-user', 'blue', 'Отец', p.fatherName) : ''}
+                    ${p.fatherName ? stat('fa-user', 'blue', 'Второй родитель', p.fatherName) : ''}
                     ${fetusSize ? stat('fa-ruler', 'blue', 'Размер', fetusSize) : ''}
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(p.healthStatus))}
                     ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', tr(p.mood)) : ''}
@@ -563,7 +571,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
                     ${pd.swelling ? stat('fa-droplet', 'orange', 'Отёки', tr(pd.swelling)) : ''}
                     ${pd.braxton_hicks ? stat('fa-bolt', 'pink', 'Схватки', tr(pd.braxton_hicks)) : ''}
                     ${pd.fetal_position ? stat('fa-baby', 'blue', 'Положение', tr(pd.fetal_position)) : ''}
-                    ${pd.recommendations ? `<div class="repro-note repro-rec">${ic('fa-lightbulb')} ${pd.recommendations}</div>` : ''}
+                    ${pd.recommendations ? `<div class="repro-note repro-rec">${ic('fa-lightbulb')} ${tr(pd.recommendations)}</div>` : ''}
                     ${noteLines.length ? `<div class="repro-note">${noteLines.join(' · ')}</div>` : ''}
                 </div>
             </div>
@@ -576,87 +584,6 @@ function cycleCardHtml(who, c, tr) {
     const s = getSettings();
     const d = c._dynamic || {};
 
-    // ── ОМЕГАВЕРС ──
-    if (isOmegaverse(s)) {
-        const desig = designationOf(s, who);
-        const st = carrierAboStatus(c, desig, s);
-        const roleLabel = desig === 'alpha' ? 'Альфа' : desig === 'omega' ? 'Омега' : 'Бета';
-        const isHot = st.phase === 'heat' || st.inRut;
-        const iconCls = isHot ? 'pregnancy' : 'cycle';
-        const icon = desig === 'alpha' ? 'fa-bolt' : desig === 'omega' ? 'fa-fire' : 'fa-clock';
-        const pct = st.len ? Math.round((st.day / st.len) * 100) : 0;
-
-        // Месячные — только у женщин (в любой роли). У мужчин цикла нет.
-        const menses = hasMenstrualCycle(s, who);
-        const mday = menses ? (who === 'char' ? Math.max(1, Math.min(28, c.cycleDay || 1)) : getCycleDay()) : null;
-        const mphase = menses ? getPhaseInfo(mday) : null;
-        const mdet = menses ? getCycleDetails(mday) : null;
-        // Бейдж: у беты (без течки/гона) показываем фазу месячных, иначе A/B/O-статус
-        const badge = (desig === 'beta' && menses) ? `День ${mday}/28 · ${mphase.name}` : st.label;
-
-        let fert, hint;
-        if (desig === 'omega') {
-            fert = st.suppressed ? 'Подавлена' : st.phase === 'heat' ? 'Пик' : st.phase === 'preheat' ? 'Растёт' : (menses ? mdet.fertility : 'Низкая');
-            hint = st.suppressed ? 'Супрессанты глушат течку: запах приглушён, симптомов нет.'
-                 : st.phase === 'heat' ? 'Течка: жар, обострённый запах, тяга к альфе, фертильность на пике.'
-                 : st.phase === 'preheat' ? `Предтечка: беспокойство, запах усиливается — течка через ${st.len - st.day + 1} дн.`
-                 : `Между течками. Следующая через ${st.len - st.day + 1} дн.`;
-        } else if (desig === 'alpha') {
-            fert = st.inRut ? 'Гон — пик' : (menses ? mdet.fertility : 'Норма');
-            hint = st.inRut ? 'Гон: агрессия, метки запахом, обострённый инстинкт.'
-                 : `Вне гона. Следующий гон через ${st.len - st.day + 1} дн.`;
-        } else {
-            fert = menses ? mdet.fertility : 'Обычная';
-            hint = menses ? mdet.note : 'Бета без месячных: течек и гонов нет.';
-        }
-
-        // Прогресс-бар: A/B/O цикл, а у беты — месячные
-        const barPct = (desig === 'beta') ? (menses ? Math.round(mday / 28 * 100) : 0) : pct;
-        const hasBar = (desig === 'beta') ? menses : !!st.len;
-
-        return `<details class="repro">
-            <summary><div class="repro-header">
-                <div class="repro-icon ${iconCls}">${ic(icon)}</div>
-                <span class="repro-title">${carrierTag(who)}${roleLabel}</span>
-                <span class="repro-badge ${iconCls}">${badge}</span>
-                <div class="repro-chev">${ic('fa-chevron-down')}</div>
-            </div></summary>
-            <div class="repro-c">
-                ${hasBar ? `<div class="repro-bar"><div class="repro-bar-fill ${iconCls}" style="width:${barPct}%"></div></div>` : ''}
-                <div class="repro-grid">
-                    ${desig !== 'beta' ? stat(desig === 'alpha' ? 'fa-bolt' : 'fa-fire', isHot ? 'pink' : 'purple',
-                           desig === 'alpha' ? 'Гон' : 'Течка',
-                           `${st.label}${st.sub ? `<span class="rp-sub"> · ${st.sub}</span>` : ''}`, true) : ''}
-                    ${menses ? stat('fa-calendar-day', 'purple', 'Месячные', `День ${mday}/28 · ${mphase.name}`) : ''}
-                    ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || (isHot ? 'Очень высокое' : menses ? mdet.libido : 'Обычное'))}
-                    ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || (isHot ? 'На взводе' : menses ? mdet.mood : 'Спокойное'))}
-                    ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || (isHot ? 'Жар, обострённые чувства' : menses ? mdet.physical : 'Норма'))}
-                    <div class="repro-note">${d.note || hint}</div>
-                </div>
-            </div>
-        </details>`;
-    }
-
-    // ── НОСИТЕЛЬ БЕЗ МЕСЯЧНЫХ ──
-    // Мужчина, которого игрок сделал носителем: цикла нет, но состояние показываем.
-    if (!hasMenstrualCycle(s, who)) {
-        return `<details class="repro">
-            <summary><div class="repro-header">
-                <div class="repro-icon baby">${ic('fa-user')}</div>
-                <span class="repro-title">${carrierTag(who)}Состояние</span>
-                <span class="repro-badge baby">Может зачать</span>
-                <div class="repro-chev">${ic('fa-chevron-down')}</div>
-            </div></summary>
-            <div class="repro-c">
-                <div class="repro-grid">
-                    ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || 'Обычное')}
-                    ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || 'Спокойное')}
-                    ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || 'Норма', true)}
-                    ${d.note ? `<div class="repro-note">${d.note}</div>` : ''}
-                </div>
-            </div>
-        </details>`;
-    }
 
     // ── ОБЫЧНЫЙ 28-ДНЕВНЫЙ ЦИКЛ ──
     const p0 = getPregnancyData();
@@ -666,40 +593,41 @@ function cycleCardHtml(who, c, tr) {
     const frozenDay = who === 'char' ? Math.max(1, c.cycleDay || 1) : getCycleDay();
     const rawDay = hidden ? frozenDay + daysSinceConception(c, p0) : frozenDay;
     const day = Math.max(1, Math.min(28, rawDay));
-    const phase = getPhaseInfo(day);
+    const phase = hidden ? { name: 'Состояние по сцене' } : getPhaseInfo(day, 'ru', who);
+    const cycling = hasCycle(s, who);
+    const carries = canCarry(s, who);
+    const role = isOmegaverse(s) ? roleLabel(s, who) : '';
+    const hot = isOmegaverse(s) && designationOf(s, who) !== 'beta' && day >= 12 && day <= 16;
     const cyclePct = Math.min(100, Math.round(rawDay / 28 * 100));
-    const cd = getCycleDetails(day);
+    const cd = carries ? getCycleDetails(s.menstruationEnabled === false && day <= 5 ? 6 : day) : { fertility:'—', libido:hot?'Высокое':'Обычное', mood:hot?'Возбуждение':'Спокойное', physical:hot?'Жар, чувствительность':'Норма', note:'' };
 
     // Задержка / скрытая беременность: героиня не знает, но задержку видит
     const delay = missedDays(rawDay, 28);
     const pp = getPostpartum(c, p0);
-    const win = s.tryingToConceive ? fertileWindow(day, 28) : null;
+    const win = carries && s.tryingToConceive ? fertileWindow(day, 28) : null;
     const testRes = c.lastTestResult;
 
     let extraRows = '';
+    let hygieneReminder = false;
 
     // ── Реализм: гигиена и протечки в дни менструации ──
-    if (s.realism && day <= 5 && !pp && !hidden) {
+    if (carries && s.menstruationEnabled !== false && day <= 5 && (!pp || pp.cycleReturned) && !hidden) {
         const flow = getFlow(day);
         const hrs = hoursBetween(c.hygieneChangedRpDate, p0.rpDate);
         const hy = getHygieneState(c.hygieneType || 'pad', hrs, flow);
+        hygieneReminder = hy.needsChange;
         const worn = hrs === null ? '' : ` · ${Math.round(hrs)} ч`;
-        extraRows += stat('fa-droplet', 'pink', 'Выделения', flow.label);
-        extraRows += stat(
-            hy.overdue ? 'fa-triangle-exclamation' : 'fa-shield-heart',
-            hy.overdue ? 'red' : hy.needsChange ? 'orange' : 'green',
-            'Средство',
-            `${hy.label}${worn}${hy.overdue ? ' — пора менять!' : hy.needsChange ? ' — скоро менять' : ''}`,
-            true);
+        const hygieneText = hy.type.id === 'none' ? 'Средство не используется' : hy.needsChange ? 'Пора сменить' : hrs === null ? 'Смена не отмечена' : `Смена через ${hy.hoursLeft} ч`;
+        extraRows += stat('fa-shield-heart', hy.needsChange ? 'orange' : 'green', 'Гигиена', hygieneText, true);
         if (hy.health === 'tampon-too-long') {
             extraRows += stat('fa-kit-medical', 'red', 'Внимание', 'Тампон дольше 8 часов', true);
         }
     }
 
-    if (delay > 0 && !pp) {
+    if (carries && delay > 0 && !pp) {
         extraRows += stat('fa-calendar-xmark', 'orange', 'Задержка', `${delay} дн.`);
     }
-    if (testRes) {
+    if (testRes && carries) {
         const tLabel = testRes === 'positive' ? 'Две полоски' : testRes === 'faint' ? 'Слабая вторая' : 'Отрицательный';
         extraRows += stat('fa-vial', testRes === 'negative' ? 'blue' : 'pink', 'Тест', tLabel);
     }
@@ -714,7 +642,7 @@ function cycleCardHtml(who, c, tr) {
         if (!pp.cycleReturned) extraRows += stat('fa-clock-rotate-left', 'purple', 'Цикл', 'Не вернулся');
     }
 
-    const badge = pp && !pp.cycleReturned
+    const badge = !cycling ? (role || 'По сцене') : pp && !pp.cycleReturned
         ? `После родов · ${pp.days} дн.`
         : delay > 0
             ? `Задержка ${delay} дн.`
@@ -723,19 +651,19 @@ function cycleCardHtml(who, c, tr) {
     return `<details class="repro">
         <summary><div class="repro-header">
             <div class="repro-icon cycle">${ic(pp ? 'fa-heart-pulse' : 'fa-clock')}</div>
-            <span class="repro-title">${carrierTag(who)}${pp ? 'Восстановление' : 'Цикл'}</span>
-            <span class="repro-badge cycle">${badge}</span>
+            <span class="repro-title">${carrierTag(who)}${pp ? 'Восстановление' : role || (cycling ? 'Цикл' : 'Состояние')}</span>
+            <span class="repro-badge cycle">${badge}${hygieneReminder ? ' · Сменить средство' : ''}</span>
             <div class="repro-chev">${ic('fa-chevron-down')}</div>
         </div></summary>
         <div class="repro-c">
-            <div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>
+            ${cycling ? `<div class="repro-bar"><div class="repro-bar-fill cycle" style="width:${cyclePct}%"></div></div>` : ''}
             <div class="repro-grid">
-                ${stat('fa-droplet', 'green', 'Фертильность', pp && !pp.cycleReturned ? 'Очень низкая' : cd.fertility)}
+                ${carries ? stat('fa-droplet', 'green', 'Фертильность', hidden || delay > 0 ? 'Не определена' : pp && !pp.cycleReturned ? 'Очень низкая' : cd.fertility) : stat('fa-clock', 'purple', 'Фаза', phase.name)}
                 ${stat('fa-fire', 'pink', 'Либидо', tr(d.libido) || cd.libido)}
                 ${stat('fa-face-smile', 'purple', 'Настроение', tr(d.mood) || cd.mood)}
                 ${stat('fa-heart', 'blue', 'Физически', tr(d.physical) || cd.physical)}
                 ${extraRows}
-                <div class="repro-note">${d.note || cd.note}</div>
+                <div class="repro-note">${tr(d.note) || (hidden || delay > 0 ? 'Ориентируйтесь на самочувствие и факты сцены.' : pp && !pp.cycleReturned ? 'Цикл ещё не возобновился.' : cd.note)}</div>
             </div>
         </div>
     </details>`;
@@ -762,7 +690,7 @@ function fmtRpDate(iso) {
 // Пилюля родителя: имя + роль (без инициала — он только шумит)
 function parentPill(name, cls, roleLabel, unknown = false) {
     return `<span class="rp-pill ${cls}${unknown ? ' unknown' : ''}">
-        <span class="rp-pill-tx"><b>${name}</b><span class="rp-pill-role">${roleLabel}</span></span>
+        <span class="rp-pill-tx"><b>${name}</b></span>
     </span>`;
 }
 
@@ -833,16 +761,13 @@ export function showFamilyTree() {
 
     const p = getPregnancyData();
     const s = getSettings();
-    // Роль носителя — по полу, а не «мама» всегда: в яое мам нет, носитель — отец.
-    const carrierSex = sexOf(s, 'user');
-    const carrierRole = carrierSex === 'female' ? 'мама' : 'отец';
-    // Второму родителю противоположную роль давать нельзя (оба могут быть мужчинами)
-    const partnerRole = carrierSex === 'female' ? 'папа' : 'родитель';
+    const carrierRole = '';
+    const partnerRole = '';
 
-    let momName = 'Ты';
+    let momName = carrierName(s.carrierMode === 'char' ? 'char' : 'user');
     try {
         const ctx = SillyTavern.getContext();
-        if (ctx?.name1) momName = ctx.name1;
+        if (s.carrierMode !== 'char' && ctx?.name1) momName = ctx.name1;
     } catch (e) { /* ignore */ }
 
     const initialOf = (name) => (name || '?').trim().charAt(0).toUpperCase() || '?';
@@ -1066,17 +991,7 @@ export function showQuickBar() {
     }
     for (const { who, data } of getCarriers()) {
         const nm = both ? `<b>${carrierName(who)}:</b> ` : '';
-        if (data.isPregnant) {
-            rows.push(`${nm}беременность — ${data.pregnancyWeeks || 0} нед.`);
-        } else if (isOmegaverse(s)) {
-            const st = carrierAboStatus(data, designationOf(s, who), s);
-            const hot = st.phase === 'heat' || st.inRut;
-            rows.push(`${nm}<span style="color:${hot ? 'rgba(255,120,180,.9)' : 'inherit'}">${st.label}</span>`);
-        } else {
-            const d = who === 'char' ? (data.cycleDay || 1) : getCycleDay();
-            const ph = getPhaseInfo(d);
-            rows.push(`${nm}день ${d}/28 · <span style="color:${ph.color}">${ph.name}</span>`);
-        }
+        rows.push(`${nm}${cycleSummary(who, data, s)}`);
     }
     const statusHtml = rows.join('<br>');
 
@@ -1084,7 +999,7 @@ export function showQuickBar() {
 
     // ── Реализм: смена средства гигиены в дни менструации ──
     let realismRow = '';
-    if (s.realism && isTracked('user') && !p.isPregnant && !isOmegaverse(s) && hasMenstrualCycle(s, 'user') && day <= 5) {
+    if (s.menstruationEnabled !== false && isTracked('user') && !p.isPregnant && hasMenstrualCycle(s, 'user') && day <= 5) {
         const hrs = hoursBetween(p.hygieneChangedRpDate, p.rpDate);
         const hy = getHygieneState(p.hygieneType || 'pad', hrs, getFlow(day));
         const opts = Object.values(HYGIENE)
@@ -1106,7 +1021,7 @@ export function showQuickBar() {
             </div>
             <div class="rp-quick-body">
                 <div class="rp-quick-status">${statusHtml}</div>
-                ${(isOmegaverse(s) || !isTracked('user')) ? '' : `<div class="rp-quick-cycle">
+                ${(!isTracked('user')) ? '' : `<div class="rp-quick-cycle">
                     <span class="rp-quick-lbl">День цикла</span>
                     <button class="rp-quick-step" data-d="-1"><i class="fa-solid fa-minus"></i></button>
                     <input type="number" id="rp-quick-cycleday" min="1" max="28" value="${day}" class="text_pole">
@@ -1161,8 +1076,7 @@ export function showQuickBar() {
     const applyCycle = (v) => {
         v = Math.max(1, Math.min(28, parseInt(v) || 1));
         overlay.find('#rp-quick-cycleday').val(v);
-        setCycleDay(v, true, true);
-        import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+        setManualCycleDay('user', v);
         saveSettingsDebounced();
         setTimeout(() => { updatePromptInjection(); syncUI(); }, 30);
         // Обновляем строку статуса
@@ -1238,8 +1152,8 @@ export function syncUI() {
     if (contraChar) contraChar.value = getContraception('char');
     const contraUserBox = el('repro-contraception-user-box');
     const contraCharBox = el('repro-contraception-char-box');
-    if (contraUserBox) contraUserBox.style.display = isTracked('user') ? 'flex' : 'none';
-    if (contraCharBox) contraCharBox.style.display = isTracked('char') ? 'flex' : 'none';
+    if (contraUserBox) contraUserBox.style.display = isTracked('user') && canCarry(s, 'user') ? 'flex' : 'none';
+    if (contraCharBox) contraCharBox.style.display = isTracked('char') && canCarry(s, 'char') ? 'flex' : 'none';
     const contraUserLabel = el('repro-contra-user-label');
     const contraCharLabel = el('repro-contra-char-label');
     if (contraUserLabel) contraUserLabel.textContent = `Контрацепция ${carrierName('user')}:`;
@@ -1249,53 +1163,39 @@ export function syncUI() {
     if (hiddenPreg) hiddenPreg.checked = s.hiddenPregnancy !== false;
 
     // ── Носители / вселенная ──
+    const roleSettings = el('repro-role-settings');
+    if (roleSettings) roleSettings.style.display = isOmegaverse(s) ? '' : 'none';
+    for (const who of ['user','char']) {
+        const roleSel = el(`repro-${who}-desig`);
+        if (roleSel) roleSel.value = designationOf(s, who);
+        const data = who === 'char' ? getPartnerData() : p;
+        const row = el(`repro-hygiene-${who}`);
+        if (row) row.style.display = isTracked(who) && canCarry(s, who) && s.menstruationEnabled !== false ? 'flex' : 'none';
+        const type = el(`repro-hygiene-type-${who}`);
+        if (type) type.value = data.hygieneType || 'pad';
+    }
+    const menstruationToggle = el('repro-menstruation-enabled');
+    if (menstruationToggle) menstruationToggle.checked = s.menstruationEnabled !== false;
     const trackSel = el('repro-trackfor');
     if (trackSel) trackSel.value = s.trackFor || 'user';
     const carrierSel = el('repro-carrier-mode');
-    if (carrierSel) carrierSel.value = s.carrierMode || 'auto';
+    if (carrierSel) carrierSel.value = s.carrierMode || 'user';
     const uniSel = el('repro-universe');
     if (uniSel) uniSel.value = s.universe || 'normal';
-    const aboPanel = el('repro-abo-panel');
-    if (aboPanel) aboPanel.style.display = isOmegaverse(s) ? 'flex' : 'none';
-    if (isOmegaverse(s)) {
-        const ud = el('repro-user-desig'); if (ud) ud.value = designationOf(s, 'user');
-        const cdg = el('repro-char-desig'); if (cdg) cdg.value = designationOf(s, 'char');
-        const usx = el('repro-user-sex'); if (usx) usx.value = sexOf(s, 'user');
-        const csx = el('repro-char-sex'); if (csx) csx.value = sexOf(s, 'char');
-        const us = el('repro-user-suppr'); if (us) us.checked = !!p.heatSuppressant;
-        const cs2 = el('repro-char-suppr'); if (cs2) cs2.checked = !!getPartnerData().heatSuppressant;
-        const al = el('repro-abo-len'); if (al) al.value = s.heatCycleLength || 30;
-        const hd = el('repro-heat-dur'); if (hd) hd.value = s.heatDuration || 5;
-        const rd = el('repro-rut-dur'); if (rd) rd.value = s.rutDuration || 3;
-
-        // Компактные окна носителей: статус + текущий день (как блок менструации)
-        for (const w of ['user', 'char']) {
-            const box = el(`repro-abo-${w}-box`);
-            if (!box) continue;
-            if (!isTracked(w)) { box.style.display = 'none'; continue; }
-            box.style.display = 'flex';
-            const carrier = w === 'char' ? getPartnerData() : p;
-            const desig = designationOf(s, w);
-            const stx = carrierAboStatus(carrier, desig, s);
-            const len = (desig === 'alpha' ? s.rutCycleLength : s.heatCycleLength) || 30;
-            const day = desig === 'alpha' ? (carrier.rutCycleDay || 1) : (carrier.heatCycleDay || 1);
-            const hot = stx.phase === 'heat' || stx.inRut;
-            const info = el(`repro-abo-${w}-info`);
-            if (info) {
-                info.innerHTML = `<b>${carrierName(w)}</b> — <span style="color:${hot ? '#ff6b9d' : 'rgba(180,120,255,.9)'}">${stx.label}</span>`
-                    + (stx.sub ? `<span style="opacity:.5"> · ${stx.sub}</span>` : '');
-            }
-            const dayIn = el(`repro-abo-${w}-day`);
-            if (dayIn) { dayIn.value = day; dayIn.max = len; }
-        }
-    }
-
-    // Обычный блок цикла (менструация) прячем в омегаверсе — там свой цикл течки/гона
     const cycInfo = el('repro-currentcycle');
     const cycRow = el('repro-cycle-row');
-    const showPlainCycle = !isOmegaverse(s) && isTracked('user');
-    if (cycInfo) cycInfo.style.display = showPlainCycle ? '' : 'none';
-    if (cycRow) cycRow.style.display = showPlainCycle ? 'flex' : 'none';
+    if (cycInfo) cycInfo.style.display = isTracked('user') ? '' : 'none';
+    if (cycRow) cycRow.style.display = isTracked('user') && hasCycle(s, 'user') ? 'flex' : 'none';
+    const partnerRow = el('repro-partner-cycle-row');
+    if (partnerRow) partnerRow.style.display = isTracked('char') && hasCycle(s, 'char') ? '' : 'none';
+    const partnerDay = getPartnerData().cycleDay || 1;
+    const partnerInput = el('repro-partner-cycle-day');
+    if (partnerInput) partnerInput.value = partnerDay;
+    const partnerInfo = el('repro-partner-cycle-info');
+    if (partnerInfo) {
+        partnerInfo.textContent = cycleSummary('char', getPartnerData(), s);
+        partnerInfo.style.color = getPartnerData().isPregnant ? 'var(--rp-pink)' : getPhaseInfo(partnerDay, 'ru', 'char').color;
+    }
 
     const babyMaxAge = el('repro-baby-max-age');
     if (babyMaxAge) {
@@ -1324,7 +1224,8 @@ export function syncUI() {
     if (cycleIn) cycleIn.value = _cd;
     if (cycleInfo) {
         const ph = getPhaseInfo(_cd);
-        cycleInfo.innerHTML = `<span style="color:${ph.color}">${ph.name}</span> — день <b>${_cd}</b>/28`;
+        cycleInfo.textContent = cycleSummary('user', p, s);
+        cycleInfo.style.color = p.isPregnant ? 'var(--rp-pink)' : ph.color;
     }
 
     const status = el('repro-status');
@@ -1382,7 +1283,7 @@ export function syncUI() {
                     <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(p.fetusCount)} (${sexStr})</span></div>
                     ${fetusSize ? `<div class="rp-m-cell"><span class="rp-m-lbl">Размер</span><span class="rp-m-val">${fetusSize}</span></div>` : ''}
                     <div class="rp-m-cell"><span class="rp-m-lbl">Здоровье</span><span class="rp-m-val rp-m-hp-${hCls}">${health.text}</span></div>
-                    ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${p.fatherName}</span></div>` : ''}
+                    ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${p.fatherName}</span></div>` : ''}
                 </div>
                 <div class="rp-m-text"><b>Симптомы:</b> ${symptoms}</div>
                 <div class="rp-m-text"><b>Рек-ции:</b> ${recs}</div>
@@ -1472,7 +1373,7 @@ export function syncUI() {
                 <div class="rp-m-grid">
                     <div class="rp-m-cell"><span class="rp-m-lbl">ПДР</span><span class="rp-m-val">${dueStr}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(c.fetusCount)} (${sexStr})</span></div>
-                    ${c.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${c.fatherName}</span></div>` : ''}
+                    ${c.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${c.fatherName}</span></div>` : ''}
                 </div>
                 <div style="display:flex;gap:4px;margin-top:6px">
                     <button id="repro-partner-birth" class="rp-m-btn" style="flex:1">Принять роды</button>
@@ -1531,7 +1432,7 @@ export function syncUI() {
                     <div class="rp-m-cell"><span class="rp-m-lbl">Сон</span><span class="rp-m-val">${baby.sleep || '—'}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Кормление</span><span class="rp-m-val">${baby.feedingType || '—'}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Подгузник</span><span class="rp-m-val" style="color:${baby.diaperClean !== false ? 'var(--rp-green)' : 'var(--rp-yellow)'}">${baby.diaperClean !== false ? 'Чистый' : 'Смена!'}</span></div>
-                    ${baby.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Отец</span><span class="rp-m-val">${baby.fatherName}</span></div>` : ''}
+                    ${baby.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${baby.fatherName}</span></div>` : ''}
                 </div>`;
             });
             babyMon.innerHTML = monHtml;
@@ -1560,87 +1461,40 @@ export function setupUI() {
             <label class="checkbox_label"><input type="checkbox" id="repro-enabled"><span>${L('enabled')}</span></label>
             <label class="checkbox_label"><input type="checkbox" id="repro-notify"><span>${L('notifications')}</span></label>
             <hr>
-            <div style="display:flex;gap:4px;align-items:center" title="Кого отслеживает расширение: цикл, беременность и инфоблок">
-                <span style="font-size:9px;opacity:0.5">Отслеживать:</span>
-                <select id="repro-trackfor" class="text_pole" style="flex:1">
-                    <option value="user">Меня (юзера)</option>
-                    <option value="char">Персонажа (бота)</option>
-                    <option value="both">Обоих</option>
+            <div style="display:flex;gap:4px;align-items:center">
+                <label for="repro-trackfor">Отслеживать:</label>
+                <select id="repro-trackfor" class="text_pole">
+                    <option value="user">Меня</option><option value="char">Бота</option><option value="both">Обоих</option>
                 </select>
             </div>
-            <div style="display:flex;gap:4px;align-items:center" title="Кто может забеременеть. Авто: женщина в любой роли (в т.ч. альфа), мужчина — только омега. Выбери вручную, если тела нестандартные">
-                <span style="font-size:9px;opacity:0.5">Вынашивает:</span>
-                <select id="repro-carrier-mode" class="text_pole" style="flex:1">
-                    <option value="auto">Авто (по телу и роли)</option>
-                    <option value="user">Только я</option>
-                    <option value="char">Только персонаж</option>
-                    <option value="both">Оба</option>
+            <div style="display:flex;gap:4px;align-items:center">
+                <span>Вынашивание:</span>
+                <select id="repro-carrier-mode" class="text_pole">
+                    <option value="user">Вынашиваю я</option>
+                    <option value="char">Вынашивает бот</option>
+                    <option value="both">Вынашиваем оба</option>
                     <option value="none">Никто</option>
                 </select>
             </div>
-            <div style="display:flex;gap:4px;align-items:center" title="Обычный мир или омегаверс (течки/гоны вместо цикла)">
-                <span style="font-size:9px;opacity:0.5">Вселенная:</span>
-                <select id="repro-universe" class="text_pole" style="flex:1">
+            <div style="display:flex;gap:4px;align-items:center">
+                <label for="repro-universe">Вселенная:</label>
+                <select id="repro-universe" class="text_pole" title="В омегаверсе течка совпадает с овуляторной фазой цикла">
                     <option value="normal">Обычная</option>
-                    <option value="omegaverse">Омегаверс (A/B/O)</option>
+                    <option value="omegaverse">Омегаверс</option>
                 </select>
             </div>
-            <div id="repro-abo-panel" style="display:none;gap:4px;flex-direction:column">
-                <div style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5;min-width:52px">Я:</span>
-                    <select id="repro-user-desig" class="text_pole" style="flex:1">
-                        <option value="omega">Омега (течки)</option>
-                        <option value="alpha">Альфа (гон)</option>
-                        <option value="beta">Бета</option>
-                    </select>
-                    <select id="repro-user-sex" class="text_pole" style="width:62px" title="Пол: от него зависят месячные">
-                        <option value="female">Жен.</option>
-                        <option value="male">Муж.</option>
-                    </select>
-                    <label class="checkbox_label" style="margin:0" title="Супрессанты глушат течку"><input type="checkbox" id="repro-user-suppr"><span style="font-size:9px;opacity:0.6">супр.</span></label>
-                </div>
-                <div style="display:flex;gap:4px;align-items:center">
-                    <span style="font-size:9px;opacity:0.5;min-width:52px">Персонаж:</span>
-                    <select id="repro-char-desig" class="text_pole" style="flex:1">
-                        <option value="alpha">Альфа (гон)</option>
-                        <option value="omega">Омега (течки)</option>
-                        <option value="beta">Бета</option>
-                    </select>
-                    <select id="repro-char-sex" class="text_pole" style="width:62px" title="Пол: от него зависят месячные">
-                        <option value="male">Муж.</option>
-                        <option value="female">Жен.</option>
-                    </select>
-                    <label class="checkbox_label" style="margin:0" title="Супрессанты глушат течку"><input type="checkbox" id="repro-char-suppr"><span style="font-size:9px;opacity:0.6">супр.</span></label>
-                </div>
-                <small style="opacity:0.4;font-size:8px;line-height:1.3">Месячные идут у женщин в любой роли (омега/бета/альфа). У мужчин цикла нет — только течка или гон.</small>
-                <div style="display:flex;gap:4px;align-items:center" title="Длина полного цикла и сколько длятся сами течка/гон">
-                    <span style="font-size:9px;opacity:0.5">Цикл:</span>
-                    <input type="number" id="repro-abo-len" class="text_pole" style="width:46px" min="7" max="180">
-                    <span style="font-size:9px;opacity:0.5">дн. · течка</span>
-                    <input type="number" id="repro-heat-dur" class="text_pole" style="width:38px" min="1" max="14">
-                    <span style="font-size:9px;opacity:0.5">· гон</span>
-                    <input type="number" id="repro-rut-dur" class="text_pole" style="width:38px" min="1" max="14">
-                </div>
-                <!-- Компактные окна носителей — как блок менструации в обычном режиме -->
-                <div id="repro-abo-user-box" style="display:none;flex-direction:column;gap:3px">
-                    <div id="repro-abo-user-info" class="rp-cycle-info"></div>
-                    <div style="display:flex;gap:4px;align-items:center">
-                        <span style="font-size:9px;opacity:0.5">День:</span>
-                        <input type="number" id="repro-abo-user-day" class="text_pole" style="width:46px" min="1" max="180">
-                        <button id="repro-abo-user-set" class="menu_button">${ic('fa-check')}</button>
-                    </div>
-                </div>
-                <div id="repro-abo-char-box" style="display:none;flex-direction:column;gap:3px">
-                    <div id="repro-abo-char-info" class="rp-cycle-info"></div>
-                    <div style="display:flex;gap:4px;align-items:center">
-                        <span style="font-size:9px;opacity:0.5">День:</span>
-                        <input type="number" id="repro-abo-char-day" class="text_pole" style="width:46px" min="1" max="180">
-                        <button id="repro-abo-char-set" class="menu_button">${ic('fa-check')}</button>
-                    </div>
-                </div>
+            <div id="repro-role-settings">
+                <div class="rp-setting-row"><label for="repro-user-desig">Я:</label><select id="repro-user-desig" class="text_pole"><option value="alpha">Альфа</option><option value="beta">Бета</option><option value="omega">Омега</option></select></div>
+                <div class="rp-setting-row"><label for="repro-char-desig">Бот:</label><select id="repro-char-desig" class="text_pole"><option value="alpha">Альфа</option><option value="beta">Бета</option><option value="omega">Омега</option></select></div>
+            </div>
+            <label class="checkbox_label"><input type="checkbox" id="repro-menstruation-enabled"><span>Месячные включены</span></label>
+            <div id="repro-partner-cycle-row">
+                <span id="repro-partner-cycle-info"></span>
+                <input id="repro-partner-cycle-day" class="text_pole" type="number" min="1" max="28">
+                <button id="repro-partner-cycle-set" class="menu_button">Установить день бота</button>
             </div>
             <hr>
-            <label class="checkbox_label" title="Героиня не знает о зачатии, пока не сделает тест или срок не станет очевидным"><input type="checkbox" id="repro-hidden-preg"><span>Скрытая беременность (тест)</span></label>
+            <label class="checkbox_label" title="Скрывать неподтверждённую беременность; учитывать тесты, раскрытие и факты текущей сцены"><input type="checkbox" id="repro-hidden-preg"><span>Скрытая беременность (тест)</span></label>
             <div id="repro-contraception-user-box" style="display:flex;gap:4px;align-items:center">
                 <span id="repro-contra-user-label" style="font-size:9px;opacity:0.5">Контрацепция {{user}}:</span>
                 <select id="repro-contraception-user" class="text_pole" style="flex:1">
@@ -1733,7 +1587,7 @@ export function setupUI() {
                         <option value="m">мес.</option>
                         <option value="y">лет</option>
                     </select>
-                    <input type="text" id="repro-mb-father" class="text_pole" style="flex:1" maxlength="60" placeholder="Отец (необязательно)">
+                    <input type="text" id="repro-mb-father" class="text_pole" style="flex:1" maxlength="60" placeholder="Второй родитель (необязательно)">
                 </div>
                 <input type="text" id="repro-mb-personality" class="text_pole" maxlength="200" placeholder="Характер: спокойный, любопытный (через запятую)" title="Черты характера через запятую — попадут в инфоблок и в промпт для модели">
                 <input type="text" id="repro-mb-appearance" class="text_pole" maxlength="200" placeholder="Внешность: мамины глаза, тёмные волосы (через запятую)" title="Черты внешности через запятую — попадут в инфоблок и в промпт для модели">
@@ -1851,54 +1705,30 @@ export function setupUI() {
             syncUI();
             setTimeout(() => { import('./message-handler.js').then(m => m.renderInfoblock()); }, 60);
         };
+        for (const who of ['user','char']) {
+            $(`#repro-${who}-desig`).on('change', function() {
+                getSettings()[who === 'char' ? 'charDesignation' : 'userDesignation'] = this.value;
+                (who === 'char' ? getPartnerData() : getPregnancyData())._dynamic = {};
+                refreshAll();
+            });
+        }
         $('#repro-trackfor').on('change', function() { getSettings().trackFor = this.value; refreshAll(); });
-        $('#repro-carrier-mode').on('change', function() { getSettings().carrierMode = this.value; refreshAll(); });
-        $('#repro-universe').on('change', function() { getSettings().universe = this.value; refreshAll(); });
-        $('#repro-user-desig').on('change', function() { getSettings().userDesignation = this.value; refreshAll(); });
-        $('#repro-char-desig').on('change', function() { getSettings().charDesignation = this.value; refreshAll(); });
-        $('#repro-user-sex').on('change', function() { getSettings().userSex = this.value; refreshAll(); });
-        $('#repro-char-sex').on('change', function() { getSettings().charSex = this.value; refreshAll(); });
-        $('#repro-user-suppr').on('change', function() { getPregnancyData().heatSuppressant = this.checked; refreshAll(); });
-        $('#repro-char-suppr').on('change', function() { getPartnerData().heatSuppressant = this.checked; refreshAll(); });
-        // Длина цикла — ОДНА на течку и гон (проще: «цикл N дней»)
-        $('#repro-abo-len').on('change', function() {
-            const v = Math.max(7, Math.min(180, parseInt(this.value) || 30));
-            $(this).val(v);
-            const s2 = getSettings();
-            s2.heatCycleLength = v;
-            s2.rutCycleLength = v;
+        $('#repro-menstruation-enabled').on('change', function() {
+            getSettings().menstruationEnabled = this.checked;
+            getPregnancyData()._dynamic = {}; getPartnerData()._dynamic = {};
             refreshAll();
         });
-        const aboNum = (id, prop, min, max) => $('#' + id).on('change', function() {
-            const v = Math.max(min, Math.min(max, parseInt(this.value) || min));
-            $(this).val(v); getSettings()[prop] = v; refreshAll();
-        });
-        aboNum('repro-heat-dur', 'heatDuration', 1, 14);
-        aboNum('repro-rut-dur', 'rutDuration', 1, 14);
-
-        // Установка текущего дня цикла носителя (как «День цикла» в обычном режиме)
-        const applyAboDay = (who) => {
-            if (warnIfNoChat()) return;
-            const s2 = getSettings();
-            const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
-            const desig = designationOf(s2, who);
-            const len = (desig === 'alpha' ? s2.rutCycleLength : s2.heatCycleLength) || 30;
-            const v = Math.max(1, Math.min(len, parseInt($(`#repro-abo-${who}-day`).val()) || 1));
-            $(`#repro-abo-${who}-day`).val(v);
-            if (desig === 'alpha') carrier.rutCycleDay = v; else carrier.heatCycleDay = v;
-            carrier._userSetCycleAt = Date.now();
-            import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
-            // В уведомлении говорим ФАЗУ, а не «день гона» — день 1 может быть обычным
-            const st = carrierAboStatus(carrier, desig, s2);
-            showNotification(`${carrierName(who)}: день ${v}/${len} — ${st.label}`, 'success');
+        $('#repro-carrier-mode').on('change', function() { getSettings().carrierMode = this.value; getPregnancyData(); getPartnerData(); refreshAll(); });
+        $('#repro-universe').on('change', function() { getSettings().universe = this.value; refreshAll(); });
+        const applyPartnerCycle = () => {
+            setManualCycleDay('char', $('#repro-partner-cycle-day').val());
             refreshAll();
         };
-        $('#repro-abo-user-set').on('click', () => applyAboDay('user'));
-        $('#repro-abo-char-set').on('click', () => applyAboDay('char'));
-        $('#repro-abo-user-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('user'); } });
-        $('#repro-abo-char-day').on('keydown', function(e) { if (e.key === 'Enter') { e.preventDefault(); applyAboDay('char'); } });
-
-        $('#repro-hidden-preg').on('change', function() { getSettings().hiddenPregnancy = this.checked; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
+        $('#repro-partner-cycle-set').on('click', applyPartnerCycle);
+        $('#repro-partner-cycle-day').on('change', applyPartnerCycle).on('keydown', function(e) {
+            if (e.key === 'Enter') { e.preventDefault(); applyPartnerCycle(); }
+        });
+        $('#repro-hidden-preg').on('change', function() { getSettings().hiddenPregnancy = this.checked; refreshAll(); });
         $('#repro-contraception-user').on('change', function() { const s = getSettings(); s.contraceptionUser = this.value; s.contraception = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
         $('#repro-contraception-char').on('change', function() { const s = getSettings(); s.contraceptionChar = this.value; saveSettingsDebounced(); updatePromptInjection(); syncUI(); });
 
@@ -1926,9 +1756,8 @@ export function setupUI() {
             if (warnIfNoChat()) return;
             v = Math.max(1, Math.min(28, parseInt(v) || 14));
             $('#repro-cycleday').val(v);
-            setCycleDay(v, true, true);
-            // ВАЖНО: обновляем regen-snapshot, иначе swipe/regen откатит ручное значение.
-            import('./message-handler.js').then(m => m.refreshRegenSnapshot());
+            setManualCycleDay('user', v);
+
             saveSettingsDebounced();
             setTimeout(() => { updatePromptInjection(); syncUI(); }, 50);
         };
@@ -2117,6 +1946,6 @@ export function setupUI() {
 
         syncUI();
     } catch (error) {
-        console.error('[Reproductive] setupUI error:', error);
+        reportError('[Reproductive] setupUI error:', error);
     }
 }

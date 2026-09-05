@@ -4,8 +4,8 @@
 
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES } from './config.js';
-import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, carrierName, L, getContraception, syncBabyLegacyFields } from './state.js';
-import { isOmegaverse, designationOf, carrierAboStatus, getCfg, canCarry, hasMenstrualCycle } from './omegaverse.js';
+import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, L, getContraception, syncBabyLegacyFields } from './state.js';
+import { canCarry, hasMenstrualCycle } from './omegaverse.js';
 import { rollTest, isObvious, postpartumState, fertileWindow, inheritLooks, conceptionStruggle, missedDays } from './fertility.js';
 import { roll, getCycleModifier, formatSexIcons, formatFetusCount, calculateWeeksFromDates, getHealthInfo, rollPlannedComplications } from './helpers.js';
 import { calculateConceptionDate } from './date-parser.js';
@@ -59,8 +59,8 @@ export function resolveBirthRpDate(carrier, root, s = getSettings(), source = 't
 
 export function createUndoCheckpoint(label = 'Изменение') {
     const p = getPregnancyData();
-    const snapshot = structuredClone(p);
-    delete snapshot._undoSnapshot;
+    const { _history, _undoSnapshot, _turnBaseline, ...current } = p;
+    const snapshot = structuredClone(current);
     p._undoSnapshot = { label, createdAt: Date.now(), state: snapshot };
     return p._undoSnapshot;
 }
@@ -140,7 +140,7 @@ export function applyScanResult(result) {
     }
 
     // День цикла
-    if (result.cycle_day !== null && result.cycle_day !== undefined) {
+    if (result.cycle_day !== null && result.cycle_day !== undefined && (result._source === 'manual' || !isManualCycleProtected('user'))) {
         const day = parseInt(result.cycle_day);
         const current = getCycleDay();
         if (day >= 1 && day <= 28 && day !== current) {
@@ -484,14 +484,9 @@ export function checkConception() {
     s.totalChecks++;
 
     const currentCycleDay = getCycleDay();
-    // В омегаверсе у женщин обычный 28-дневный цикл продолжает иметь значение.
-    // Для омеги течка дополнительно усиливает/ослабляет фертильность; у носителя без
-    // месячных (например, мужчина-омега) шанс определяется только течкой.
+    // Fertility comes from the same cycle day used by UI and prompts.
     let cycleModifier = hasMenstrualCycle(s, 'user') ? getCycleModifier(currentCycleDay) : 1;
-    if (isOmegaverse(s)) {
-        const abo = carrierAboStatus(p, designationOf(s, 'user'), s);
-        if (designationOf(s, 'user') === 'omega') cycleModifier *= (abo.fertility ?? 1);
-    }
+
     let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
     // Послеродовой период: пока цикл не вернулся, зачатие почти невозможно
@@ -617,7 +612,6 @@ export function terminatePregnancy(reason) {
             s._lastConceptionRollAt = null;
         }
     } catch (e) {}
-    refreshSnap();
     saveSettingsDebounced();
     _syncUI();
     _updatePromptInjection();
@@ -1042,10 +1036,7 @@ export function partnerCheckConception() {
 
     s.totalChecks++;
     let cycleModifier = hasMenstrualCycle(s, 'char') ? getCycleModifier(c.cycleDay || 1) : 1;
-    if (isOmegaverse(s)) {
-        const st = carrierAboStatus(c, designationOf(s, 'char'), s);
-        if (designationOf(s, 'char') === 'omega') cycleModifier *= (st.fertility ?? 1);
-    }
+
     let chance = Math.max(0, Math.min(100, Math.round(CHANCES.base * cycleModifier)));
 
     const contraception = getContraception('char');
@@ -1061,6 +1052,8 @@ export function partnerCheckConception() {
 
     if (success) {
         c.isPregnant = true;
+        c.pregnancyKnown = !s.hiddenPregnancy;
+        c.lastTestResult = null;
         s._birthBlockedUntilChar = null;
         c.conceptionDate = p.rpDate || null;
         c._conceptionAnchored = !!p.rpDate;
@@ -1082,7 +1075,6 @@ export function partnerCheckConception() {
     }
 
     saveSettingsDebounced();
-    refreshSnap();
     _syncUI();
     _updatePromptInjection();
     return { success, roll: r, chance };
@@ -1261,7 +1253,8 @@ export function daysSinceConception(carrier, root) {
 // Знает ли героиня о беременности (по факту теста или очевидному сроку)
 export function pregnancyIsKnown(carrier, s) {
     if (!carrier?.isPregnant) return false;
-    if (carrier.pregnancyKnown) return true;
+    if (s?.hiddenPregnancy === false) return true;
+    if (carrier.pregnancyKnown || ['positive', 'faint'].includes(carrier.lastTestResult)) return true;
     return isObvious(carrier.pregnancyWeeks || 0, s?.obviousAtWeek || 12);
 }
 

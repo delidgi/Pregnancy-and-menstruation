@@ -9,28 +9,28 @@
 // перепишет «CONCEPTION_CHECK» в тексте без обёртки в комментарий, это НЕ должно срабатывать.
 
 // Тег срабатывает ТОЛЬКО если находится внутри HTML-комментария <!-- ... -->
-const CONCEPTION_RE_STRICT = /<!--[\s\S]*?\[CONCEPTION_CHECK\][\s\S]*?-->/i;
-const BIRTH_RE_STRICT = /<!--[\s\S]*?\[BIRTH\][\s\S]*?-->/i;
+const CONCEPTION_RE_STRICT = /<!--(?:(?!-->)[\s\S])*?\[CONCEPTION_CHECK\](?:(?!-->)[\s\S])*?-->/i;
+const BIRTH_RE_STRICT = /<!--(?:(?!-->)[\s\S])*?\[BIRTH\](?:(?!-->)[\s\S])*?-->/i;
 // Прерывание беременности: выкидыш / аборт — тоже только в комментариях
-const MISCARRIAGE_RE_STRICT = /<!--[\s\S]*?\[MISCARRIAGE\][\s\S]*?-->/i;
-const ABORTION_RE_STRICT = /<!--[\s\S]*?\[ABORTION\][\s\S]*?-->/i;
+const MISCARRIAGE_RE_STRICT = /<!--(?:(?!-->)[\s\S])*?\[MISCARRIAGE\](?:(?!-->)[\s\S])*?-->/i;
+const ABORTION_RE_STRICT = /<!--(?:(?!-->)[\s\S])*?\[ABORTION\](?:(?!-->)[\s\S])*?-->/i;
 
 // CYCLE_DAY — тоже только в комментарии (с группой захвата числа)
-const CYCLE_DAY_RE = /<!--[\s\S]*?\[CYCLE_DAY[:\s]+(\d+)\][\s\S]*?-->/i;
+const CYCLE_DAY_RE = /<!--(?:(?!-->)[\s\S])*?\[CYCLE_DAY[:\s]+(\d+)\](?:(?!-->)[\s\S])*?-->/i;
 
 // RP_DATE — тоже только в комментарии (это важно — модель часто пишет даты в prose)
 // Поддержка опционального времени HH:MM после даты (разделитель: пробел, T, запятая)
-const RP_DATE_RE_DOT = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\.(\d{1,2})\.(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
-const RP_DATE_RE_SLASH = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{1,2})\/(\d{1,2})\/(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
-const RP_DATE_RE_ISO = /<!--[\s\S]*?\[RP_DATE[:\s]+\s*(\d{4})-(\d{1,2})-(\d{1,2})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\][\s\S]*?-->/i;
+const RP_DATE_RE_DOT = /<!--(?:(?!-->)[\s\S])*?\[RP_DATE[:\s]+\s*(\d{1,2})\.(\d{1,2})\.(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\](?:(?!-->)[\s\S])*?-->/i;
+const RP_DATE_RE_SLASH = /<!--(?:(?!-->)[\s\S])*?\[RP_DATE[:\s]+\s*(\d{1,2})\/(\d{1,2})\/(\d{1,4})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\](?:(?!-->)[\s\S])*?-->/i;
+const RP_DATE_RE_ISO = /<!--(?:(?!-->)[\s\S])*?\[RP_DATE[:\s]+\s*(\d{4})-(\d{1,2})-(\d{1,2})(?:[\s,T]+(\d{1,2}):(\d{2}))?\s*\](?:(?!-->)[\s\S])*?-->/i;
 
 // Sex reveal — только в HTML-комментарии
-const SEX_REVEAL_RE_STRICT = /<!--[\s\S]*?\[SEX_REVEAL\][\s\S]*?-->/i;
+const SEX_REVEAL_RE_STRICT = /<!--(?:(?!-->)[\s\S])*?\[SEX_REVEAL\](?:(?!-->)[\s\S])*?-->/i;
 
 // ── Теги носителя-ПЕРСОНАЖА (суффикс :CHAR) — беременность {{char}}, не юзера ──
-const CONCEPTION_CHAR_RE = /<!--[\s\S]*?\[CONCEPTION_CHECK:CHAR\][\s\S]*?-->/i;
-const BIRTH_CHAR_RE = /<!--[\s\S]*?\[BIRTH:CHAR\][\s\S]*?-->/i;
-const SEX_REVEAL_CHAR_RE = /<!--[\s\S]*?\[SEX_REVEAL:CHAR\][\s\S]*?-->/i;
+const CONCEPTION_CHAR_RE = /<!--(?:(?!-->)[\s\S])*?\[CONCEPTION_CHECK:CHAR\](?:(?!-->)[\s\S])*?-->/i;
+const BIRTH_CHAR_RE = /<!--(?:(?!-->)[\s\S])*?\[BIRTH:CHAR\](?:(?!-->)[\s\S])*?-->/i;
+const SEX_REVEAL_CHAR_RE = /<!--(?:(?!-->)[\s\S])*?\[SEX_REVEAL:CHAR\](?:(?!-->)[\s\S])*?-->/i;
 
 function extractRevealedSexes(text) {
     if (!text) return null;
@@ -54,7 +54,7 @@ function extractRevealedSexes(text) {
 // по инерции — на сцену с игрушкой, на чужой секс, просто потому что тег мелькал
 // в контексте. Слов «секс», «член», «трах» недостаточно: они есть в любой сцене.
 function looksLikeInternalRelease(text) {
-    const releaseInside = /(?:сперм|семен|семя|creampie|cum(?:s|ming|med)?\s+(?:in|inside|into)|(?:came|come|coming)\s+(?:in|inside|into)|fill(?:s|ed|ing)?\s+(?:her|you|me)\b|конч(?:ил|ила|ает|аю|аешь|ая)\s+(?:в|внутр)|изли(?:в|л)[а-яё]*\s+(?:в|внутр)|залива(?:л|ла|ет)\s+(?:в|внутр)|заполн(?:ил|ила|яет)\s+(?:её|ее|тебя|меня|лоно|матк)|внутри\s+(?:неё|нее|тебя|меня))/i;
+    const releaseInside = /(?:сперм|семен|семя|semen|creampie|cum(?:s|ming|med)?\s+(?:in|inside|into)|(?:came|come|coming)\s+(?:in|inside|into)|fill(?:s|ed|ing)?\s+(?:her|you|me)\b|конч(?:ил|ила|ает|аю|аешь|ая)\s+(?:в|внутр)|изли(?:в|л)[а-яё]*\s+(?:в|внутр)|залива(?:л|ла|ет)\s+(?:в|внутр)|заполн(?:ил|ила|яет)\s+(?:её|ее|тебя|меня|лоно|матк)|внутри\s+(?:неё|нее|тебя|меня))/i;
     // Омегаверс: сцепка узлом — тоже зачатие, но только если сказано «внутрь»
     const knotting = /(?:узл[аоеы]м?|узел|knot(?:s|ted|ting)?)\b/i.test(text)
         && /(?:внутр|inside|изли|сперм|семен|cum)/i.test(text);
@@ -62,7 +62,7 @@ function looksLikeInternalRelease(text) {
 
     // Игрушка упомянута, а спермы в тексте нет — тег ложный
     const toys = /(?:секс[- ]?игрушк|игрушк[иауео]?\s|дилдо|dildo|вибратор|vibrator|strap[- ]?on|страпон|фаллоимитатор|plug\b|пробк[ауи])/i;
-    const semen = /(?:сперм|семен|семя|creampie|cum|конч(?:ил|ила|ает)\s+(?:в|внутр))/i;
+    const semen = /(?:сперм|семен|семя|semen|creampie|cum|конч(?:ил|ила|ает)\s+(?:в|внутр))/i;
     if (toys.test(text) && !semen.test(text)) return false;
 
     return true;
@@ -475,7 +475,16 @@ export function stripThink(text) {
 // Исходник сообщения: теги живут в extra, если их уже отцепили от текста
 export function messageRaw(msg) {
     if (!msg) return '';
-    return (msg.extra && msg.extra.reproRaw) || msg.mes || '';
+    const current = msg.mes || '';
+    // New markers always belong to the current answer, never to a cached swipe.
+    if (hasReproTags(current)) return current;
+    if (msg.extra?.reproRawInvalid) return current;
+    const raw = msg.extra?.reproRaw;
+    if (typeof raw !== 'string') return current;
+    const savedSwipe = msg.extra?.reproRawSwipe;
+    if (savedSwipe !== undefined && savedSwipe !== (msg.swipe_id ?? null)) return current;
+    // Also validates legacy caches without metadata. An edit invalidates the cache.
+    return stripReproTags(raw) === current ? raw : current;
 }
 
 // Наши технические комментарии — перечисляем поимённо, чтобы не задеть

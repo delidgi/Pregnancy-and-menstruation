@@ -1,12 +1,16 @@
+import { reportError } from './diagnostics.js';
 // ═══════════════════════════════════════════
 // STATE — доступ к настройкам и данным
 // ═══════════════════════════════════════════
 
+import { carrierMode, canCarry } from './omegaverse.js';
 import { extension_settings } from '../../../extensions.js';
 import { extensionName, defaultPregnancyData, defaultPartnerData, LANG } from './config.js';
 
 export function getSettings() {
-    return extension_settings[extensionName];
+    const s = extension_settings[extensionName];
+    if (s) { s.carrierMode = carrierMode(s); if (!['user', 'char', 'both', 'none'].includes(s.trackFor)) s.trackFor = s.carrierMode; s.debugKeepTags = false; }
+    return s;
 }
 
 
@@ -225,16 +229,10 @@ export function getPregnancyData() {
     if (!s.chatPregnancyData[chatId]) {
         const fresh = structuredClone(defaultPregnancyData);
         // Каждый новый чат стартует в случайной фазе цикла, а не всегда с 1-го дня
-        const heatLen = Math.max(7, parseInt(s.heatCycleLength) || 30);
-        const rutLen = Math.max(7, parseInt(s.rutCycleLength) || 30);
         fresh.cycleDay = 1 + Math.floor(Math.random() * 28);
-        fresh.heatCycleDay = 1 + Math.floor(Math.random() * heatLen);
-        fresh.rutCycleDay = 1 + Math.floor(Math.random() * rutLen);
         fresh.lastCycleUpdate = Date.now();
         fresh.partner = structuredClone(defaultPartnerData);
         fresh.partner.cycleDay = 1 + Math.floor(Math.random() * 28);
-        fresh.partner.heatCycleDay = 1 + Math.floor(Math.random() * heatLen);
-        fresh.partner.rutCycleDay = 1 + Math.floor(Math.random() * rutLen);
         s.chatPregnancyData[chatId] = fresh;
     }
 
@@ -265,7 +263,7 @@ export function getCarriers() {
     const list = [];
     if (mode === 'user' || mode === 'both') list.push({ who: 'user', data: getPregnancyData() });
     if (mode === 'char' || mode === 'both') list.push({ who: 'char', data: getPartnerData() });
-    if (list.length === 0) list.push({ who: 'user', data: getPregnancyData() });
+
     return list;
 }
 
@@ -281,10 +279,7 @@ export function carrierName(who) {
 }
 
 // Отслеживается ли носитель
-export function isTracked(who) {
-    const mode = getSettings()?.trackFor || 'user';
-    return mode === 'both' || mode === who;
-}
+export function isTracked(who) { const mode = getSettings()?.trackFor || 'user'; return mode === 'both' || mode === who; }
 
 export function L(key) {
     try {
@@ -297,7 +292,7 @@ export function L(key) {
         }
         return result || key;
     } catch (e) {
-        console.error('[Reproductive] L() error:', key, e);
+        reportError('[Reproductive] L() error:', key, e);
         return key;
     }
 }
@@ -305,7 +300,7 @@ export function L(key) {
 // ─── Cycle day accessors (per-chat) ───
 export function getCycleDay() {
     const p = getPregnancyData();
-    if (typeof p.cycleDay === 'number' && p.cycleDay >= 1 && p.cycleDay <= 28) {
+    if (typeof p.cycleDay === 'number' && p.cycleDay >= 1 && p.cycleDay <= 28 + Math.max(0, parseInt(p._cycleShift) || 0)) {
         return p.cycleDay;
     }
     const s = getSettings();
@@ -324,9 +319,17 @@ export function setCycleDay(day, updateTimestamp = true, isUserAction = false) {
     p.cycleDay = d;
     if (updateTimestamp) p.lastCycleUpdate = Date.now();
     if (isUserAction) {
+        p._dynamic = {};
         // Метка ручной установки цикла — защита от auto-advance в advanceTime
         // (бот-ответ с новым RP_DATE не должен затирать день, выставленный юзером)
         p._userSetCycleAt = Date.now();
     }
     return d;
+}
+
+// A stale CYCLE_DAY tag from the regenerated reply cannot override a manual edit.
+export function isManualCycleProtected(who = 'user') {
+    const c = who === 'char' ? getPartnerData() : getPregnancyData();
+    const position = typeof SillyTavern?.getContext === 'function' ? SillyTavern.getContext().chat?.length || 0 : 0;
+    return Number.isInteger(c._manualCyclePosition) && position <= c._manualCyclePosition;
 }
