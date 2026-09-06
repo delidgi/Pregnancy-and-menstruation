@@ -68,13 +68,21 @@ function looksLikeInternalRelease(text) {
     return true;
 }
 
+// The event marker alone must not turn contractions or plans into a newborn.
+export function hasCompletedDelivery(text) {
+    const scene = stripThink(text).replace(/<!--[\s\S]*?-->/g, '').replace(/\[OOC:[\s\S]*?\]/gi, '');
+    return scene.split(/[.!?\n]+/).some(line =>
+        !/(?:ещ[её] не|не (?:родил|родила|родился|родилась)|not yet|has not|hasn't|will be|would|could|будет|когда|если|вспомин|в прошлом|(?:^|\s)бы(?:\s|$))/i.test(line)
+        && /(?:родил(?:а|ся|ась|ись)?[ ,]|появил(?:ся|ась|ись) на свет|реб[её]нок родился|малыш родился|gave birth|was born|were born|has been born|delivered (?:the |a )?bab)/i.test(line + ' '));
+}
+
 // Сканер: ловит ТОЛЬКО теги внутри HTML-комментариев. Никаких keyword fallback —
 // если модель не поставила тег, расширка ничего не делает (это безопаснее для РП).
 export function scanMessage(text) {
     if (!text) return null;
 
     let hasConception = CONCEPTION_RE_STRICT.test(text);
-    const hasBirth = BIRTH_RE_STRICT.test(text);
+    const hasBirth = BIRTH_RE_STRICT.test(text) && hasCompletedDelivery(text);
     const hasSexReveal = SEX_REVEAL_RE_STRICT.test(text);
     let hasMiscarriage = MISCARRIAGE_RE_STRICT.test(text);
     let hasAbortion = ABORTION_RE_STRICT.test(text);
@@ -107,7 +115,7 @@ export function scanMessage(text) {
 
     // ── Теги носителя-персонажа (suffix :CHAR) ──
     let hasCharConception = CONCEPTION_CHAR_RE.test(text);
-    const hasCharBirth = BIRTH_CHAR_RE.test(text);
+    const hasCharBirth = BIRTH_CHAR_RE.test(text) && hasCompletedDelivery(text);
     const hasCharSexReveal = SEX_REVEAL_CHAR_RE.test(text);
     if (hasCharConception && !looksLikeInternalRelease(text.replace(/<!--[\s\S]*?-->/g, ''))) {
         hasCharConception = false;
@@ -213,7 +221,8 @@ export function scanPregnancyStateTag(text) {
     }
 
     // Нормализуем остальные поля
-    const fetusCount = Math.max(1, Math.min(4, parseInt(json.fetus_count || json.fetusCount || 1) || 1));
+    const suppliedCount = Number(json.fetus_count ?? json.fetusCount);
+    const fetusCount = Number.isInteger(suppliedCount) && suppliedCount >= 1 && suppliedCount <= 4 ? suppliedCount : null;
     let fetusSex = json.fetus_sex || json.fetusSex || json.sex;
     if (typeof fetusSex === 'string') {
         fetusSex = fetusSex.split(/[,;\s]+/).map(s => s.trim()).filter(Boolean);
@@ -225,13 +234,14 @@ export function scanPregnancyStateTag(text) {
         if (u === 'F' || u === 'FEMALE' || u === 'GIRL' || u === 'ДЕВОЧКА' || u === 'Д' || u === 'Ж') return 'F';
         return '?';
     });
-    while (fetusSex.length < fetusCount) fetusSex.push('?');
+    while (fetusSex.length < (fetusCount || 0)) fetusSex.push('?');
 
     const father = (json.father || json.father_name || json.fatherName || '').toString().slice(0, 80);
 
     const result = {
         conceptionDate: conceptionIso,
         fetusCount: fetusCount,
+        fetusCountConfirmed: json.fetus_count_confirmed === true,
         fetusSex: fetusSex,
         fatherName: father,
     };
@@ -424,6 +434,8 @@ export function scanDateTag(text) {
     if (m) return _parseDate(parseInt(m[1]), parseInt(m[2]), parseInt(m[3]), m[4], m[5]);
     m = text.match(RP_DATE_RE_ISO);
     if (m) return _parseDate(parseInt(m[3]), parseInt(m[2]), parseInt(m[1]), m[4], m[5]);
+    const phone = text.match(/<!--\s*tel:time:(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s*-->/i);
+    if (phone) return _parseDate(+phone[3], +phone[4], +phone[5], phone[1], phone[2]);
     return null;
 }
 
@@ -431,11 +443,12 @@ function _parseDate(day, month, year, hourStr, minStr) {
     if (day < 1 || day > 31 || month < 1 || month > 12 || year < 1) return null;
     if (year < 100) year += 2000;
     const d = new Date(year, month - 1, day);
-    if (isNaN(d.getTime())) return null;
+    if (isNaN(d.getTime()) || d.getFullYear() !== year || d.getMonth() !== month - 1 || d.getDate() !== day) return null;
     // Прикрепляем время к объекту Date (не-стандартное свойство)
     if (hourStr !== undefined && minStr !== undefined) {
         const h = parseInt(hourStr);
         const mn = parseInt(minStr);
+        if (!(h >= 0 && h <= 23 && mn >= 0 && mn <= 59)) return null;
         if (h >= 0 && h <= 23 && mn >= 0 && mn <= 59) {
             d.setHours(h, mn, 0, 0);
             d.rpTime = `${String(h).padStart(2, '0')}:${String(mn).padStart(2, '0')}`;

@@ -11,8 +11,10 @@ import { initCustomNotifications } from './notifications.js';
 import { setSyncUI, setUpdatePromptInjection, setRenderInfoblock } from './pregnancy.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, setupUI } from './ui.js';
-import { onMessageReceived, onMessageSent, renderInfoblock, markRegeneration, prepareGeneration, processDateTag, rescanStatusOnly, rollbackToPosition, clearRegenState, detachTags, rawTextOf } from './message-handler.js';
+import { onMessageReceived, onMessageSent, renderInfoblock, markRegeneration, prepareGeneration, processDateTag, rescanStatusOnly, rollbackToPosition, clearRegenState, detachTags, rawTextOf, prepareTrackerOutput, filterTrackerContext } from './message-handler.js';
 import { stripHiddenTags, scanFullHistory } from './scanner.js';
+
+window.reproductiveSystemContextFilter = filterTrackerContext;
 
 // ── Load CSS ──
 const cssId = 'reproductive-system-css';
@@ -219,14 +221,11 @@ jQuery(async () => {
                         finalStatusSeen.set(msg, raw);
                     }
                 } catch (e) { /* ignore */ }
-                // Отцепляем теги от текста: в контекст модели они больше не уходят,
-                // исходник остаётся в msg.extra.reproRaw для повторных сканов.
-                try {
-                    if (detachTags(msg)) {
-                        const ctx = SillyTavern.getContext();
-                        if (ctx?.saveChat) ctx.saveChat();
-                    }
-                } catch (e) { /* ignore */ }
+                // Keep technical comments in the saved source; HTML already hides them.
+                if (prepareTrackerOutput(msg)) {
+                    processDateTag(msg.mes);
+                    if (context.saveChat) context.saveChat();
+                }
                 // Скрываем теги только в отображаемом DOM. msg.mes оставляем исходным:
                 // технические комментарии нужны при повторном скане, swipe и открытии чата.
                 if (

@@ -94,9 +94,11 @@ function pickInherited(a, b, ranks, rnd) {
 
 function normalizeTrait(v, ranks) {
     if (!v || typeof v !== 'string') return null;
-    const low = v.toLowerCase();
+    const low = v.toLowerCase().replace(/ё/g, 'е');
+    if (ranks === HAIR_RANK && /брюнет|black/.test(low)) return 'чёрные';
+    if (ranks === HAIR_RANK && /блон|blond/.test(low)) return 'светлые';
     for (const key of Object.keys(ranks)) {
-        if (low.includes(key.slice(0, 4))) return key;
+        if (low.includes(key.replace(/ё/g, 'е').slice(0, 3))) return key;
     }
     return null;
 }

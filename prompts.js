@@ -78,6 +78,7 @@ export function getBasePrompt() {
     const active = ['user', 'char'].filter(isTracked);
     if (!active.length && !p.hasBaby) return '';
     let b = `[TRACKER] Universe: ${isOmegaverse(s) ? 'OMEGAVERSE; omega has heat, alpha has rut, beta has neither. Active phase is days 12–16 of the same cycle' : 'NORMAL; ordinary ovulation, no omegaverse heat or rut'}. Tracking: ${active.join(', ') || 'none'}. Carriers: ${active.filter(w => canCarry(s, w)).join(', ') || 'none'} (explicit choice; never infer from anatomy or A/B/O). One 28-day cycle each.\n`;
+    if (p.rpDate) b += `RP clock: ${new Date(p.rpDate).toLocaleString('en-GB', {hour12:false})}. Advance only by time actually elapsed in the scene; do not skip to a due date.\n`;
     b += 'Identity: user={{user}} (player), char={{char}} (bot). RP_STATUS root describes ONLY user; partner describes ONLY char, regardless of narrator or pronouns. Never exchange their actions or body states. If uncertain, omit the field.\n';
     if (isOmegaverse(s)) b += active.map(w => `${w}=${designationOf(s,w)}`).join(', ') + '.\n';
     b += active.map(w => carrierCycleLine(w, s)).join(' | ') + '\n';
@@ -93,7 +94,7 @@ export function getBasePrompt() {
         }
     }
     const pregnant = active.some(w => (w === 'char' ? getPartnerData() : p).isPregnant);
-    if (pregnant) b += knowledgePrompt(s);
+    if (pregnant) b += knowledgePrompt(s) + 'Known character appearance from the story/cards only: RP_STATUS looks:{hair,eyes} for user, partner.looks for char. Omit unknown traits.\n';
     for (const who of active) {
         const c = who === 'char' ? getPartnerData() : p;
         if (c.isPregnant || !canCarry(s, who)) continue;
@@ -119,16 +120,20 @@ export function getBasePrompt() {
 function compactPregnancy(who, s) {
     const p = getPregnancyData(), c = who === 'char' ? getPartnerData() : p;
     if (!isTracked(who) || !c.isPregnant) return '';
-    if (!pregnancyIsKnown(c, s)) return `[${who}: discovery not recorded] Respect scene evidence; do not invent discovery.\n`;
+    const known = pregnancyIsKnown(c, s);
     const nm = who === 'char' ? '{{char}}' : '{{user}}';
     const suffix = who === 'char' ? ':CHAR' : '';
     const duration = s.pregnancyDuration || 40;
     const {weeks} = calculateWeeksFromDates(c.conceptionDate,p.rpDate,c.pregnancyWeeks);
     const pct = Math.round(weeks/duration*100);
-    let b = `[${nm} IS PREGNANT] ${weeks}/${duration} weeks (${pct}%), fetuses=${c.fetusCount||1}, sex=${c.fetusSexRevealed?sexToText(c.fetusSex):'unknown'}, health=${c.healthStatus||'normal'}. Cycle paused.\n`;
+    let b = `[${known ? nm + ' IS PREGNANT' : who + ' PRIVATE SIMULATION'}] ${weeks}/${duration} weeks (${pct}%), fetuses=${c.fetusCount||1}, sex=${c.fetusSexRevealed?sexToText(c.fetusSex):'unknown'}, health=${c.healthStatus||'normal'}. Cycle paused.\n`;
+    if (c.fatherName) b += `Second parent: ${JSON.stringify(c.fatherName)}; preserve this identity for the children.\n`;
+    b += 'BABY_TRAITS appearance must follow established parental descriptions and any explicit child description; do not invent hair/eye colours or unusual traits. If unknown, use an empty appearance array.\n';
+    if (!known) b += 'Discovery not recorded: these are private simulation facts, not character knowledge. Follow actual tests/disclosures in the scene.\n';
+    b += 'Tracker term and fetal count are authoritative; do not invent multiples or delivery. Due date alone never means a baby was born. An actual examination confirming a different count: RP_STATUS fetus_count (1–4) and fetus_count_confirmed:true, in partner for char.\n';
     if (duration !== 40) b += `Scale development and fetus_size to ${pct}% of full term, equivalent to about ${Math.round(pct*40/100)} human weeks.\n`;
     if (c.complications?.length) b += `Active complications: ${c.complications.filter(x=>!x.resolved).map(x=>x.type).join(', ')}.\n`;
-    b += `Only actual delivery, not contractions: <!-- [BIRTH${suffix}] --> and <!-- [BABY_TRAITS:{"babies":[{"name":"","fatherName":"","personality":[],"appearance":[]}]}] --> with scene facts.\n`;
+    b += `Only completed delivery at or after the configured term, never contractions or plans: <!-- [BIRTH${suffix}] --> and <!-- [BABY_TRAITS:{"babies":[{"name":"","fatherName":"","personality":[],"appearance":[]}]}] --> with scene facts.\n`;
     b += 'Optional pregnancy status fields: libido, weight_gain, baby_activity, movements, swelling, braxton_hicks, fetal_position, recommendations; use only when relevant to the current term and scene.\n';
     if (!c.fetusSexRevealed) b += `Medical sex reveal: <!-- [SEX_REVEAL${suffix}] -->.\n`;
     if (who === 'user') b += 'Only confirmed loss/completed termination: <!-- [MISCARRIAGE] --> or <!-- [ABORTION] -->; never for a scare, plan, or together with BIRTH.\n';

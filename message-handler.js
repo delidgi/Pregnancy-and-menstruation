@@ -4,7 +4,7 @@
 
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
 import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw } from './scanner.js';
-import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum } from './pregnancy.js';
+import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
 import { getPartnerData, carrierName, isTracked } from './state.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
 import { updateBabyCare } from './baby-care.js';
@@ -219,7 +219,10 @@ function runScan() {
     let dateAdvanced = processDateTag(text);
 
     // 1) Try tag-based detection (if model added tags)
+    const freshStatus = scanStatusTag(text);
+    if (freshStatus) applyStatusData(s, p, freshStatus);
     const tagResult = scanMessage(text);
+    if (tagResult?.birth_occurred && !canTriggerBirth(p, s, 'tag')) tagResult.birth_occurred = false;
     if (tagResult) {
         // Ignore conception tag when already pregnant
         if (p.isPregnant) {
@@ -364,19 +367,8 @@ function runScan() {
     }
     if (pregState && p.isPregnant) {
         let stateChanged = false;
-        if (p.conceptionDate !== pregState.conceptionDate) {
-            // Защита: если юзер недавно вручную выставил беременность — НЕ затираем его дату,
-            // даже если бот в PREGNANCY_STATE прислал другое (бот может пересчитать или округлить).
-            const userSetMs = p._userSetWeeksAt || 0;
-            const recentlyUserSet = userSetMs > 0 && (Date.now() - userSetMs) / 60000 < 30;
-            if (recentlyUserSet) {
-            } else {
-                p.conceptionDate = pregState.conceptionDate;
-                p._conceptionAnchored = true;
-                stateChanged = true;
-            }
-        }
-        if (p.fetusCount !== pregState.fetusCount) {
+        // Established conception date is tracker state. A model echo cannot redate it.
+        if (pregState.fetusCountConfirmed && pregState.fetusCount !== null && p.fetusCount !== pregState.fetusCount) {
             p.fetusCount = pregState.fetusCount;
             stateChanged = true;
         }
@@ -390,7 +382,7 @@ function runScan() {
             }
             stateChanged = true;
         }
-        if (pregState.fatherName && p.fatherName !== pregState.fatherName) {
+        if (!p._secondParentManual && pregState.fatherName && p.fatherName !== pregState.fatherName) {
             p.fatherName = pregState.fatherName;
             stateChanged = true;
         }
@@ -484,9 +476,24 @@ function applyStatusData(s, p, data) {
     if (data.partner?.subject && data.partner.subject !== 'char') {
         data = { ...data, partner: undefined };
     }
+    const applyLooks = (carrier, looks) => {
+        if (!looks || typeof looks !== 'object') return;
+        carrier.motherLooks ||= {};
+        for (const key of ['hair','eyes']) {
+            if (typeof looks[key] === 'string' && looks[key].trim()) carrier.motherLooks[key] = looks[key].trim().slice(0,80);
+        }
+    };
+    if (isTracked('user')) applyLooks(p, data.looks);
+    if (isTracked('char')) applyLooks(getPartnerData(), data.partner?.looks);
     const applyKnowledge = (c, fact) => {
         if (!c.isPregnant || !fact || typeof fact !== 'object') return;
         if (fact.pregnancy_known === true) c.pregnancyKnown = true;
+        const count = Number(fact.fetus_count);
+        if (fact.fetus_count_confirmed === true && Number.isInteger(count) && count >= 1 && count <= 4) {
+            c.fetusCount = count;
+            c.fetusSex = Array.from({ length: count }, (_, i) => c.fetusSex?.[i] || '?');
+            c.pregnancyKnown = true;
+        }
         if (['positive', 'faint', 'negative'].includes(fact.test_result)) {
             c.lastTestResult = fact.test_result;
             if (fact.test_result !== 'negative') c.pregnancyKnown = true;
@@ -620,7 +627,7 @@ function applyStatusData(s, p, data) {
         if (data.libido) p.libido = data.libido;
         if (data.weight_gain) p.weightGain = data.weight_gain;
         if (data.baby_activity) p.babyActivity = data.baby_activity;
-        if (data.father_name && data.father_name !== p.fatherName) {
+        if (!p._secondParentManual && data.father_name && data.father_name !== p.fatherName) {
             p.fatherName = String(data.father_name).slice(0, 80);
         }
 
@@ -665,7 +672,7 @@ function applyStatusData(s, p, data) {
         if (d2.libido) c.libido = d2.libido;
         if (d2.weight_gain) c.weightGain = d2.weight_gain;
         if (d2.baby_activity) c.babyActivity = d2.baby_activity;
-        if (d2.father_name) c.fatherName = String(d2.father_name).slice(0, 80);
+        if (!c._secondParentManual && d2.father_name) c.fatherName = String(d2.father_name).slice(0, 80);
         if (d2.sex_revealed === true && c.isPregnant && !c.fetusSexRevealed) c.fetusSexRevealed = true;
         c._dynamic = c.isPregnant ? {
             symptoms: d2.symptoms || null,
@@ -709,12 +716,7 @@ function advanceTime(s, p, daysPassed) {
                     c.pregnancyWeeks = w;
                     changed = true;
                 }
-                // Настроенная длительность — это фактический полный срок, а не только ПДР.
-                // Проверяем даже если номер недели не изменился: это чинит уже «зависшие» беременности
-                // после обновления расширения (например, состояние уже сохранено как 24/24).
-                if (w >= dur) {
-                    partnerBirth(null, { source: 'auto', silent: !!s._historyScanInProgress });
-                }
+
             }
         } catch (e) { /* ignore */ }
     }
@@ -786,7 +788,7 @@ function advanceTime(s, p, daysPassed) {
                     }
 
                     if (newW >= duration && oldWeeks < duration) {
-                        showNotification('<i class="fa-solid fa-hospital"></i> Срок беременности завершён — начинаются роды!', 'warning');
+                        showNotification('<i class="fa-solid fa-hospital"></i> Достигнут ожидаемый срок. Роды отмечаются по событию в сцене.', 'warning');
                     }
                 }
 
@@ -794,21 +796,7 @@ function advanceTime(s, p, daysPassed) {
                 revealPlannedComplications(s, p, oldWeeks, newW);
             }
 
-            // ── AUTO-BIRTH: configured duration is the actual birth threshold ──
-            // Стоит вне проверки смены номера недели, чтобы уже сохранённое 24/24
-            // состояние родило при следующем продвижении RP-даты хотя бы на день.
-            if (newW >= duration) {
-                const birthResult = {
-                    birth_occurred: true,
-                    vaginal_ejaculation_occurred: false,
-                    cycle_day: null,
-                    _birthSource: 'auto',
-                    _silent: !!s._historyScanInProgress,
-                };
-                applyScanResult(birthResult);
 
-                return; // applyScanResult handles everything
-            }
         }
     }
 
@@ -1096,15 +1084,14 @@ export function processDateTag(text) {
     // If conception was set manually (or before any RP_DATE was seen), conceptionDate is
     // anchored to real-world time. On the FIRST RP_DATE we see, re-anchor so that the
     // accumulated pregnancyWeeks are preserved and start ticking from the RP timeline.
-    if (p.isPregnant && !p._conceptionAnchored) {
-        const w = Math.max(0, p.pregnancyWeeks || 0);
-        p.conceptionDate = new Date(rpDate.getTime() - w * 7 * 86400000).toISOString();
-        p._conceptionAnchored = true;
-    } else if (p.isPregnant && !p.conceptionDate) {
-        // Safety net: pregnant but no conceptionDate at all
-        p.conceptionDate = newIso;
-        p._conceptionAnchored = true;
+    for (const c of [p, getPartnerData()]) {
+        if (c.isPregnant && (!c._conceptionAnchored || !c.conceptionDate)) {
+            const weeks = Math.max(0, c.pregnancyWeeks || 0);
+            c.conceptionDate = new Date(rpDate.getTime() - weeks * 7 * 86400000).toISOString();
+            c._conceptionAnchored = true;
+        }
     }
+
     // Clamp: if rpDate < conceptionDate (model rewound time), pull conceptionDate back
     // НО: если юзер только что вручную выставил беременность — НЕ трогаем его дату зачатия.
     // Иначе ручная "беременна с 01.06.2026" мгновенно сбрасывается до текущей RP-даты бота.
@@ -1139,4 +1126,59 @@ export function processDateTag(text) {
         saveSettingsDebounced();
     }
     return false;
+}
+
+export function setManualPregnancyWeeks(who, value) {
+    if (!['user','char'].includes(who)) return false;
+    const p = getPregnancyData(), c = who === 'char' ? getPartnerData() : p;
+    if (!c.isPregnant) return false;
+    const weeks = Math.max(0, Math.min(100, parseInt(value) || 0));
+    const anchor = p.rpDate ? new Date(p.rpDate) : null;
+    c.pregnancyWeeks = weeks;
+    c.conceptionDate = anchor && Number.isFinite(anchor.getTime())
+        ? new Date(anchor.getTime() - weeks * 7 * 86400000).toISOString() : null;
+    c._conceptionAnchored = !!c.conceptionDate;
+    c._userSetWeeksAt = Date.now();
+    refreshRegenSnapshot();
+    saveSettingsDebounced();
+    updatePromptInjection();
+    return weeks;
+}
+
+export function prepareTrackerOutput(msg) {
+    if (!msg || msg.is_user || !getSettings().isEnabled) return false;
+    const current = msg.mes || '';
+    if (/\[RP_DATE[:\s]/i.test(current)) return false;
+    const date = scanDateTag(stripThink(current));
+    if (!date?.rpTime) return false;
+    const pad = n => String(n).padStart(2, '0');
+    // Canonicalize the explicit clock already supplied by the phone extension.
+    msg.mes = current + `\n<!-- [RP_DATE:${pad(date.getDate())}.${pad(date.getMonth()+1)}.${date.getFullYear()} ${date.rpTime}] -->`;
+    if (Array.isArray(msg.swipes) && msg.swipes[msg.swipe_id] === current) msg.swipes[msg.swipe_id] = msg.mes;
+    return true;
+}
+
+export function filterTrackerContext(messages) {
+    // SillyTavern passes coreChat, a prompt copy. Replace entries rather than
+    // mutating shared message objects or deleting the tags in the saved chat.
+    for (let i = 0; i < messages.length; i++) {
+        if (typeof messages[i]?.mes !== 'string') continue;
+        const clean = stripReproTags(messages[i].mes);
+        if (clean !== messages[i].mes) messages[i] = { ...messages[i], mes: clean };
+    }
+    updatePromptInjection();
+}
+
+export function setSecondParent(who, name) {
+    if (!['user','char'].includes(who)) return false;
+    const carrier = who === 'char' ? getPartnerData() : getPregnancyData();
+    if (!carrier.isPregnant) return false;
+    carrier.fatherName = String(name || '').trim().slice(0,80);
+    carrier._secondParentManual = true;
+    refreshRegenSnapshot();
+    saveSettingsDebounced();
+    syncUI();
+    updatePromptInjection();
+    renderInfoblock();
+    return true;
 }

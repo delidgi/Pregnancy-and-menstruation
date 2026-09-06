@@ -1,4 +1,4 @@
-import { setManualCycleDay } from './message-handler.js';
+import { setManualCycleDay, setManualPregnancyWeeks, setSecondParent } from './message-handler.js';
 import { reportError } from './diagnostics.js';
 function cycleSummary(who, c, s) {
     if (!hasCycle(s, who) && !c.isPregnant) return isOmegaverse(s) ? roleLabel(s, who) : 'Состояние';
@@ -457,7 +457,7 @@ export function buildInfoblockHtml() {
                     ${stat('fa-baby-carriage', diaperIsClean ? 'green' : 'orange', 'Подгузник', diaperIsClean ? diaperText : `<span class="rp-val-warn">${diaperText}</span>`)}
                     ${baby.teething ? stat('fa-tooth', 'blue', 'Зубки', 'Режутся') : ''}
                     ${baby.colicky ? stat('fa-face-sad-tear', 'pink', 'Колики', 'Да') : ''}
-                    ${baby.fatherName ? stat('fa-user', 'blue', 'Второй родитель', baby.fatherName) : ''}
+                    ${baby.fatherName ? stat('fa-user', 'blue', 'Второй родитель', escapeLabel(baby.fatherName)) : ''}
                     ${baby.personality?.length ? `<div class="repro-note"><i class="fa-solid fa-brain" style="margin-right:4px;opacity:0.5"></i>${baby.personality.join(', ')}</div>` : ''}
                     ${baby.appearance?.length ? `<div class="repro-note"><i class="fa-solid fa-eye" style="margin-right:4px;opacity:0.5"></i>${baby.appearance.join(', ')}</div>` : ''}
                     ${baby.special ? `<div class="repro-note" style="border-color:rgba(255,215,64,.35);background:rgba(255,215,64,.06)"><i class="fa-solid fa-star" style="margin-right:4px;color:#ffd740"></i><b>${baby.special.name || baby.special}</b>${baby.special.desc ? ` — ${baby.special.desc}` : ''}</div>` : ''}
@@ -560,7 +560,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
                     ${stat('fa-calendar-day', 'pink', 'Зачатие', conceptionStr)}
                     ${stat('fa-calendar', 'purple', 'ПДР', dueStr)}
                     ${stat('fa-baby', 'pink', 'Плод', `${formatFetusCount(p.fetusCount)} (${sexStr})`)}
-                    ${p.fatherName ? stat('fa-user', 'blue', 'Второй родитель', p.fatherName) : ''}
+                    ${p.fatherName ? stat('fa-user', 'blue', 'Второй родитель', escapeLabel(p.fatherName)) : ''}
                     ${fetusSize ? stat('fa-ruler', 'blue', 'Размер', fetusSize) : ''}
                     ${stat('fa-heart-pulse', 'green', 'Здоровье', hpBadge(p.healthStatus))}
                     ${p.mood ? stat('fa-face-smile', 'purple', 'Настроение', tr(p.mood)) : ''}
@@ -688,9 +688,13 @@ function fmtRpDate(iso) {
 }
 
 // Пилюля родителя: имя + роль (без инициала — он только шумит)
+function escapeLabel(value) {
+    return String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
+
 function parentPill(name, cls, roleLabel, unknown = false) {
     return `<span class="rp-pill ${cls}${unknown ? ' unknown' : ''}">
-        <span class="rp-pill-tx"><b>${name}</b></span>
+        <span class="rp-pill-tx"><b>${escapeLabel(name)}</b></span>
     </span>`;
 }
 
@@ -777,16 +781,20 @@ export function showFamilyTree() {
     (p.babies || []).forEach(b => kids.push({ ...b, _grown: false }));
     (p.grownChildren || []).forEach(c => kids.push({ ...c, _grown: true }));
 
-    // Группировка по отцу
+    const pregnancies = [
+        { state: p, name: carrierName('user') },
+        { state: getPartnerData(), name: carrierName('char') },
+    ].filter(x => x.state.isPregnant);
+    const pairKey = (name, second) => JSON.stringify([name, (second || '').trim() || '—']);
     const groups = new Map();
     for (const k of kids) {
-        const f = (k.fatherName || '').trim() || '—';
-        if (!groups.has(f)) groups.set(f, []);
-        groups.get(f).push(k);
+        const key = pairKey(k.motherName || (k.bornBy ? carrierName(k.bornBy) : momName), k.fatherName);
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(k);
     }
-    if (p.isPregnant) {
-        const f = (p.fatherName || '').trim() || '—';
-        if (!groups.has(f)) groups.set(f, []);
+    for (const pending of pregnancies) {
+        const key = pairKey(pending.name, pending.state.fatherName);
+        if (!groups.has(key)) groups.set(key, []);
     }
 
     // Детальные панели детей (по клику на карточку)
@@ -848,7 +856,8 @@ export function showFamilyTree() {
     };
 
     let branchesHtml = '';
-    for (const [father, children] of groups) {
+    for (const [key, children] of groups) {
+        const [birthParentName, father] = JSON.parse(key);
         // Старшие слева
         children.sort((a, b) => {
             const am = a.birthRpDate ? new Date(a.birthRpDate).getTime() : 0;
@@ -857,11 +866,12 @@ export function showFamilyTree() {
         });
         let cells = children.map(kidCard).join('');
 
-        if (p.isPregnant && ((p.fatherName || '').trim() || '—') === father) {
-            const w = p.pregnancyWeeks || 0;
-            const cnt = p.fetusCount || 1;
-            const sexStr = p.fetusSexRevealed && p.fetusSex?.length
-                ? p.fetusSex.map(s => s === 'M' ? 'мальчик' : 'девочка').join(', ')
+        for (const pending of pregnancies.filter(x => pairKey(x.name, x.state.fatherName) === key)) {
+            const carrier = pending.state;
+            const w = carrier.pregnancyWeeks || 0;
+            const cnt = carrier.fetusCount || 1;
+            const sexStr = carrier.fetusSexRevealed && carrier.fetusSex?.length
+                ? carrier.fetusSex.map(s => s === 'M' ? 'мальчик' : 'девочка').join(', ')
                 : 'сюрприз';
             cells += `<div class="rp-tree-cell">
                 <div class="rp-node kid expecting">
@@ -878,9 +888,9 @@ export function showFamilyTree() {
         // Пара: мама ♥ папа компактными пилюлями, дети — под ними
         branchesHtml += `<div class="rp-tree-union">
             <div class="rp-couple">
-                ${parentPill(momName, 'mom', carrierRole)}
+                ${parentPill(birthParentName, 'mom', carrierRole)}
                 <span class="rp-couple-line"></span>
-                <span class="rp-couple-link" title="${isUnknown ? 'отец неизвестен' : 'пара'}"><i class="fa-solid ${isUnknown ? 'fa-question' : 'fa-heart'}"></i></span>
+                <span class="rp-couple-link" title="${isUnknown ? 'второй родитель не указан' : 'пара'}"><i class="fa-solid ${isUnknown ? 'fa-question' : 'fa-heart'}"></i></span>
                 <span class="rp-couple-line"></span>
                 ${parentPill(isUnknown ? 'неизвестен' : father, 'dad', partnerRole, isUnknown)}
             </div>
@@ -1283,7 +1293,7 @@ export function syncUI() {
                     <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(p.fetusCount)} (${sexStr})</span></div>
                     ${fetusSize ? `<div class="rp-m-cell"><span class="rp-m-lbl">Размер</span><span class="rp-m-val">${fetusSize}</span></div>` : ''}
                     <div class="rp-m-cell"><span class="rp-m-lbl">Здоровье</span><span class="rp-m-val rp-m-hp-${hCls}">${health.text}</span></div>
-                    ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${p.fatherName}</span></div>` : ''}
+                    ${p.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${escapeLabel(p.fatherName)}</span></div>` : ''}
                 </div>
                 <div class="rp-m-text"><b>Симптомы:</b> ${symptoms}</div>
                 <div class="rp-m-text"><b>Рек-ции:</b> ${recs}</div>
@@ -1330,14 +1340,7 @@ export function syncUI() {
                 if (ab) ab.onclick = () => {
                     const input = el('repro-set-weeks');
                     const newWeeks = Math.max(0, Math.min(42, parseInt(input?.value) || 0));
-                    // Якорь: предпочитаем rpDate (RP-время чата), иначе сейчас (real-world)
-                    const anchor = p.rpDate ? new Date(p.rpDate) : new Date();
-                    p.conceptionDate = new Date(anchor.getTime() - newWeeks * 7 * 86400000).toISOString();
-                    p.pregnancyWeeks = newWeeks;
-                    p._conceptionAnchored = true;
-                    // Метка ручной установки — защита от перезаписи парсером текста (30 минут)
-                    p._userSetWeeksAt = Date.now();
-                    import('./message-handler.js').then(m => m.refreshRegenSnapshot && m.refreshRegenSnapshot());
+                    setManualPregnancyWeeks('user', newWeeks);
                     saveSettingsDebounced();
                     showNotification(`Срок установлен: ${newWeeks} нед.`, 'success');
                     syncUI();
@@ -1373,7 +1376,7 @@ export function syncUI() {
                 <div class="rp-m-grid">
                     <div class="rp-m-cell"><span class="rp-m-lbl">ПДР</span><span class="rp-m-val">${dueStr}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Плод</span><span class="rp-m-val">${formatFetusCount(c.fetusCount)} (${sexStr})</span></div>
-                    ${c.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${c.fatherName}</span></div>` : ''}
+                    ${c.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${escapeLabel(c.fatherName)}</span></div>` : ''}
                 </div>
                 <div style="display:flex;gap:4px;margin-top:6px">
                     <button id="repro-partner-birth" class="rp-m-btn" style="flex:1">Принять роды</button>
@@ -1383,7 +1386,7 @@ export function syncUI() {
                 const bb = el('repro-partner-birth');
                 if (bb) bb.onclick = () => {
                     if (!confirm(`Принять роды у ${carrierName('char')}? Запустится диалог именования.`)) return;
-                    import('./pregnancy.js').then(m => m.partnerBirth(null));
+                    import('./pregnancy.js').then(m => m.partnerBirth(null, { source: 'manual' }));
                 };
                 const rb2 = el('repro-partner-reset');
                 if (rb2) rb2.onclick = () => {
@@ -1402,6 +1405,10 @@ export function syncUI() {
     if (manualWhoRow) manualWhoRow.style.display = (s.trackFor === 'both') ? 'flex' : 'none';
     const manualWhoSel = el('repro-manual-who');
     if (manualWhoSel && s.trackFor !== 'both') manualWhoSel.value = (s.trackFor === 'char') ? 'char' : 'user';
+
+    const manualParent = el('repro-manual-second-parent');
+    const manualCarrier = manualWhoSel?.value === 'char' ? getPartnerData() : p;
+    if (manualParent && document.activeElement !== manualParent && manualCarrier.isPregnant) manualParent.value = manualCarrier.fatherName || '';
 
     const resetBtn = el('repro-reset');
     if (resetBtn) resetBtn.style.display = p.isPregnant ? 'block' : 'none';
@@ -1432,7 +1439,7 @@ export function syncUI() {
                     <div class="rp-m-cell"><span class="rp-m-lbl">Сон</span><span class="rp-m-val">${baby.sleep || '—'}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Кормление</span><span class="rp-m-val">${baby.feedingType || '—'}</span></div>
                     <div class="rp-m-cell"><span class="rp-m-lbl">Подгузник</span><span class="rp-m-val" style="color:${baby.diaperClean !== false ? 'var(--rp-green)' : 'var(--rp-yellow)'}">${baby.diaperClean !== false ? 'Чистый' : 'Смена!'}</span></div>
-                    ${baby.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${baby.fatherName}</span></div>` : ''}
+                    ${baby.fatherName ? `<div class="rp-m-cell"><span class="rp-m-lbl">Второй родитель</span><span class="rp-m-val">${escapeLabel(baby.fatherName)}</span></div>` : ''}
                 </div>`;
             });
             babyMon.innerHTML = monHtml;
@@ -1443,7 +1450,10 @@ export function syncUI() {
     }
 
     const stats = el('repro-stats');
-    if (stats) stats.textContent = `${s.totalChecks} проверок / ${s.totalConceptions} зачатий`;
+    if (stats) {
+        const clock = p.rpDate ? new Date(p.rpDate).toLocaleString('ru-RU', {dateStyle:'short', timeStyle:'short'}) : 'нет отметки';
+        stats.textContent = `${s.totalChecks} проверок / ${s.totalConceptions} зачатий · Время РП: ${clock}`;
+    }
 }
 
 // ── setupUI ──
@@ -1571,6 +1581,8 @@ export function setupUI() {
                         <option value="F">Все девочки</option>
                     </select>
                 </div>
+                <label for="repro-manual-second-parent" style="font-size:11px">Второй родитель</label>
+                <input type="text" id="repro-manual-second-parent" class="text_pole" maxlength="80" placeholder="Имя второго родителя" title="Для текущей беременности имя сохраняется при завершении ввода; для новой — при нажатии «Начать беременность».">
                 <button id="repro-manual-start" class="menu_button" style="width:100%">Начать беременность</button>
                 <small style="opacity:0.5;font-size:9px;font-weight:600;margin-top:4px">Малыш <span style="font-weight:400;opacity:0.7">(добавляется к существующим)</span></small>
                 <div style="display:flex;gap:4px;align-items:center">
@@ -1843,6 +1855,14 @@ export function setupUI() {
             manualDateInput.val(iso);
         }
 
+        $('#repro-manual-who').on('change', () => {
+            const who = $('#repro-manual-who').val() || 'user';
+            $('#repro-manual-second-parent').val((who === 'char' ? getPartnerData() : getPregnancyData()).fatherName || '');
+        });
+        $('#repro-manual-second-parent').on('change', function() {
+            setSecondParent($('#repro-manual-who').val() || 'user', $(this).val());
+        });
+
         // Manual pregnancy start
         $('#repro-manual-start').on('click', function() {
             if (warnIfNoChat()) return;
@@ -1864,8 +1884,9 @@ export function setupUI() {
             }
             // Носитель: я или персонаж
             const who = $('#repro-manual-who').val() || 'user';
-            if (who === 'char') startPartnerPregnancy(conceptionDate.toISOString(), fetus, sexArr);
-            else startManualPregnancy(conceptionDate.toISOString(), fetus, sexArr);
+            const secondParent = String($('#repro-manual-second-parent').val() || '').trim();
+            if (who === 'char') startPartnerPregnancy(conceptionDate.toISOString(), fetus, sexArr, secondParent);
+            else startManualPregnancy(conceptionDate.toISOString(), fetus, sexArr, secondParent);
             syncUI();
             updatePromptInjection();
             setTimeout(() => { import('./message-handler.js').then(m => m.renderInfoblock()); }, 100);

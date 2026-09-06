@@ -36,11 +36,11 @@ function configuredDuration(s) {
 // explicit scene/manual birth keeps the legacy minimum threshold for plausibility.
 export function canTriggerBirth(carrier, s = getSettings(), source = 'tag') {
     if (!carrier?.isPregnant) return false;
-    const weeks = Math.max(0, parseInt(carrier.pregnancyWeeks) || 0);
-    const duration = configuredDuration(s);
-    if (source === 'auto') return weeks >= duration;
-    const minBirthWeek = Math.min(20, duration);
-    return weeks > 0 && weeks >= minBirthWeek;
+    if (source === 'manual') return true;
+    // A date reaching the due date is not a delivery event.
+    if (source === 'auto') return false;
+    const { weeks } = calculateWeeksFromDates(carrier.conceptionDate, getPregnancyData().rpDate, carrier.pregnancyWeeks);
+    return weeks >= configuredDuration(s);
 }
 
 // When RP time jumps past the due date, auto-birth is anchored to the due date,
@@ -192,6 +192,7 @@ export function applyScanResult(result) {
 
         // ── Сохраняем существующих детей (если они уже есть от предыдущих родов) ──
         const existingBabies = Array.isArray(p.babies) ? [...p.babies] : [];
+        const newbornStartIdx = existingBabies.length;
         const prevMomState = p.momState;
 
         // ВАЖНО: не заменяем весь root defaultPregnancyData. Корень хранит не только
@@ -246,6 +247,8 @@ export function applyScanResult(result) {
         if (prevMomState) p.momState = prevMomState;
 
         // Массив babies: сначала старшие (с их сохранёнными атрибутами), потом новенькие
+        const newbornLooks = Array.from({ length: newBabyCount }, () => inheritedLooks(p));
+        const birthParentName = carrierName('user');
         p.babies = [...existingBabies];
 
         // Добавляем новорождённых с привязкой к birthRpDate (для расчёта возраста)
@@ -263,7 +266,10 @@ export function applyScanResult(result) {
                 milestones: [],
                 personality: [],
                 // Внешность наследуется от родителей (менделевская модель)
-                appearance: inheritedLooks(p),
+                appearance: newbornLooks[i],
+                fatherName: p.fatherName || '',
+                motherName: birthParentName,
+                bornBy: 'user',
                 birthRpDate: birthRpDate,  // для расчёта возраста в днях
                 age: 'новорождённый',
             });
@@ -282,17 +288,15 @@ export function applyScanResult(result) {
             dialogBabies.push({
                 sex: babySex[i] || 'M',
                 name: mt.name || mt.имя || '',
-                fatherName: mt.fatherName || mt.father || mt.отец || '',
+                fatherName: p._secondParentManual ? p.fatherName : p.fatherName || mt.fatherName || mt.father || mt.отец || '',
                 personality: Array.isArray(mt.personality) ? mt.personality
                           : Array.isArray(mt.характер) ? mt.характер : null,
-                appearance: Array.isArray(mt.appearance) ? mt.appearance
-                         : Array.isArray(mt.внешность) ? mt.внешность : null,
+                appearance: mergeBabyAppearance(p.babies[newbornStartIdx + i].appearance, mt.appearance || mt.внешность),
                 special: mt.special !== undefined ? mt.special : undefined,
             });
         }
 
         // Индекс начала новорождённых в массиве p.babies (чтобы диалог писал имена в правильные слоты)
-        const newbornStartIdx = existingBabies.length;
 
         // Show birth dialog for naming + traits (state already transitioned).
         // Full-history recovery runs silent to avoid popping historical birth dialogs.
@@ -821,13 +825,17 @@ export function createPregnancyFromStateTag(pregState, { notify = true } = {}) {
 // conceptionDateISO: ISO-строка даты зачатия (от пользователя через datepicker)
 // fetusCount: 1-4
 // fetusSex: массив ['M'/'F'], опционально — если null, генерится случайно
-export function startManualPregnancy(conceptionDateISO, fetusCount, fetusSex = null) {
+export function startManualPregnancy(conceptionDateISO, fetusCount, fetusSex = null, secondParent = undefined) {
     const s = getSettings();
     const p = getPregnancyData();
     s._conceptionBlockedUntilUser = null;
     s._birthBlockedUntilUser = null;
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
 
+    if (secondParent !== undefined) {
+        p.fatherName = String(secondParent).trim().slice(0, 80);
+        p._secondParentManual = true;
+    }
     p.isPregnant = true;
     p.conceptionDate = conceptionDateISO;
     // Привязка: ручная дата зачатия — это RP-дата, не real-world.
@@ -1066,7 +1074,7 @@ export function partnerCheckConception() {
         c.fetusSex = [];
         for (let i = 0; i < c.fetusCount; i++) c.fetusSex.push(roll(2) === 1 ? 'M' : 'F');
         c.fetusSexRevealed = false;
-        if (!c.fatherName) c.fatherName = carrierName('user');
+        if (!c._secondParentManual && !c.fatherName) c.fatherName = carrierName('user');
         if (s.showNotifications) {
             showNotification(`<i class="fa-solid fa-check"></i> ${carrierName('char')} беременна! ${formatFetusCount(c.fetusCount)}`, 'success');
         }
@@ -1092,7 +1100,7 @@ export function partnerBirth(babyTraits, options = {}) {
     const sexes = c.fetusSex?.length ? [...c.fetusSex] : ['M'];
     const birthRpDate = resolveBirthRpDate(c, p, s, birthSource);
     const motherName = carrierName('char');
-    const fatherName = c.fatherName || carrierName('user');
+    const fatherName = c._secondParentManual ? c.fatherName : c.fatherName || carrierName('user');
 
     // Сброс беременности партнёра
     c.isPregnant = false;
@@ -1107,12 +1115,13 @@ export function partnerBirth(babyTraits, options = {}) {
 
     // Дети — в общую семью
     if (!Array.isArray(p.babies)) p.babies = [];
+    const newbornLooks = Array.from({ length: count }, () => inheritedLooks(c));
     const startIdx = p.babies.length;
     for (let i = 0; i < count; i++) {
         p.babies.push({
             name: '', sex: sexes[i] || 'M', health: 'normal', mood: 'спокойный', sleep: 'спит',
             diaperClean: true, teething: false, colicky: false, feedingType: '',
-            milestones: [], personality: [], appearance: [],
+            milestones: [], personality: [], appearance: newbornLooks[i],
             fatherName, motherName, bornBy: 'char',
             birthRpDate, age: 'новорождённый',
         });
@@ -1144,9 +1153,9 @@ export function partnerBirth(babyTraits, options = {}) {
         dialogBabies.push({
             sex: sexes[i] || 'M',
             name: mt.name || mt.имя || '',
-            fatherName: mt.fatherName || mt.father || fatherName,
+            fatherName: c._secondParentManual ? fatherName : fatherName || mt.fatherName || mt.father || '',
             personality: Array.isArray(mt.personality) ? mt.personality : null,
-            appearance: Array.isArray(mt.appearance) ? mt.appearance : null,
+            appearance: mergeBabyAppearance(p.babies[startIdx + i].appearance, mt.appearance),
             special: mt.special !== undefined ? mt.special : undefined,
         });
     }
@@ -1186,13 +1195,17 @@ export function partnerBirth(babyTraits, options = {}) {
 }
 
 // Ручная беременность партнёра (из панели настроек)
-export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = null) {
+export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = null, secondParent = undefined) {
     const s = getSettings();
     const c = getPartnerData();
     const p = getPregnancyData();
     s._conceptionBlockedUntilChar = null;
     s._birthBlockedUntilChar = null;
     const count = Math.max(1, Math.min(4, parseInt(fetusCount) || 1));
+    if (secondParent !== undefined) {
+        c.fatherName = String(secondParent).trim().slice(0, 80);
+        c._secondParentManual = true;
+    }
     c.isPregnant = true;
     c.conceptionDate = conceptionDateISO;
     c._conceptionAnchored = true;
@@ -1205,7 +1218,7 @@ export function startPartnerPregnancy(conceptionDateISO, fetusCount, fetusSex = 
         ? [...fetusSex]
         : Array.from({ length: count }, () => (roll(2) === 1 ? 'M' : 'F'));
     c.fetusSexRevealed = false;
-    if (!c.fatherName) c.fatherName = carrierName('user');
+    if (!c._secondParentManual && !c.fatherName) c.fatherName = carrierName('user');
     c.pregnancyWeeks = p.rpDate ? calculateWeeksFromDates(c.conceptionDate, p.rpDate, 0).weeks : 0;
 
     refreshSnap();
@@ -1356,7 +1369,11 @@ export function setTrying(value) {
 // Родительские черты берём из p.motherLooks / p.fatherLooks (задаются в панели).
 export function inheritedLooks(p) {
     try {
-        const res = inheritLooks(p?.motherLooks, p?.fatherLooks);
+        const root = getPregnancyData();
+        const other = p === root ? getPartnerData() : root;
+        const expectedName = carrierName(p === root ? 'char' : 'user');
+        const otherLooks = p?.fatherLooks || (p?.fatherName === expectedName ? other?.motherLooks : null);
+        const res = inheritLooks(p?.motherLooks, otherLooks);
         const out = [];
         if (res.eyes) out.push(`${res.eyes} глаза`);
         if (res.hair) out.push(`${res.hair} волосы`);
@@ -1374,4 +1391,13 @@ export function setParentLooks(which, looks) {
     saveSettingsDebounced();
     _syncUI();
     return p[key];
+}
+
+// Keep already inherited colours; model details may add other established traits.
+export function mergeBabyAppearance(inherited, proposed) {
+    const base = Array.isArray(inherited) ? inherited : [];
+    const details = Array.isArray(proposed) ? proposed.filter(x => typeof x === 'string').map(x => x.trim().slice(0, 160)).filter(Boolean) : [];
+    const hair = base.some(x => /волос|hair/i.test(x));
+    const eyes = base.some(x => /глаз|eyes?/i.test(x));
+    return [...new Set([...base, ...details.filter(x => !(hair && /волос|рыж|блон|брюнет|hair|redhead|blond|brunet/i.test(x)) && !(eyes && /глаз|eyes?/i.test(x)))])].slice(0, 8);
 }

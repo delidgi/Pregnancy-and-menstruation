@@ -138,21 +138,14 @@ function generateTraits() {
         'активный', 'сонливый', 'упрямый', 'ласковый', 'непоседливый',
         'тихий', 'весёлый', 'чувствительный', 'капризный', 'общительный',
     ];
-    const features = [
-        'голубые глаза', 'карие глаза', 'зелёные глаза', 'серые глаза',
-        'тёмные волосы', 'светлые волосы', 'рыжие волосы',
-        'пухлые щёчки', 'ямочки на щеках', 'длинные ресницы',
-        'курносый носик', 'маленькие ушки', 'родинка на щеке',
-        'крепкий хват', 'громкий голос', 'тихий голосок',
-    ];
     const pick = (arr, n) => {
         const shuffled = [...arr].sort(() => Math.random() - 0.5);
         return shuffled.slice(0, n);
     };
     return {
         personality: pick(traits, 2),
-        appearance: pick(features, 3),
-        special: rollSpecialTrait(10),
+        appearance: [],
+        special: null,
     };
 }
 
@@ -170,7 +163,7 @@ export function showBirthDialog(babies, onConfirm) {
         const sxCls = isF ? 'f' : 'm';
 
         // Use model-provided traits if present (parsed from [BABY_TRAITS:{...}] tag),
-        // otherwise fall back to random pool. Special trait always rolled if not provided.
+        // Only personality has a random fallback. Appearance needs supplied facts.
         const fallback = generateTraits();
         const personality = (Array.isArray(baby.personality) && baby.personality.length)
             ? baby.personality : fallback.personality;
@@ -183,7 +176,7 @@ export function showBirthDialog(babies, onConfirm) {
 
         const fatherHtml = fatherName
             ? `<div class="rb-trait-section">
-                    <span class="rb-trait-label"><i class="fa-solid fa-person"></i>Отец:</span>
+                    <span class="rb-trait-label"><i class="fa-solid fa-person"></i>Второй родитель:</span>
                     <span class="rb-trait-values">${escapeHtml(fatherName)}</span>
                </div>` : '';
 
@@ -211,7 +204,7 @@ export function showBirthDialog(babies, onConfirm) {
                 </div>
                 <div class="rb-trait-section">
                     <span class="rb-trait-label"><i class="fa-solid fa-eye"></i>Внешность:</span>
-                    <span class="rb-trait-values">${escapeHtml(appearance.join(', '))}</span>
+                    <span class="rb-trait-values">${escapeHtml(appearance.length ? appearance.join(', ') : 'Пока не указана')}</span>
                 </div>
             </div>
             ${specialHtml}
