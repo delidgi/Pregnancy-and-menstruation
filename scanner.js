@@ -436,6 +436,9 @@ export function scanDateTag(text) {
     if (m) return _parseDate(parseInt(m[3]), parseInt(m[2]), parseInt(m[1]), m[4], m[5]);
     const phone = text.match(/<!--\s*tel:time:(\d{1,2}):(\d{2})\s+(\d{1,2})\.(\d{1,2})\.(\d{4})\s*-->/i);
     if (phone) return _parseDate(+phone[3], +phone[4], +phone[5], phone[1], phone[2]);
+    // Only the diary entry header is a clock. Dates mentioned inside its prose aren't.
+    const diary = text.match(/<!--\s*diary\s*(?:📖\s*)?(?:Дневник|Diary)\s+(\d{1,2})\.(\d{1,2})\.(\d{1,4})[,\s]+(\d{1,2}):(\d{2})/i);
+    if (diary) return _parseDate(+diary[1], +diary[2], +diary[3], diary[4], diary[5]);
     return null;
 }
 
@@ -809,4 +812,28 @@ export async function scanFullHistory() {
     }
 
     return stats;
+}
+
+// Read a discovery from this carrier's own status, never from the whole scene:
+// a partner's dialogue may refer to somebody else, a wish, or an earlier pregnancy.
+export function confirmedFetusCount(status) {
+    if (!status || typeof status !== 'object') return null;
+    const tagged = Number(status.fetus_count);
+    if (status.fetus_count_confirmed === true && Number.isInteger(tagged) && tagged >= 1 && tagged <= 4) return tagged;
+    const found = new Set();
+    for (const key of ['note', 'symptoms']) {
+        if (typeof status[key] !== 'string') continue;
+        for (const sentence of status[key].slice(0, 800).split(/[.!?;\n]+/)) {
+            if (/подруг|сестр|сосед|другой беременн|чуж|сны|во сне|приснил|dream|friend's|sister's/i.test(sentence)) continue;
+            if (/(?:\b(?:not|no|may|might|hope|wish|fear|suspect|maybe|previous)\b|(?:^|\s)(?:не|нет|если|бы)(?:\s|$)|может|похоже|якобы|хоч|мечта|боится|страх|наде|возмож|предполож|подозр|вероят|раньше|прошл|ещ[её] не)/i.test(sentence)) continue;
+            if (!/(?:узнал|выяснил|обнаруж|подтверд|подтверж|установлен|показал|сообщил|выяв|confirmed|discovered|learned|found out|scan shows)/i.test(sentence)) continue;
+            const counts = [];
+            if (/двойн|близнец|\btwins\b|(?:два|двое|двух|2)\s+(?:плод|реб[её]н|малыш|яйц|fetuses|babies|eggs)/i.test(sentence)) counts.push(2);
+            if (/тройн|\btriplets\b|(?:три|тр[её]х|3)\s+(?:плод|реб[её]н|малыш|яйц|fetuses|babies|eggs)/i.test(sentence)) counts.push(3);
+            if (/четверн|\bquadruplets\b|(?:четыре|четыр[её]х|4)\s+(?:плод|реб[её]н|малыш|яйц|fetuses|babies|eggs)/i.test(sentence)) counts.push(4);
+            if (/(?:один|одного|1)\s+(?:плод|реб[её]н|малыш|fet[u]?s|baby)|одно\s+яйцо|singleton/i.test(sentence)) counts.push(1);
+            if (counts.length === 1) found.add(counts[0]);
+        }
+    }
+    return found.size === 1 ? [...found][0] : null;
 }

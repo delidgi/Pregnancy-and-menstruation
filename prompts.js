@@ -104,7 +104,7 @@ export function getBasePrompt() {
     if (isTracked('char')) b += compactPregnancy('char', s);
     if (isTracked('user') && s.tryingToConceive && !p.isPregnant) b += tryingBlock(s, p);
     const fields = c => c.isPregnant && pregnancyIsKnown(c, s)
-        ? { mood: '...', symptoms: '...', fetus_size: '...', note: '...' }
+        ? { mood: '...', symptoms: '...', fetus_count: c.fetusCount || 1, fetus_size: '...', note: '...' }
         : { libido: '...', mood: '...', physical: '...', note: '...' };
     const status = isTracked('user') && !p.hasBaby ? fields(p) : { note: '...' };
     status.subject = 'user';
@@ -130,7 +130,7 @@ function compactPregnancy(who, s) {
     if (c.fatherName) b += `Second parent: ${JSON.stringify(c.fatherName)}; preserve this identity for the children.\n`;
     b += 'BABY_TRAITS appearance must follow established parental descriptions and any explicit child description; do not invent hair/eye colours or unusual traits. If unknown, use an empty appearance array.\n';
     if (!known) b += 'Discovery not recorded: these are private simulation facts, not character knowledge. Follow actual tests/disclosures in the scene.\n';
-    b += 'Tracker term and fetal count are authoritative; do not invent multiples or delivery. Due date alone never means a baby was born. An actual examination confirming a different count: RP_STATUS fetus_count (1–4) and fetus_count_confirmed:true, in partner for char.\n';
+    b += 'Tracker term and fetal count are authoritative; do not invent multiples or delivery. Due date alone never means a baby was born. An established discovery in this scene (examination or reliable in-world knowledge, including fantasy settings) confirming a different count: RP_STATUS fetus_count (1–4) and fetus_count_confirmed:true, in partner for char. The count must agree with discoveries in note and symptoms; wishes and guesses never change it.\n';
     if (duration !== 40) b += `Scale development and fetus_size to ${pct}% of full term, equivalent to about ${Math.round(pct*40/100)} human weeks.\n`;
     if (c.complications?.length) b += `Active complications: ${c.complications.filter(x=>!x.resolved).map(x=>x.type).join(', ')}.\n`;
     b += `Only completed delivery at or after the configured term, never contractions or plans: <!-- [BIRTH${suffix}] --> and <!-- [BABY_TRAITS:{"babies":[{"name":"","fatherName":"","personality":[],"appearance":[]}]}] --> with scene facts.\n`;

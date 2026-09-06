@@ -3,7 +3,7 @@
 // ═══════════════════════════════════════════
 
 import { getSettings, getPregnancyData, getCycleDay, setCycleDay, getCurrentChatId } from './state.js';
-import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw } from './scanner.js';
+import { scanMessage, scanDateTag, scanStatusTag, scanWeeksFromText, scanPregnancyStateTag, stripHiddenTags, stripThink, stripReproTags, hasReproTags, messageRaw, confirmedFetusCount } from './scanner.js';
 import { applyScanResult, createPregnancyFromWeeks, createPregnancyFromStateTag, partnerCheckConception, partnerBirth, getPostpartum, canTriggerBirth } from './pregnancy.js';
 import { getPartnerData, carrierName, isTracked } from './state.js';
 import { hasMenstrualCycle, hasCycle, cyclePhase } from './omegaverse.js';
@@ -488,8 +488,8 @@ function applyStatusData(s, p, data) {
     const applyKnowledge = (c, fact) => {
         if (!c.isPregnant || !fact || typeof fact !== 'object') return;
         if (fact.pregnancy_known === true) c.pregnancyKnown = true;
-        const count = Number(fact.fetus_count);
-        if (fact.fetus_count_confirmed === true && Number.isInteger(count) && count >= 1 && count <= 4) {
+        const count = confirmedFetusCount(fact);
+        if (count !== null) {
             c.fetusCount = count;
             c.fetusSex = Array.from({ length: count }, (_, i) => c.fetusSex?.[i] || '?');
             c.pregnancyKnown = true;

@@ -522,7 +522,7 @@ function buildPregnancyCard(who, p, root, s, tr) {
     {
         const dur = s.pregnancyDuration || 40;
         // RP-дата всегда в корне (одна на чат), у партнёра своего rpDate нет
-        const { weeks } = calculateWeeksFromDates(p.conceptionDate, root.rpDate, p.pregnancyWeeks);
+        const { weeks, days } = calculateWeeksFromDates(p.conceptionDate, root.rpDate, p.pregnancyWeeks);
         const pct = Math.min(100, Math.round((weeks / dur) * 100));
         // Триместр — по доле срока: беременность может длиться не 40 недель
         const trimester = pct <= 33 ? 1 : pct <= 67 ? 2 : 3;
@@ -551,12 +551,13 @@ function buildPregnancyCard(who, p, root, s, tr) {
             <summary><div class="repro-header">
                 <div class="repro-icon pregnancy">${ic('fa-heart')}</div>
                 <span class="repro-title">${carrierTag(who)}Беременность</span>
-                <span class="repro-badge pregnancy">${weeks}/${dur} нед. · ${trimester} трим.</span>
+                <span class="repro-badge pregnancy">${weeks}/${dur} нед.${days ? ` + ${days} дн.` : ''} · ${trimester} трим.</span>
                 <div class="repro-chev">${ic('fa-chevron-down')}</div>
             </div></summary>
             <div class="repro-c">
                 <div class="repro-bar"><div class="repro-bar-fill pregnancy" style="width:${pct}%"></div></div>
                 <div class="repro-grid">
+                    ${root.rpDate ? stat('fa-clock', 'purple', 'Время РП', new Date(root.rpDate).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})) : ''}
                     ${stat('fa-calendar-day', 'pink', 'Зачатие', conceptionStr)}
                     ${stat('fa-calendar', 'purple', 'ПДР', dueStr)}
                     ${stat('fa-baby', 'pink', 'Плод', `${formatFetusCount(p.fetusCount)} (${sexStr})`)}
@@ -1451,7 +1452,7 @@ export function syncUI() {
 
     const stats = el('repro-stats');
     if (stats) {
-        const clock = p.rpDate ? new Date(p.rpDate).toLocaleString('ru-RU', {dateStyle:'short', timeStyle:'short'}) : 'нет отметки';
+        const clock = p.rpDate ? new Date(p.rpDate).toLocaleString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'}) : 'нет отметки';
         stats.textContent = `${s.totalChecks} проверок / ${s.totalConceptions} зачатий · Время РП: ${clock}`;
     }
 }
