@@ -1,3 +1,4 @@
+import { compactSettingsSnapshots } from './snapshots.js';
 import { reportError } from './diagnostics.js';
 // ═══════════════════════════════════════════
 // INDEX — точка входа расширения
@@ -120,6 +121,8 @@ function loadSettings() {
                 }
             }
         }
+        // Remove recursive legacy copies once, before any UI reads or saves.
+        if (compactSettingsSnapshots(extension_settings[extensionName])) saveSettingsDebounced();
     } catch (error) {
         reportError('[Reproductive] Error loading settings:', error);
         extension_settings[extensionName] = structuredClone(defaultSettings);

@@ -12,6 +12,7 @@ import { DISRUPTIONS, disruptionShift } from './cycle-realism.js';
 import { updatePromptInjection } from './prompts.js';
 import { syncUI, buildInfoblockHtml } from './ui.js';
 import { showNotification } from './notifications.js';
+import { snapshotState, HISTORY_CAP } from './snapshots.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 
 // ─── Get last N messages as context for AI ───
@@ -92,8 +93,7 @@ let _snapshotChatId = null;
 
 // Исключаем историю, undo и снимок ответа, чтобы копии не вкладывались друг в друга.
 function snapshotOf(p) {
-    const { _history, _undoSnapshot, _turnBaseline, ...state } = p;
-    return structuredClone(state);
+    return snapshotState(p);
 }
 
 // Быстрый хэш текста — для дедупа сканов (позиции мало: стриминг шлёт текст дважды)
@@ -114,7 +114,7 @@ export function clearRegenState() {
 // ─── История состояний по позициям чата (для отката при удалении сообщений) ───
 // p._history = [{pos, state}] — состояние ПОСЛЕ обработки сообщения на позиции pos
 // (pos = chat.length на момент скана). Хранится в per-chat данных, переживает перезагрузку.
-const HISTORY_CAP = 25;
+// Shared cap also applies when loading legacy history.
 
 export function pushStateHistory(pos) {
     try {
@@ -154,8 +154,9 @@ export function rollbackToPosition(newLen) {
         }
 
         // Полная замена состояния (с удалением ключей, появившихся позже)
+        const restored = snapshotOf(target.state);
         for (const k of Object.keys(p)) delete p[k];
-        Object.assign(p, structuredClone(target.state));
+        Object.assign(p, restored);
         p._history = kept;
 
         // Синхронизируем regen-снапшот с откатом

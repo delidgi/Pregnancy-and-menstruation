@@ -2,6 +2,7 @@
 // PREGNANCY — зачатие, осложнения, роды
 // ═══════════════════════════════════════════
 
+import { snapshotState } from './snapshots.js';
 import { saveSettingsDebounced } from '../../../../script.js';
 import { CHANCES } from './config.js';
 import { getSettings, getPregnancyData, getPartnerData, getCycleDay, setCycleDay, isManualCycleProtected, carrierName, L, getContraception, syncBabyLegacyFields } from './state.js';
@@ -59,8 +60,7 @@ export function resolveBirthRpDate(carrier, root, s = getSettings(), source = 't
 
 export function createUndoCheckpoint(label = 'Изменение') {
     const p = getPregnancyData();
-    const { _history, _undoSnapshot, _turnBaseline, ...current } = p;
-    const snapshot = structuredClone(current);
+    const snapshot = snapshotState(p);
     p._undoSnapshot = { label, createdAt: Date.now(), state: snapshot };
     return p._undoSnapshot;
 }
@@ -69,7 +69,7 @@ export function undoLastDestructiveChange() {
     const p = getPregnancyData();
     const backup = p?._undoSnapshot;
     if (!backup?.state) return false;
-    const restored = structuredClone(backup.state);
+    const restored = snapshotState(backup.state);
     Object.keys(p).forEach(k => delete p[k]);
     Object.assign(p, restored);
     syncBabyLegacyFields(p);
